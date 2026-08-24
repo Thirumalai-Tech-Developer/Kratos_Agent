@@ -79,9 +79,7 @@ class Account:
         self._rate_limit_reason = ""
 
     def is_token_expired(self, safety_seconds: int = 60) -> bool:
-        if not self.expires_at:
-            return False
-        return is_token_expired(self.expires_at, safety_seconds)
+        return token_is_expired(self, safety_seconds=safety_seconds)
 
     extra: Dict[str, Any] = field(default_factory=dict)
 
