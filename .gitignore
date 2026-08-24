@@ -1,0 +1,69 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables & sensitive API keys
+.env
+.env.*
+*.env
+accounts.json
+creds.json
+current_account.json
+token.json
+
+# Kratos runtime state & session memory
+.kratos/sessions/
+.kratos/temp/
+.kratos/agent_memory.json
+
+# Temporary generated artifacts
+*.pptx
+*.docx
+*.pdf
+*.log
+
+# Node.js & Web build artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.turbo/
+.next/
+out/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

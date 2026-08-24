@@ -1,0 +1,125 @@
+{
+    "tools": [
+        {
+            "name": "write_file",
+            "description": "Writes text or code directly to a file on disk in the workspace with UTF-8 encoding. Use this to create or overwrite Python scripts, HTML, CSS, JavaScript, JSON, or any other code files instead of using terminal echo commands.",
+            "func_name": "write_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to create or overwrite (e.g. 'generate_invoice.py' or 'src/App.jsx')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Complete text/code content to write to the file"
+                    }
+                },
+                "required": [
+                    "file_path",
+                    "content"
+                ]
+            }
+        },
+        {
+            "name": "read_file",
+            "description": "Reads the text contents of a file in the workspace.",
+            "func_name": "read_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to read"
+                    }
+                },
+                "required": [
+                    "file_path"
+                ]
+            }
+        },
+        {
+            "name": "run_terminal_command",
+            "description": "Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly on the host system without asking for confirmation. Use this whenever the user wants you to inspect files, run tests, install packages, check system status, or execute commands.",
+            "func_name": "run_terminal_command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The exact shell command to execute in the terminal"
+                    }
+                },
+                "required": [
+                    "command"
+                ]
+            }
+        },
+        {
+            "name": "self_tool_creator",
+            "description": "Autonomous Self Tool Creator: Call this tool whenever you need a tool/function that does not exist yet. You provide the python function code, function name, and description. It will automatically write to tools.py, register in tools_list.json, and hot-reload it into active memory so you can immediately use it.",
+            "func_name": "self_tool_creator",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Unique python function name (e.g. calculate_math, fetch_weather)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Clear description of what the new tool does and how to call it"
+                    },
+                    "python_code": {
+                        "type": "string",
+                        "description": "Complete Python function definition e.g. def calculate_math(expression: str) -> str: ..."
+                    },
+                    "parameters_json_str": {
+                        "type": "string",
+                        "description": "Optional JSON schema string for parameters"
+                    }
+                },
+                "required": [
+                    "tool_name",
+                    "description",
+                    "python_code"
+                ]
+            }
+        },
+        {
+            "name": "google_search",
+            "description": "Google search tool to query the web for information in real-time.",
+            "func_name": "google_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "calculate_expression",
+            "description": "Evaluates mathematical expressions safely (e.g. '2 ** 10 + 50').",
+            "func_name": "calculate_expression",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The math expression to evaluate"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            }
+        }
+    ]
+}
