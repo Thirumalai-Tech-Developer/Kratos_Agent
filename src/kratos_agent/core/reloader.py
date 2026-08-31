@@ -1,27 +1,37 @@
 import sys
+import time
 import importlib
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from rich.console import Console
 
 console = Console(highlight=False)
 
 MODULES_IN_ORDER = [
-    "kratos_agent.antigravity.accounts",
-    "kratos_agent.antigravity.client",
-    "kratos_agent.antigravity.gemini_direct",
-    "kratos_agent.antigravity.chat_model",
-    "kratos_agent.antigravity",
+    "kratos_agent.brain.config",
+    "kratos_agent.brain.fetch_model",
+    "kratos_agent.brain.client",
+    "kratos_agent.brain.chat_model",
+    "kratos_agent.brain.brain",
+    "kratos_agent.brain",
     "kratos_agent.utils.tools",
     "kratos_agent.utils.tool_creator",
     "kratos_agent.core.planner",
     "kratos_agent.core.memory",
     "kratos_agent.core.skills",
+    "kratos_agent.core.compactor",
+    "kratos_agent.core.prompt_library",
     "kratos_agent.main",
 ]
 
+IGNORED_DIRS = {
+    ".git", ".venv", "venv", "node_modules", "__pycache__",
+    "dist", "build", ".next", ".turbo", ".kratos/sessions", ".kratos/temp",
+    ".cache", ".pytest_cache"
+}
+
 class CodeReloader:
-    """Watches Kratos codebase and auto-reloads modules on change during runtime."""
+    """Watches Kratos codebase and auto-reloads modules on change during runtime with zero-lag throttling."""
 
     def __init__(self, watch_roots: Optional[List[Path]] = None):
         if watch_roots is None:
@@ -34,13 +44,27 @@ class CodeReloader:
             self.watch_roots = watch_roots
 
         self.file_mtimes: Dict[str, float] = {}
+        self.last_check_time: float = 0.0
+        self.check_throttle_seconds: float = 1.0
         self._record_mtimes()
+
+    def _should_ignore(self, path: Path) -> bool:
+        parts = path.parts
+        for ignored in IGNORED_DIRS:
+            if "/" in ignored or "\\" in ignored:
+                if str(path).replace("\\", "/").find(ignored) != -1:
+                    return True
+            elif ignored in parts:
+                return True
+        return False
 
     def _record_mtimes(self):
         for root in self.watch_roots:
             if not root.exists():
                 continue
             for p in root.rglob("*"):
+                if self._should_ignore(p):
+                    continue
                 if p.is_file() and p.suffix in (".py", ".json", ".md"):
                     try:
                         self.file_mtimes[str(p.resolve())] = p.stat().st_mtime
@@ -48,14 +72,21 @@ class CodeReloader:
                         pass
 
     def check_for_changes(self) -> List[str]:
-        """Checks if any watched source files have been modified or added."""
+        """Checks if any watched source files have been modified or added with throttling."""
+        now = time.time()
+        if now - self.last_check_time < self.check_throttle_seconds:
+            return []
+        self.last_check_time = now
+
         changed_files = []
-        current_files = set()
+        current_files: Set[str] = set()
 
         for root in self.watch_roots:
             if not root.exists():
                 continue
             for p in root.rglob("*"):
+                if self._should_ignore(p):
+                    continue
                 if p.is_file() and p.suffix in (".py", ".json", ".md"):
                     p_str = str(p.resolve())
                     current_files.add(p_str)
@@ -85,7 +116,7 @@ class CodeReloader:
                 if mod_name in sys.modules:
                     try:
                         importlib.reload(sys.modules[mod_name])
-                    except Exception as e:
+                    except Exception:
                         pass
 
             # Refresh runtime instance
@@ -113,3 +144,4 @@ class CodeReloader:
 
 # Global reloader instance
 code_reloader = CodeReloader()
+

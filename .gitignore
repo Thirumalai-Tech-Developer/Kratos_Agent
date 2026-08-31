@@ -36,6 +36,13 @@ accounts.json
 creds.json
 current_account.json
 token.json
+client_secret*.json
+client_id*.json
+*.key
+*.pem
+*.p12
+*.pfx
+
 
 # Kratos runtime state & session memory
 .kratos/sessions/
@@ -67,3 +74,5 @@ out/
 .DS_Store
 Thumbs.db
 desktop.ini
+ben10_app
+tests

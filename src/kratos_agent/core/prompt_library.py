@@ -177,14 +177,148 @@ class PromptLibrary:
             "debug": "skill-debugging"
         }
 
-        target_key = key_map.get(agent_name.lower().strip(), agent_name.lower().strip())
-        prompt = self.get_prompt(target_key)
-        if prompt:
-            return prompt.content
-        return ""
+    def detect_subagent_intent(self, query: str) -> Optional[Dict[str, Any]]:
+        """Automatically detects user intent and matches it with the best specialized subagent prompt from the 698 prompt library.
+        Enables seamless automatic subagent invocation without requiring manual slash commands.
+        """
+        q = query.lower().strip()
+        if not q or len(q) < 4:
+            return None
+
+        # 1. Frontend & UI/UX Design Architect (Claude Code Design / Kimi UI Specialist)
+        ui_patterns = [
+            r"\b(website|web\s*app|webapp|html|css|javascript|frontend|landing\s*page|ui|ux|react|vue|svelte|vite|threejs|three\.js|canvas|game|animation|omnitrix|ben\s*10|ben10|portfolio|dashboard)\b"
+        ]
+        if any(re.search(p, q) for p in ui_patterns):
+            prompt = self.get_prompt("skill-artifact-design") or self.get_prompt("skill-design") or self.get_prompt("data-artifact-decision-component-design-tokens")
+            ws = os.getcwd().replace("\\", "/")
+            custom_directive = (
+                f"You are the Lead Frontend & UI/UX Design Architect. Your mission is to build visually stunning, "
+                f"production-grade, fully interactive web applications.\n"
+                f"CRITICAL WORKSPACE RULE: All files MUST be created directly in the current directory: `{ws}` (using paths like `./index.html`, `./style.css`, `./app.js` or `./<folder_name>/`). NEVER use external scratch or temp folders.\n"
+                f"1. Design System: Implement modern aesthetics with curated color palettes, dark/glassmorphic accents, fluid typography, and micro-animations.\n"
+                f"2. Thematic Depth: Fully embrace the specific theme requested by the user (e.g. alien tech, neon accents, interactive components).\n"
+                f"3. Zero Placeholders: Write complete, functional JavaScript logic, styled HTML, and rich CSS. Do not leave TODOs or mockup stubs.\n"
+                f"4. Autonomous File Creation: Use file-writing tools to write complete `index.html`, `style.css`, and `app.js` files directly in `{ws}`."
+            )
+            return {
+                "type": "frontend_design",
+                "title": "Lead Frontend & UI/UX Architect",
+                "icon": "🎨",
+                "prompt": (prompt.content if prompt else "") + "\n\n" + custom_directive
+            }
+
+        # 2. Security & Vulnerability Audit (Claude Code / Codex Security specialist)
+        sec_patterns = [
+            r"\b(security|vulnerability|vulnerabilities|exploit|cve|cwe|injection|xss|sqli|csrf|ssrf|idor|rce|auth\s*bypass|privilege\s*escalation|acl\s*abuse|pentest|audit\s*security)\b"
+        ]
+        if any(re.search(p, q) for p in sec_patterns):
+            prompt = self.get_prompt("agent-prompt-security-review-slash-command") or self.get_prompt("system-prompt-doing-tasks-security")
+            if prompt:
+                return {
+                    "type": "security",
+                    "title": "Security & Vulnerability Auditor",
+                    "icon": "🛡️",
+                    "prompt": prompt.content
+                }
+
+        # 3. Code Review & Quality Sweep (Claude Code UltraReview / Codex Reviewer)
+        review_patterns = [
+            r"\b(code\s*review|review\s*this|review\s*my|review\s*code|audit\s*code|find\s*bugs|inspect\s*changes|pr\s*review|pull\s*request\s*review|diff\s*review)\b"
+        ]
+        if any(re.search(p, q) for p in review_patterns):
+            prompt = self.get_prompt("agent-prompt-code-review-minimal-mode") or self.get_prompt("skill-code-review-correctness-finder-angles")
+            if prompt:
+                return {
+                    "type": "code_review",
+                    "title": "Senior Code Reviewer",
+                    "icon": "🔍",
+                    "prompt": prompt.content
+                }
+
+        # 4. Code Simplification & Anti-Bloat Refactoring (Claude Code Simplify / Kimi Code Optimizer)
+        simplify_patterns = [
+            r"\b(simplify|clean\s*up|refactor|reduce\s*complexity|remove\s*bloat|remove\s*dead\s*code|anti-bloat|decouple|optimize\s*structure)\b"
+        ]
+        if any(re.search(p, q) for p in simplify_patterns):
+            prompt = self.get_prompt("agent-prompt-simplify-slash-command")
+            if prompt:
+                return {
+                    "type": "simplify",
+                    "title": "Code Simplifier & Refactorer",
+                    "icon": "✨",
+                    "prompt": prompt.content
+                }
+
+        # 5. Error Diagnostics & Deep Debugging (Claude Code Debugger / Codex Self-Healing)
+        debug_patterns = [
+            r"\b(debug|fix\s*error|fix\s*bug|traceback|stack\s*trace|why\s*is\s*this\s*failing|failing\s*test|exception\s*in|diagnose|error\s*log|segfault|crash|unhandled\s*exception)\b"
+        ]
+        if any(re.search(p, q) for p in debug_patterns):
+            prompt = self.get_prompt("skill-debugging") or self.get_prompt("skill-stuck-slash-command")
+            if prompt:
+                return {
+                    "type": "debug",
+                    "title": "Autonomous Debugging Specialist",
+                    "icon": "🩺",
+                    "prompt": prompt.content
+                }
+
+        # 6. Codebase Exploration & Architectural Discovery (Claude Code Explore / Kimi Repo Navigator)
+        explore_patterns = [
+            r"\b(explore|where\s*is|how\s*does\s*.*work|map\s*the\s*repo|find\s*all\s*usages|trace\s*flow|architecture\s*of|codebase\s*overview)\b"
+        ]
+        if any(re.search(p, q) for p in explore_patterns):
+            prompt = self.get_prompt("agent-prompt-explore") or self.get_prompt("agent-prompt-read-only-search-agent")
+            if prompt:
+                return {
+                    "type": "explore",
+                    "title": "Codebase Exploration Specialist",
+                    "icon": "🧭",
+                    "prompt": prompt.content
+                }
+
+        # 7. Planning & System Architecture Mode
+        plan_patterns = [
+            r"\b(plan\s*how|architect|step\s*by\s*step\s*plan|blueprint|design\s*system|implementation\s*plan|roadmap)\b"
+        ]
+        if any(re.search(p, q) for p in plan_patterns):
+            prompt = self.get_prompt("agent-prompt-plan-mode-enhanced")
+            if prompt:
+                return {
+                    "type": "plan",
+                    "title": "System Architect & Planner",
+                    "icon": "📋",
+                    "prompt": prompt.content
+                }
+
+        # 8. Full-Stack Creation & Autonomous Engineering (Claude Code Builder)
+        build_patterns = [
+            r"\b(create|build|scaffold|develop|make|generate|implement)\b"
+        ]
+        if any(re.search(p, q) for p in build_patterns):
+            prompt = self.get_prompt("system-prompt-autonomous-operation-guidelines") or self.get_prompt("system-prompt-delivering-work-at-full-scope")
+            ws = os.getcwd().replace("\\", "/")
+            builder_directive = (
+                f"\n\n### CRITICAL WORKSPACE DIRECTIVE:\n"
+                f"You are executing inside the user's active workspace: `{ws}`.\n"
+                f"ALL created files, scripts, deliverables, and projects MUST be written directly to `{ws}` (e.g. `./<filename>` or `./<project_name>/`).\n"
+                f"DO NOT write to external temporary folders or scratch directories outside `{ws}`."
+            )
+            return {
+                "type": "builder",
+                "title": "Autonomous Full-Stack Builder",
+                "icon": "🚀",
+                "prompt": (prompt.content if prompt else "") + builder_directive
+            }
+
+        return None
 
     def get_engineering_guidelines(self) -> str:
-        """Constructs a consolidated, high-fidelity software engineering instruction prompt from Claude Code rules."""
+        """Constructs a consolidated, high-fidelity software engineering instruction prompt from Claude Code, OpenAI Codex, and Kimi Code rules."""
+        if hasattr(self, "_cached_guidelines") and self._cached_guidelines:
+            return self._cached_guidelines
+
         keys = [
             "system-prompt-doing-tasks-software-engineering-focus",
             "system-prompt-doing-tasks-security",
@@ -195,7 +329,10 @@ class PromptLibrary:
             "system-prompt-outcome-first-communication-style",
             "system-prompt-tone-and-style-code-references",
             "system-prompt-executing-actions-with-care",
-            "system-prompt-action-safety-and-truthful-reporting"
+            "system-prompt-action-safety-and-truthful-reporting",
+            "system-prompt-autonomous-operation-guidelines",
+            "system-prompt-act-when-ready",
+            "system-prompt-delivering-work-at-full-scope"
         ]
 
         sections = []
@@ -208,14 +345,64 @@ class PromptLibrary:
                     sections.append(f"### {p.title}\n{cleaned_content}")
 
         if not sections:
-            return """### Software Engineering Principles
+            result = """### Software Engineering Principles (Claude Code + Codex + Kimi Standards)
 - Lead with outcomes and deliver complete, working code.
 - Read files before modifying and prefer editing existing files over creating duplicates.
 - Avoid unnecessary compatibility hacks, speculative error wrappers, or unsolicited code scaffolding.
 - Reference code with exact file paths and line numbers (`file:line`).
 - Execute all actions carefully and verify changes with terminal checks before concluding."""
+        else:
+            result = "\n\n".join(sections)
 
-        return "\n\n".join(sections)
+        self._cached_guidelines = result
+        return result
+
+    def get_workspace_environment_context(self) -> str:
+        """Builds high-density environment, git status, and workspace context (Kimi-Code / Codex / FCC style)."""
+        import platform
+        import sys
+        
+        ws = os.getcwd().replace("\\", "/")
+        os_name = f"{platform.system()} {platform.release()} ({platform.machine()})"
+        py_ver = f"Python {sys.version.split()[0]}"
+        
+        # Git context
+        git_branch = "N/A"
+        git_status_lines = []
+        try:
+            from kratos_agent.core import git_tools as _git
+            rc, branch_out, _ = _git._run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+            if rc == 0 and branch_out:
+                git_branch = branch_out
+            st = _git.get_git_status()
+            if st and "Working tree clean" not in st and "git status error" not in st:
+                git_status_lines = [l.strip() for l in st.splitlines()[:8] if l.strip()]
+        except Exception:
+            pass
+
+        # Top level directory structure
+        dir_entries = []
+        try:
+            p = Path.cwd()
+            for item in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if item.name.startswith(".") or item.name in ("__pycache__", "node_modules", "dist", "build", "venv", ".venv"):
+                    continue
+                dir_entries.append(f"{item.name}/" if item.is_dir() else item.name)
+        except Exception:
+            pass
+
+        dir_summary = ", ".join(dir_entries[:20]) if dir_entries else "Empty workspace"
+        git_summary = "\n".join(f"  {l}" for l in git_status_lines) if git_status_lines else "  Working tree clean"
+
+        return f"""### 🌐 ACTIVE WORKSPACE & ENVIRONMENT CONTEXT:
+- **Workspace Root**: `{ws}`
+- **OS & Environment**: `{os_name}` | `{py_ver}`
+- **Git Branch**: `{git_branch}`
+- **Git Status**:
+{git_summary}
+- **Workspace Files/Dirs**: `{dir_summary}`
+"""
 
 # Global prompt library singleton
 prompt_library = PromptLibrary()
+

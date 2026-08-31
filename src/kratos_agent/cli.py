@@ -32,46 +32,86 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 
 from kratos_agent.main import runtime
-from kratos_agent.antigravity import PUBLIC_MODELS, AccountPool
-from kratos_agent.antigravity.gemini_direct import GeminiKeyPool
+from kratos_agent.brain import PUBLIC_MODELS, BrainClient
+from kratos_agent.brain.fetch_model import get_model
 from kratos_agent.utils.tool_creator import create_or_update_tool
 from kratos_agent.core.memory import memory
 from kratos_agent.core.reloader import code_reloader
 from kratos_agent.core.compactor import compactor
 from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+from kratos_agent.core.background_runner import background_runner
+from kratos_agent.core.hooks import hook_registry
+from kratos_agent.tui import KratosLiveRenderer, render_completion_card
+from kratos_agent.tui.stream_printer import is_interactive
+from kratos_agent.tui.debug_panel import render_step_log, render_event_log
 
 console = Console()
 
-BANNER = r"""[bold red]
-  ██╗  ██╗██████╗   █████╗ ████████╗ ██████╗  ███████╗
-  ██║ ██╔╝██╔══██╗ ██╔══██╗╚══██╔══╝██╔═══██╗ ██╔════╝
-  █████╔╝ ██████╔╝ ███████║   ██║   ██║   ██║ ███████╗
-  ██╔═██╗ ██╔══██╗ ██╔══██║   ██║   ██║   ██║ ╚════██║
-  ██║  ██╗██║  ██║ ██║  ██║   ██║   ╚██████╔╝ ███████║
-  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝  ╚══════╝[/bold red]
-[italic gold1]        "Do not be sorry. Be better." — Ghost of Sparta[/italic gold1]
-"""
+# Instantiate the live TUI renderer (wraps runtime with event-driven display)
+_tui = KratosLiveRenderer(runtime)
+
+ASCII_BANNER = r"""[bold red]
+  ██╗  ██╗██████╗  █████╗ ████████╗ ██████╗ ███████╗
+  ██║ ██╔╝██╔══██╗██╔══██╗╚══██╔══╝██╔═══██╗██╔════╝
+  █████╔╝ ██████╔╝███████║   ██║   ██║   ██║███████╗
+  ██╔═██╗ ██╔══██╗██╔══██║   ██║   ██║   ██║╚════██║
+  ██║  ██╗██║  ██║██║  ██║   ██║   ╚██████╔╝███████║
+  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚══════╝[/bold red]
+  [bold #D4AF37]⚔   T H E   G H O S T   O F   S P A R T A   C O D E S   ⚔[/bold #D4AF37]"""
+
+def get_kratos_banner():
+    # Pixel-art conversion is not rendered consistently across PowerShell,
+    # redirected output, and terminals without true-colour support. Keep the
+    # readable Unicode banner as the default; opt into the raster banner with
+    # KRATOS_IMAGE_BANNER=1 when the terminal supports it.
+    if os.environ.get("KRATOS_IMAGE_BANNER", "").lower() not in {"1", "true", "yes"}:
+        return ASCII_BANNER
+    try:
+        import climage
+        from pathlib import Path
+        img_path = Path("kratos_banner.png")
+        if img_path.exists():
+            # Generate terminal image string with climage
+            output = climage.convert(str(img_path), is_unicode=True, is_truecolor=True, is_256color=False, width=65)
+            # Use rich's Text to properly handle ANSI colors and unicode block chars in terminal
+            from rich.text import Text
+            return Text.from_ansi(output)
+    except Exception:
+        pass
+    return ASCII_BANNER
 
 HELP_TEXT = """
 [bold gold1]Available CLI Commands:[/bold gold1]
-  [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
+  [bold cyan]/doctor[/bold cyan]                  - Run Brain connection & transport diagnostics (alias: /health)
   [bold cyan]/model[/bold cyan] [dim][name][/dim]           - Switch LLM with [bold gold1]↑ / ↓ arrow keys[/bold gold1] or direct name
+  [bold cyan]/gateway[/bold cyan]                - View Brain Gateway status & configuration (alias: /accounts)
+  [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
+  [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto][/dim] - Set approval mode (Codex-style)
+  [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
   [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse or search 500+ Claude Code system prompts
   [bold cyan]/review[/bold cyan] [dim][target][/dim]         - Run multi-angle senior code review (alias: /code-review)
   [bold cyan]/simplify[/bold cyan] [dim][target][/dim]       - Run 4-angle code cleanup & refactoring sweep
   [bold cyan]/security[/bold cyan] [dim][target][/dim]       - Run high-confidence vulnerability & exploit audit
   [bold cyan]/skill[/bold cyan] [dim][add|list|show|rm][/dim] - Add, view, or manage skills from URL / Internet
   [bold cyan]/create-tool[/bold cyan] [dim][desc][/dim]    - Autonomously forge and hot-reload a new tool
-  [bold cyan]/tools[/bold cyan]                   - Inspect all active & self-created tools
+  [bold cyan]/tools[/bold cyan]                   - Inspect all active & self-created tools (edit_file, grep, etc.)
   [bold cyan]/compact[/bold cyan]                 - Compress conversation context (alias: /compress)
   [bold cyan]/reload[/bold cyan]                  - Live hot-reload all code, tools & skills (alias: /r)
   [bold cyan]/memory[/bold cyan]                  - View persistent agentic memory & command log
-  [bold cyan]/accounts[/bold cyan]                - View configured accounts & API key pool
-  [bold cyan]/health[/bold cyan]                  - Check in-process engine & pool status
+  [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
+  [bold cyan]/debug[/bold cyan]                   - Inspect full execution/event trace from last turn
+  [bold cyan]/debug live[/bold cyan]              - Toggle live step display on/off
   [bold cyan]/reset[/bold cyan]                   - Reset multi-turn conversation memory
   [bold cyan]/clear[/bold cyan]                   - Clear the terminal screen
   [bold cyan]/help[/bold cyan]                    - Display this commands overview
   [bold cyan]/exit[/bold cyan]                    - Exit Kratos Agent (alias: /quit, Ctrl+C)
+
+[bold gold1]Background Agent (Kimi Swarm / Claude Code):[/bold gold1]
+  [bold cyan]/bg-run[/bold cyan] [dim]<prompt>[/dim]         - Launch a prompt as a background task (non-blocking)
+  [bold cyan]/bg-status[/bold cyan]               - Show all background tasks and their status
+  [bold cyan]/bg-result[/bold cyan] [dim]<id>[/dim]          - Show output of a completed background task
+  [bold cyan]/bg-cancel[/bold cyan] [dim]<id>[/dim]          - Cancel a running background task
 
 [bold gold1]Special Syntax & Autocomplete:[/bold gold1]
   [bold green]@<file>[/bold green]                - Type [bold green]@[/bold green] to autocomplete & attach local files
@@ -90,25 +130,9 @@ prompt_style = Style.from_dict({
     "scrollbar.button": "bg:#E63946",
 })
 
-# Supported in-process models list
-AVAILABLE_MODELS = [
-    "gemini-3.6-flash-high",
-    "gemini-3.6-flash-medium",
-    "gemini-3.6-flash-low",
-    "claude-sonnet-4-6",
-    "claude-opus-4-6-thinking",
-    "gemini-pro-agent",
-    "gemini-3.1-pro-low",
-    "gemini-3-flash-agent",
-    "gemini-3.5-flash-low",
-    "gemini-3.5-flash-extra-low",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-thinking",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash-lite",
-    "gpt-oss-120b-medium",
-]
+# Models sourced dynamically from Brain Gateway — fallback to PUBLIC_MODELS
+from kratos_agent.brain.config import PUBLIC_MODELS as _PUBLIC_MODELS
+AVAILABLE_MODELS: List[str] = list(_PUBLIC_MODELS)
 
 def normalize_command(cmd_str: str) -> str:
     """Automatically detects and removes duplicate leading slashes (e.g. //help -> /help, ///review -> /review)."""
@@ -120,6 +144,9 @@ def normalize_command(cmd_str: str) -> str:
 class KratosCompleter(Completer):
     """Provides live autocomplete for /commands, @files, and /model names with auto-deduplication."""
     SLASH_COMMANDS = [
+        ("/doctor", "Run Brain connection & transport diagnostics (alias: /health)"),
+        ("/gateway", "View Brain Gateway status & configuration (alias: /accounts)"),
+        ("/bypass", "View / confirm autonomous bypass permissions mode"),
         ("/session", "Manage isolated agentic memory sessions (new, load, list, show, rm)"),
         ("/model", "Switch active LLM (use ↑/↓ arrow keys or name)"),
         ("/prompts", "Browse or search 500+ Claude Code system prompts"),
@@ -131,12 +158,14 @@ class KratosCompleter(Completer):
         ("/skill show", "Show skill guidelines & cheatsheet (e.g. /skill show <name>)"),
         ("/skill remove", "Uninstall an active skill (e.g. /skill remove <name>)"),
         ("/create-tool", "Autonomously forge and hot-reload a new tool"),
-        ("/tools", "Inspect active and self-created tools"),
+        ("/tools", "Inspect active and self-created tools (edit_file, grep, etc.)"),
         ("/compact", "Compress conversation history & optimize token context"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
-        ("/accounts", "View configured accounts and key pools"),
-        ("/health", "Check in-process engine & pool status"),
+        ("/accounts", "View Brain gateway configuration"),
+        ("/health", "Check Brain gateway health status"),
+        ("/debug", "Inspect full execution/event trace from last turn"),
+        ("/debug live", "Toggle live step display on/off"),
         ("/reset", "Reset multi-turn conversation memory"),
         ("/clear", "Clear terminal screen"),
         ("/help", "Show commands reference overview"),
@@ -232,26 +261,45 @@ class KratosCompleter(Completer):
                     pass
 
 def print_welcome():
-    console.print(BANNER)
-    
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="bold white")
-    table.add_column(style="dim cyan")
-    
-    loaded_tool_names = ", ".join([t.name for t in runtime.tools]) if runtime.tools else "None"
+    from datetime import datetime
+    from kratos_agent.core.approval_mode import approval_gate
+    from kratos_agent.core.project_memory import project_memory
+
+    # Top decorative bar
+    console.print()
+    console.print("[bold red]" + "═" * 72 + "[/bold red]")
+    console.print(get_kratos_banner())
+    console.print("[bold red]" + "═" * 72 + "[/bold red]")
+    console.print()
+
+    # Core info grid
+    grid = Table.grid(padding=(0, 3))
+    grid.add_column(style="bold #D4AF37", min_width=18)
+    grid.add_column(style="white")
+
+    loaded_tool_names = [t.name for t in runtime.tools]
     num_skills = len(runtime.skill_manager.skills)
-    table.add_row("• Model:", f"[bold cyan]{runtime.model_name}[/bold cyan] (In-Process Antigravity Engine)")
-    table.add_row("• Active Tools:", f"{loaded_tool_names}")
-    table.add_row("• Active Skills:", f"{num_skills} skills loaded (Use [bold gold1]/skill[/bold gold1] to view/add)")
-    table.add_row("• Quick Start:", "Type [bold gold1]/[/bold gold1] for autocomplete, [bold gold1]/model[/bold gold1] (use ↑/↓), [bold green]@[/bold green] for files")
-    
-    panel = Panel(
-        table,
-        title="[bold red]⚔️  KRATOS AGENT SHELL ⚔️[/bold red]",
-        border_style="red",
-        subtitle="[dim]Autonomous Agent Ready[/dim]"
+    num_tools = len(loaded_tool_names)
+    mode_badge = approval_gate.mode_badge()
+    mem_file = project_memory.file_path
+    mem_label = str(mem_file.name) if mem_file else "KRATOS.md (none)"
+
+    grid.add_row("⚔  Model", f"[bold cyan]{runtime.model_name}[/bold cyan]  [dim](Brain LLM Gateway)[/dim]")
+    grid.add_row("⛓  Mode", f"{mode_badge}  [dim]| /mode suggest|auto-edit|full-auto[/dim]")
+    grid.add_row("🔧  Tools", f"[bold green]{num_tools} loaded[/bold green]  [dim]{', '.join(loaded_tool_names[:5])}{'...' if num_tools > 5 else ''}[/dim]")
+    grid.add_row("🧠  Skills", f"[bold green]{num_skills} active[/bold green]  [dim]Use /skill to view or add[/dim]")
+    grid.add_row("📜  Memory", f"[dim]{mem_label}[/dim]")
+    grid.add_row("⚡  Quick Start", "[bold gold1]/[/bold gold1] for commands  [bold gold1]/model[/bold gold1] to switch  [bold green]@[/bold green] for files  [bold cyan]/bg-run[/bold cyan] background")
+
+    console.print(
+        Panel(
+            grid,
+            title="[bold red]⚔  KRATOS AGENT  ⛓  Blades of Chaos Edition  ⚔[/bold red]",
+            subtitle=f"[dim #D4AF37]{datetime.now().strftime('%A, %b %d %Y — %H:%M')}[/dim #D4AF37]",
+            border_style="red",
+            padding=(1, 3),
+        )
     )
-    console.print(panel)
     console.print()
 
 def parse_file_mentions(user_input: str) -> Tuple[str, List[str]]:
@@ -350,6 +398,12 @@ def select_model_arrow_menu(model_ids: List[str], active_model: str) -> Optional
     console.print()
     return app.run()
 
+def handle_login(arg: str = ""):
+    """Notifies user that Kratos communicates directly with local Brain gateway without Google OAuth."""
+    console.print("\n[bold green]✓ Direct Brain Gateway Active[/bold green]")
+    console.print("[dim]Kratos uses Brain Gateway as its direct OpenAI-compatible model gateway. No Google login or authentication tokens required.[/dim]\n")
+
+
 def handle_model_command(arg: str = ""):
     """Handles the /model command with arrow key navigation or direct argument."""
     model_ids = AVAILABLE_MODELS
@@ -369,7 +423,9 @@ def handle_model_command(arg: str = ""):
             elif len(matches) > 1:
                 console.print(f"[yellow]Ambiguous model '{target}'. Matches: {', '.join(matches)}[/yellow]")
             else:
-                console.print(f"[bold red]Unknown model '{target}'.[/bold red]")
+                runtime.set_model(target)
+                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan]\n")
+                return
 
     # Interactive Arrow Key Selection Menu
     selected_model = select_model_arrow_menu(model_ids, runtime.model_name)
@@ -378,6 +434,7 @@ def handle_model_command(arg: str = ""):
         console.print(f"[bold green]⚡ Active model changed to:[/bold green] [bold cyan]{selected_model}[/bold cyan]\n")
     else:
         console.print("[dim]Model selection cancelled.[/dim]\n")
+
 
 def handle_memory_command():
     """Displays persistent agentic memory overview and executed commands."""
@@ -398,46 +455,132 @@ def handle_memory_command():
     sessions_count = len(memory.data.get("sessions", []))
     console.print(f"[dim]Stored Turns: {sessions_count} | Memory File: .kratos/agent_memory.json[/dim]\n")
 
+
 def handle_accounts_command():
-    """Displays active OAuth accounts and API key pools."""
-    account_pool = AccountPool()
-    gemini_pool = GeminiKeyPool()
-    
-    table = Table(title="🔑 Configured Credentials & Key Pools", border_style="gold1")
-    table.add_column("Type", style="bold cyan")
-    table.add_column("Count", style="bold green")
-    table.add_column("Details", style="white")
-    
-    table.add_row(
-        "Gemini API Keys",
-        str(len(gemini_pool.api_keys)),
-        ", ".join([k["name"] for k in gemini_pool.api_keys]) or "None"
+    """Displays active Brain Gateway configuration."""
+    from kratos_agent.brain import (
+        get_base_url,
+        get_endpoint_url,
+        PUBLIC_MODELS,
+        get_request_timeout,
+        get_max_retries,
     )
-    table.add_row(
-        "Antigravity Accounts",
-        str(len(account_pool.accounts)),
-        ", ".join([a.name for a in account_pool.accounts[:5]]) + (f" (+{len(account_pool.accounts)-5} more)" if len(account_pool.accounts) > 5 else "")
-    )
-    
+    base_url = get_base_url()
+    endpoint = get_endpoint_url()
+
+    table = Table(title="⚔ Brain Gateway Configuration", border_style="gold1")
+    table.add_column("Property", style="bold cyan", width=22)
+    table.add_column("Value / Details", style="white")
+
+    table.add_row("Base URL", base_url)
+    table.add_row("Chat Endpoint", endpoint)
+    table.add_row("Active Model", runtime.model_name)
+    table.add_row("Request Timeout", f"{get_request_timeout()}s")
+    table.add_row("Max Retries", str(get_max_retries()))
+    table.add_row("Proxy Bypass", "[bold green]trust_env = False (Active)[/bold green]")
+    table.add_row("Available Models", ", ".join(PUBLIC_MODELS[:5]) + "...")
+
     console.print(table)
     console.print()
 
+
 def handle_health_command():
-    """Displays in-process Antigravity engine health status."""
-    gemini_pool = GeminiKeyPool()
-    account_pool = AccountPool()
-    
-    table = Table(title="🏥 In-Process Engine Health Status", border_style="green")
-    table.add_column("Component", style="bold white")
-    table.add_column("Status", style="cyan")
-    
-    table.add_row("Engine Mode", "Direct Native Engine (No external server required)")
-    table.add_row("Active Model", runtime.model_name)
-    table.add_row("Gemini API Keys Loaded", f"{len(gemini_pool.api_keys)} keys active")
-    table.add_row("Antigravity OAuth Accounts", f"{len(account_pool.accounts)} accounts in pool")
-    table.add_row("Active Tools", f"{len(runtime.tools)} tools loaded")
-    
+    """Displays local Brain engine health status."""
+    handle_doctor_command()
+
+
+def handle_doctor_command():
+    """Runs a full diagnostic on Brain gateway connection, model configuration, and transport health."""
+    from kratos_agent.brain import (
+        get_base_url,
+        get_endpoint_url,
+        get_request_timeout,
+        authenticate,
+    )
+    import requests
+
+    base_url = get_base_url()
+    endpoint = get_endpoint_url()
+    timeout = get_request_timeout()
+
+    console.print("\n[bold gold1]⚔ KRATOS DIAGNOSTICS[/bold gold1]\n")
+
+    table = Table(title="🔧 Brain Gateway & Provider Health", border_style="cyan")
+    table.add_column("Check", style="bold white", width=26)
+    table.add_column("Result", style="cyan")
+
+    table.add_row("Brain Base URL", f"[bold cyan]{base_url}[/bold cyan]")
+    table.add_row("Endpoint URL", f"[dim]{endpoint}[/dim]")
+    table.add_row("Configured Model", f"[bold green]{runtime.model_name}[/bold green]")
+    table.add_row("Proxy Bypass (trust_env)", "[bold green]✓ Active (ignores HTTP_PROXY/HTTPS_PROXY)[/bold green]")
+    table.add_row("Active Tools Loaded", f"[bold white]{len(runtime.tools)} tools[/bold white]")
+
+    test_ok = False
+    error_msg = ""
+
+    try:
+        session = requests.Session()
+        session.trust_env = False
+        headers = authenticate()
+        res = session.post(
+            endpoint,
+            headers=headers,
+            json={
+                "model": runtime.model_name,
+                "messages": [{"role": "user", "content": "ping"}],
+                "stream": False,
+            },
+            timeout=min(15.0, timeout),
+        )
+        if res.status_code == 200:
+            test_ok = True
+            table.add_row("Gateway Connection", "[bold green]✓ Online (HTTP 200 OK)[/bold green]")
+            table.add_row("Test Completion", "[bold green]✓ OK (Response received)[/bold green]")
+        elif res.status_code == 404:
+            error_msg = f"HTTP 404: Model '{runtime.model_name}' or endpoint not found on Brain gateway."
+            table.add_row("Gateway Connection", "[bold green]✓ Online[/bold green]")
+            table.add_row("Test Completion", f"[bold red]✗ Failed (HTTP 404 Not Found)[/bold red]")
+        else:
+            error_msg = f"HTTP {res.status_code}: {res.text[:200]}"
+            table.add_row("Gateway Connection", f"[yellow]⚠ Returned HTTP {res.status_code}[/yellow]")
+            table.add_row("Test Completion", f"[yellow]⚠ Failed ({error_msg})[/yellow]")
+    except requests.exceptions.ConnectionError:
+        table.add_row("Gateway Connection", f"[bold red]✗ Unreachable (Connection refused on {base_url})[/bold red]")
+        table.add_row("Test Completion", "[dim]Skipped[/dim]")
+        error_msg = f"Brain LLM is not running on {base_url}. Please ensure Brain gateway is active on port 20128."
+    except requests.exceptions.Timeout:
+        table.add_row("Gateway Connection", f"[bold yellow]⚠ Timeout (No response within 15s)[/bold yellow]")
+        table.add_row("Test Completion", "[dim]Skipped[/dim]")
+        error_msg = f"Request timed out connecting to {endpoint}."
+    except Exception as e:
+        table.add_row("Gateway Connection", f"[bold red]✗ Error: {e}[/bold red]")
+        table.add_row("Test Completion", "[dim]Skipped[/dim]")
+        error_msg = str(e)
+
     console.print(table)
+    console.print()
+
+    if test_ok:
+        console.print("[bold green]✓ All diagnostics passed! Kratos is ready for autonomous agent execution.[/bold green]\n")
+    else:
+        advice = [
+            f"• [bold red]Issue:[/bold red] {error_msg}",
+            f"• [dim]Make sure Brain gateway is running with OpenAI-compatible endpoint at {base_url}.[/dim]",
+            f"• [dim]Verify {runtime.model_name} is supported by Brain gateway.[/dim]",
+        ]
+        console.print(Panel("\n".join(advice), title="[bold gold1]💡 Diagnostics Advice[/bold gold1]", border_style="red", padding=(1, 2)))
+        console.print()
+
+def handle_context_command():
+    """Render the runtime's redacted request/trace for developer debugging."""
+    snapshot = runtime.debug_context()
+    rendered = json.dumps(snapshot, indent=2, ensure_ascii=False, default=str)
+    console.print(Panel(
+        rendered,
+        title="[bold gold1]🔎 Context & Request Trace (redacted)[/bold gold1]",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
     console.print()
 
 def handle_create_tool_command(user_prompt: str = ""):
@@ -667,6 +810,7 @@ def handle_session_command(arg: str = ""):
     elif subcmd in ("new", "create"):
         title = target or f"Session {time.strftime('%b %d, %H:%M')}"
         session = memory.create_session(title=title, model=runtime.model_name)
+        runtime.activate_session()
         console.print(f"[bold green]✓ Created and switched to new session:[/bold green] [bold gold1]{session.session_id}[/bold gold1] ({session.title})\n")
 
     elif subcmd in ("load", "switch"):
@@ -687,6 +831,7 @@ def handle_session_command(arg: str = ""):
             return
             
         if memory.load_session(matched):
+            runtime.activate_session()
             console.print(f"[bold green]✓ Activated session:[/bold green] [bold gold1]{matched}[/bold gold1] ({memory.active_session.title})\n")
         else:
             console.print(f"[bold red]Failed to load session '{matched}'.[/bold red]\n")
@@ -787,6 +932,28 @@ def handle_prompts_command(arg: str = ""):
 
     console.print(table)
     console.print(f"[dim]Showing {len(matches)} results. View full prompt with '/prompts show <name_or_key>'.[/dim]\n")
+
+def handle_bypass_command():
+    """Displays autonomous bypass permissions status and capabilities."""
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold gold1")
+    table.add_column(style="white")
+    table.add_row("Bypass Permissions:", "[bold green]ACTIVE (UNRESTRICTED)[/bold green]")
+    table.add_row("Terminal Execution:", "[bold green]Autonomous / Zero-Confirmation[/bold green]")
+    table.add_row("File Operations:", "[bold green]Direct Read / Write / Surgical Edit[/bold green]")
+    table.add_row("Self-Healing Loop:", "[bold green]Enabled (Auto-diagnose & fix)[/bold green]")
+    table.add_row("Tool Execution Suite:", "[bold cyan]write_file, edit_file, run_terminal_command, grep_search, list_directory, fetch_url, google_search[/bold cyan]")
+
+    console.print()
+    console.print(
+        Panel(
+            table,
+            title="[bold gold1]⚡ AUTONOMOUS BYPASS PERMISSIONS[/bold gold1]",
+            border_style="green",
+            padding=(1, 2)
+        )
+    )
+    console.print()
 
 def handle_code_review_command(arg: str = ""):
     """Executes a multi-angle senior code review workflow on recent changes or target files."""
@@ -936,6 +1103,10 @@ def start_interactive_cli():
                 console.print("[bold green]✓ Live hot-reload complete. All code modules, skills & tools refreshed.[/bold green]\n")
                 continue
 
+            if user_input.lower() in ("/bypass", "/permission", "/permissions"):
+                handle_bypass_command()
+                continue
+
             if user_input.lower() == "/clear":
                 console.clear()
                 print_welcome()
@@ -951,16 +1122,48 @@ def start_interactive_cli():
                 console.print("[bold yellow]🧹 Conversation and agentic memory have been cleared.[/bold yellow]\n")
                 continue
 
+            if user_input.lower().startswith("/login"):
+                handle_login()
+                continue
+
             if user_input.lower() == "/memory":
                 handle_memory_command()
                 continue
 
-            if user_input.lower() == "/accounts":
+            if user_input.lower() in ("/accounts", "/gateway"):
                 handle_accounts_command()
                 continue
 
-            if user_input.lower() == "/health":
-                handle_health_command()
+            if user_input.lower() in ("/health", "/doctor", "/auth"):
+                handle_doctor_command()
+                continue
+
+            if user_input.lower().startswith("/debug"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                if arg == "live":
+                    _tui.live_mode = not _tui.live_mode
+                    state = "[bold green]ON[/bold green]" if _tui.live_mode else "[bold yellow]OFF[/bold yellow]"
+                    console.print(f"\n[bold gold1]⊡ Live step display:[/bold gold1] {state}\n")
+                elif arg in ("latency", "timing", "perf", "telemetry", "metrics"):
+                    from kratos_agent.tui.debug_panel import render_latency_report
+                    render_latency_report()
+                else:
+                    # Show step log, event trace, and latency diagnostic from last turn
+                    from kratos_agent.tui.debug_panel import render_latency_report
+                    steps = _tui.get_last_steps()
+                    events = _tui.get_last_events()
+                    if not steps and not events:
+                        console.print("[dim]No execution data from last turn yet. Run a query first.[/dim]\n")
+                    else:
+                        render_step_log(steps)
+                        if events:
+                            render_event_log(events)
+                        render_latency_report()
+                continue
+
+            if user_input.lower() in ("/context", "/debug-context", "/trace"):
+                handle_context_command()
                 continue
 
             if any(user_input.lower().startswith(c) for c in ("/prompts", "/prompt")):
@@ -1018,6 +1221,77 @@ def start_interactive_cli():
                     console.print()
                 continue
 
+            # /mode [suggest|auto-edit|full-auto] — Codex-style approval mode
+            if user_input.lower().startswith("/mode"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                mode_map = {
+                    "suggest": ApprovalMode.SUGGEST,
+                    "auto-edit": ApprovalMode.AUTO_EDIT,
+                    "auto_edit": ApprovalMode.AUTO_EDIT,
+                    "full-auto": ApprovalMode.FULL_AUTO,
+                    "full_auto": ApprovalMode.FULL_AUTO,
+                    "full": ApprovalMode.FULL_AUTO,
+                }
+                if arg in mode_map:
+                    approval_gate.set_mode(mode_map[arg])
+                else:
+                    mode_badges = {
+                        ApprovalMode.SUGGEST:   "[yellow]suggest[/yellow]   — read-only, all writes need approval",
+                        ApprovalMode.AUTO_EDIT: "[cyan]auto-edit[/cyan]  — file edits auto, shell needs approval",
+                        ApprovalMode.FULL_AUTO: "[green]full-auto[/green]  — full autonomy (default)",
+                    }
+                    console.print(f"\n[bold gold1]Current mode:[/bold gold1] {approval_gate.mode_badge()}")
+                    console.print("\n[bold]Available modes:[/bold]")
+                    for badge in mode_badges.values():
+                        console.print(f"  {badge}")
+                    console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto[/dim]\n")
+                continue
+
+            # /bg-run <prompt> — Background agent loop (Kimi swarm / Claude Code)
+            if user_input.lower().startswith("/bg-run"):
+                parts = user_input.split(maxsplit=1)
+                bg_prompt = parts[1].strip() if len(parts) > 1 else ""
+                if not bg_prompt:
+                    console.print("[yellow]Usage: /bg-run <prompt>[/yellow]\n")
+                else:
+                    background_runner.run(bg_prompt, agent_fn=runtime.run_agent)
+                    console.print("[dim]Use /bg-status to monitor, /bg-result <id> to view output.[/dim]\n")
+                continue
+
+            # /bg-status — Show all background tasks
+            if user_input.lower() in ("/bg-status", "/bg", "/background"):
+                background_runner.print_status_table()
+                console.print()
+                continue
+
+            # /bg-result <id> — Show background task result
+            if user_input.lower().startswith("/bg-result"):
+                parts = user_input.split(maxsplit=1)
+                task_id = parts[1].strip() if len(parts) > 1 else ""
+                if not task_id:
+                    console.print("[yellow]Usage: /bg-result <task-id>[/yellow]\n")
+                else:
+                    result = background_runner.get_result(task_id)
+                    console.print(Panel(
+                        Markdown(result),
+                        title=f"[bold gold1]⚡ Background Task Result: {task_id[:8]}[/bold gold1]",
+                        border_style="gold1", padding=(1, 2)
+                    ))
+                console.print()
+                continue
+
+            # /bg-cancel <id> — Cancel background task
+            if user_input.lower().startswith("/bg-cancel"):
+                parts = user_input.split(maxsplit=1)
+                task_id = parts[1].strip() if len(parts) > 1 else ""
+                if not task_id:
+                    console.print("[yellow]Usage: /bg-cancel <task-id>[/yellow]\n")
+                else:
+                    msg = background_runner.cancel(task_id)
+                    console.print(f"[bold yellow]{msg}[/bold yellow]\n")
+                continue
+
             # Parse @file attachments
             processed_query, attached_files = parse_file_mentions(user_input)
             if attached_files:
@@ -1027,33 +1301,112 @@ def start_interactive_cli():
             # Multi-turn history
             messages.append({"role": "user", "content": processed_query})
 
-            reply_text = runtime.invoke(messages)
+            # ── Live TUI invoke (replaces bare runtime.invoke) ──────────────
+            try:
+                reply_text = _tui.invoke_with_live(messages)
+            except KeyboardInterrupt:
+                _tui.cancel()
+                console.print("\n[bold yellow]⚠ Agent interrupted.[/bold yellow]")
+                if runtime.memory.active_session:
+                    summary = runtime.memory.active_session.get_unfinished_tasks_summary()
+                    if "completed" in summary:
+                        console.print(f"[dim]{summary}[/dim]")
+                        console.print("[dim]Type [bold cyan]continue[/bold cyan] to resume execution from the interrupted task.[/dim]\n")
+                # Keep history intact so continue can resume
+                continue
 
             if not reply_text.strip():
                 reply_text = "Task executed successfully."
 
             messages.append({"role": "assistant", "content": reply_text})
 
-            # Styled Box Output
-            console.print()
-            console.print(
-                Panel(
-                    Markdown(reply_text),
-                    title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim]",
-                    title_align="left",
-                    border_style="red",
-                    padding=(1, 2)
+            # Styled Box Output: Completion Card for coding/project tasks, clean Markdown for chat
+            last_plan = _tui.get_last_plan()
+            if last_plan and last_plan.tasks and not _tui.is_chat_mode():
+                plan_dict = last_plan.to_dict()
+                files_summary = runtime.loop.workspace_tracker.summary() if hasattr(runtime.loop, "workspace_tracker") else None
+                verif_dict = runtime.loop.last_verification.__dict__ if getattr(runtime.loop, "last_verification", None) else None
+                console.print()
+                console.print(
+                    render_completion_card(
+                        summary_text=reply_text,
+                        plan_dict=plan_dict,
+                        files_summary=files_summary,
+                        verification=verif_dict,
+                        model_name=runtime.model_name
+                    )
                 )
-            )
-            console.print()
+                console.print()
+            else:
+                console.print()
+                console.print(
+                    Panel(
+                        Markdown(reply_text),
+                        title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
+                        title_align="left",
+                        border_style="red",
+                        padding=(1, 2)
+                    )
+                )
+                console.print()
 
         except (KeyboardInterrupt, EOFError):
+            _tui.cancel()
             console.print("\n[bold red]Kratos departs. Strength and honor.[/bold red]\n")
             break
         except Exception as e:
             console.print(f"[bold red]❌ Error:[/bold red] {e}\n")
 
+def render_git_changes_card():
+    """Renders a clean summary of workspace files modified/added in the current session (git stat style)."""
+    try:
+        from kratos_agent.core import git_tools as _git
+        st = _git.get_git_status()
+        if not st or "Working tree clean" in st or "git status error" in st:
+            return
+        
+        lines = [l for l in st.splitlines() if l.strip() and not l.strip().startswith("##")]
+        if not lines:
+            return
+        
+        status_items = []
+        for line in lines[:8]:
+            status_code = line[:2].strip()
+            file_name = line[2:].strip()
+            if "A" in status_code or "??" in status_code:
+                status_items.append(f"[bold green]🟢 A[/bold green] [white]{file_name}[/white]")
+            elif "M" in status_code:
+                status_items.append(f"[bold yellow]🟡 M[/bold yellow] [white]{file_name}[/white]")
+            elif "D" in status_code:
+                status_items.append(f"[bold red]🔴 D[/bold red] [white]{file_name}[/white]")
+            else:
+                status_items.append(f"[bold cyan]ℹ {status_code}[/bold cyan] [white]{file_name}[/white]")
+        
+        card_content = "\n".join(status_items)
+        if len(lines) > 8:
+            card_content += f"\n[dim]... and {len(lines) - 8} more files[/dim]"
+            
+        console.print(
+            Panel(
+                card_content,
+                title="[bold #D4AF37]📊 Workspace Changes (git status)[/bold #D4AF37]",
+                border_style="#D4AF37",
+                padding=(0, 2)
+            )
+        )
+    except Exception:
+        pass
+
 def main():
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].strip()
+        if arg in ("--help", "-h", "/help", "help"):
+            console.print(HELP_TEXT)
+            return
+        if arg in ("--version", "-v", "version"):
+            console.print("[bold red]Kratos Agent[/bold red] [bold gold1]v0.1.0[/bold gold1] - [dim]The Ghost of Sparta Codes[/dim]")
+            return
+
     code_reloader.auto_reload_if_changed()
     if len(sys.argv) > 1:
         raw_query = " ".join(sys.argv[1:])
@@ -1063,20 +1416,44 @@ def main():
             for att in attached_files:
                 console.print(f"[dim green]📎 Attached:[/dim green] [bold white]{att}[/bold white]")
         
-        reply = runtime.run_agent(processed_query)
+        messages = [{"role": "user", "content": processed_query}]
+        
+        try:
+            reply = _tui.invoke_with_live(messages)
+        except KeyboardInterrupt:
+            _tui.cancel()
+            console.print("\n[bold yellow]⊘ Cancelled.[/bold yellow]\n")
+            return
             
         if not reply.strip():
             reply = "Task executed successfully."
 
-        console.print(
-            Panel(
-                Markdown(reply),
-                title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim]",
-                title_align="left",
-                border_style="red",
-                padding=(1, 2)
+        last_plan = _tui.get_last_plan()
+        if last_plan and last_plan.tasks and not _tui.is_chat_mode():
+            plan_dict = last_plan.to_dict()
+            files_summary = runtime.loop.workspace_tracker.summary() if hasattr(runtime.loop, "workspace_tracker") else None
+            verif_dict = runtime.loop.last_verification.__dict__ if getattr(runtime.loop, "last_verification", None) else None
+            console.print()
+            console.print(
+                render_completion_card(
+                    summary_text=reply,
+                    plan_dict=plan_dict,
+                    files_summary=files_summary,
+                    verification=verif_dict,
+                    model_name=runtime.model_name
+                )
             )
-        )
+            console.print()
+        else:
+            console.print(
+                Panel(
+                    Markdown(reply),
+                    title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim]",
+                    title_align="left",
+                    border_style="red",
+                    padding=(1, 2)
+                )
+            )
     else:
         start_interactive_cli()
 

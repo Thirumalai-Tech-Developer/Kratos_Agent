@@ -227,11 +227,11 @@ source_url: {url}
             "..."
         )
 
-        model_name = getattr(brain, "model_name", "gemini-3.6-flash-high")
+        model_name = getattr(brain, "model_name", "auto/best-free")
         client = getattr(brain, "client", None)
         if not client:
-            from kratos_agent.antigravity.client import AntigravityClient
-            client = AntigravityClient()
+            from kratos_agent.brain.client import BrainClient
+            client = BrainClient()
 
         reply = client.generate(
             model=model_name,
@@ -275,18 +275,29 @@ source_url: search:{query}
             return True
         return False
 
-    def get_all_skills_prompt(self) -> str:
-        """Generates a compact system prompt summary of all active skills."""
+    def get_all_skills_prompt(self, query: str = "") -> str:
+        """Generates a compact system prompt summary of relevant active skills (capped to prevent prompt bloat)."""
         if not self.skills:
             return ""
 
-        parts = ["\nACTIVE AGENT SKILLS & SPECIALIZED DOMAIN KNOWLEDGE:"]
-        for s in self.skills.values():
-            parts.append(f"- **{s.name}**: {s.description}")
-            # Include brief summary of instructions if available
-            brief = "\n".join([line for line in s.content.splitlines() if line.startswith("#") or line.startswith("-")][:6])
-            if brief:
-                parts.append(f"  Instructions:\n  {brief}")
+        unique_skills = list({str(s.path): s for s in self.skills.values()}.values())
+        
+        # If query is provided, prioritize matching skills
+        if query:
+            q_words = set(re.findall(r'\w+', query.lower()))
+            scored = []
+            for s in unique_skills:
+                score = sum(1 for w in q_words if w in s.name.lower() or w in s.description.lower())
+                scored.append((score, s))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            selected = [s for _, s in scored[:12]]
+        else:
+            selected = unique_skills[:12]
+
+        parts = ["\nACTIVE AGENT SKILLS:"]
+        for s in selected:
+            desc = s.description[:80] + "…" if len(s.description) > 80 else s.description
+            parts.append(f"- `{s.name}`: {desc}")
 
         return "\n".join(parts) + "\n"
 

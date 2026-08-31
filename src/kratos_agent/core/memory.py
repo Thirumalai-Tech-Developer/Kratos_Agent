@@ -23,6 +23,10 @@ class AgenticSession:
         self.executed_commands: List[Dict[str, Any]] = []
         self.created_artifacts: List[Dict[str, Any]] = []
         self.notes: Dict[str, Any] = {}
+        self.plan: Optional[Dict[str, Any]] = None
+        self.files_changed: Dict[str, List[str]] = {"created": [], "modified": [], "deleted": []}
+        self.last_status: str = "idle"
+        self.verification_status: Dict[str, Any] = {}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -34,7 +38,11 @@ class AgenticSession:
             "turns": self.turns,
             "executed_commands": self.executed_commands,
             "created_artifacts": self.created_artifacts,
-            "notes": self.notes
+            "notes": self.notes,
+            "plan": self.plan,
+            "files_changed": self.files_changed,
+            "last_status": self.last_status,
+            "verification_status": self.verification_status,
         }
 
     @classmethod
@@ -50,7 +58,41 @@ class AgenticSession:
         session.executed_commands = data.get("executed_commands", [])
         session.created_artifacts = data.get("created_artifacts", [])
         session.notes = data.get("notes", {})
+        session.plan = data.get("plan")
+        session.files_changed = data.get("files_changed", {"created": [], "modified": [], "deleted": []})
+        session.last_status = data.get("last_status", "idle")
+        session.verification_status = data.get("verification_status", {})
         return session
+
+    def set_plan(self, plan_dict_or_obj: Any) -> None:
+        if hasattr(plan_dict_or_obj, "to_dict"):
+            self.plan = plan_dict_or_obj.to_dict()
+        elif isinstance(plan_dict_or_obj, dict):
+            self.plan = plan_dict_or_obj
+        else:
+            self.plan = None
+
+    def get_plan(self) -> Optional[Any]:
+        if not self.plan:
+            return None
+        from kratos_agent.core.task_manager import ExecutionPlan
+        return ExecutionPlan.from_dict(self.plan)
+
+    def has_unfinished_plan(self) -> bool:
+        plan = self.get_plan()
+        if not plan or not plan.tasks:
+            return False
+        return any(t.state in ("pending", "running", "needs_attention", "failed") for t in plan.tasks)
+
+    def get_unfinished_tasks_summary(self) -> str:
+        plan = self.get_plan()
+        if not plan:
+            return "No active plan."
+        completed = len([t for t in plan.tasks if t.state == "completed"])
+        interrupted = len([t for t in plan.tasks if t.state in ("running", "needs_attention")])
+        pending = len([t for t in plan.tasks if t.state == "pending"])
+        failed = len([t for t in plan.tasks if t.state == "failed"])
+        return f"✓ {completed} completed  ⠋ {interrupted} interrupted  ☐ {pending} pending" + (f"  ✗ {failed} failed" if failed else "")
 
 class AgenticMemory:
     """Manages multi-session persistent agent memory, command logs, and context isolation."""
@@ -234,8 +276,17 @@ class AgenticMemory:
         self._save_index(index)
         return True
 
-    def record_turn(self, user_query: str, agent_reply: str, tool_calls: Optional[List[Dict[str, Any]]] = None) -> None:
-        """Records a completed turn into the active session."""
+    def record_turn(
+        self,
+        user_query: str,
+        agent_reply: str,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        plan: Optional[Any] = None,
+        files_changed: Optional[Dict[str, List[str]]] = None,
+        verification_status: Optional[Dict[str, Any]] = None,
+        status: str = "completed"
+    ) -> None:
+        """Records a completed or interrupted turn into the active session."""
         if not self.active_session:
             self.create_session()
 
@@ -252,6 +303,13 @@ class AgenticMemory:
             "tools_used": tool_calls or []
         }
         self.active_session.turns.append(turn)
+        if plan is not None:
+            self.active_session.set_plan(plan)
+        if files_changed is not None:
+            self.active_session.files_changed = files_changed
+        if verification_status is not None:
+            self.active_session.verification_status = verification_status
+        self.active_session.last_status = status
         self.save()
 
     def record_command(self, command: str, returncode: int, output_preview: str) -> None:

@@ -2,14 +2,14 @@
     "tools": [
         {
             "name": "write_file",
-            "description": "Writes text or code directly to a file on disk in the workspace with UTF-8 encoding. Use this to create or overwrite Python scripts, HTML, CSS, JavaScript, JSON, or any other code files instead of using terminal echo commands.",
+            "description": "Writes text or code directly to a file on disk in the workspace with UTF-8 encoding. Use this to create or overwrite complete files (Python scripts, HTML, CSS, React components, JSON, etc.).",
             "func_name": "write_file",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Path to the file to create or overwrite (e.g. 'generate_invoice.py' or 'src/App.jsx')"
+                        "description": "Path to the file to create or overwrite (e.g. 'src/App.jsx' or 'index.html')"
                     },
                     "content": {
                         "type": "string",
@@ -19,6 +19,33 @@
                 "required": [
                     "file_path",
                     "content"
+                ]
+            }
+        },
+        {
+            "name": "edit_file",
+            "description": "Surgical search-and-replace editor: Replaces exact target_text with replacement_text in a file. Preserves all other code, structure, and comments without rewriting the whole file.",
+            "func_name": "edit_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to edit"
+                    },
+                    "target_text": {
+                        "type": "string",
+                        "description": "Exact text/lines to find and replace"
+                    },
+                    "replacement_text": {
+                        "type": "string",
+                        "description": "New replacement text/lines"
+                    }
+                },
+                "required": [
+                    "file_path",
+                    "target_text",
+                    "replacement_text"
                 ]
             }
         },
@@ -40,8 +67,51 @@
             }
         },
         {
+            "name": "list_directory",
+            "description": "Lists files and subdirectories in a workspace folder with tree depth control (e.g. to inspect codebase structure).",
+            "func_name": "list_directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Directory to inspect (default '.')"
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum tree exploration depth (default 2)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "grep_search",
+            "description": "Fast regex and text code search across all source files in the workspace (finds definitions, usages, imports).",
+            "func_name": "grep_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search string or regex pattern"
+                    },
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Directory to search within (default '.')"
+                    },
+                    "is_regex": {
+                        "type": "boolean",
+                        "description": "True if query is a regular expression"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
             "name": "run_terminal_command",
-            "description": "Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly on the host system without asking for confirmation. Use this whenever the user wants you to inspect files, run tests, install packages, check system status, or execute commands.",
+            "description": "Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly on the host system without asking for confirmation. Use this to install dependencies, run builds, launch servers, run tests, or execute scripts.",
             "func_name": "run_terminal_command",
             "parameters": {
                 "type": "object",
@@ -53,6 +123,40 @@
                 },
                 "required": [
                     "command"
+                ]
+            }
+        },
+        {
+            "name": "fetch_url",
+            "description": "Fetches and extracts clean readable text from a URL (useful for real-time library documentation, API specs, and online guides).",
+            "func_name": "fetch_url",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Web URL to fetch"
+                    }
+                },
+                "required": [
+                    "url"
+                ]
+            }
+        },
+        {
+            "name": "google_search",
+            "description": "Google search tool to query the web for real-time information, documentation, and answers.",
+            "func_name": "google_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": [
+                    "query"
                 ]
             }
         },
@@ -88,23 +192,6 @@
             }
         },
         {
-            "name": "google_search",
-            "description": "Google search tool to query the web for information in real-time.",
-            "func_name": "google_search",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    }
-                },
-                "required": [
-                    "query"
-                ]
-            }
-        },
-        {
             "name": "calculate_expression",
             "description": "Evaluates mathematical expressions safely (e.g. '2 ** 10 + 50').",
             "func_name": "calculate_expression",
@@ -119,6 +206,79 @@
                 "required": [
                     "expression"
                 ]
+            }
+        },
+        {
+            "name": "git_status",
+            "description": "Shows current git repository status: staged changes, unstaged modifications, and untracked files. Use before committing to understand the current state.",
+            "func_name": "git_status",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "git_diff",
+            "description": "Shows the git diff (file changes) in the repository. Set staged=true to see what would be committed (staged diff). Default shows unstaged working tree changes.",
+            "func_name": "git_diff",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "staged": {
+                        "type": "boolean",
+                        "description": "If true, shows staged diff (what would be committed). Default false shows working tree diff."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_commit",
+            "description": "Stages all current changes and creates a git commit. Automatically generates a Conventional Commits message if none is provided (feat/fix/refactor/chore etc).",
+            "func_name": "git_commit",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Commit message. If empty, auto-generates from diff analysis."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_push",
+            "description": "Pushes the current branch to the remote origin repository.",
+            "func_name": "git_push",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name to push. Defaults to current branch."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_create_pr",
+            "description": "Creates a GitHub Pull Request via the gh CLI. Automatically pushes the branch first. Requires gh CLI to be installed and authenticated.",
+            "func_name": "git_create_pr",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "PR title. Auto-generated from diff if empty."
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "PR description/body text."
+                    },
+                    "base": {
+                        "type": "string",
+                        "description": "Base branch to merge into (default: main)."
+                    }
+                }
             }
         }
     ]
