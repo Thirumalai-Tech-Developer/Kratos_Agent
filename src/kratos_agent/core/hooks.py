@@ -1,4 +1,4 @@
-﻿"""
+"""
 Hooks System for Kratos Agent — Claude Code-style pre/post tool hooks.
 
 Hooks are configured in .kratos/hooks.json:
@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from rich.console import Console
 

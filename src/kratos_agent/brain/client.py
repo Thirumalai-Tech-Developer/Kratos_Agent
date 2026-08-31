@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any, Dict, Iterator, List, Optional
 import requests
-import urllib.parse
 
 from kratos_agent.brain.config import (
     authenticate,
@@ -20,14 +18,6 @@ from kratos_agent.brain.config import (
     BrainBadRequestError,
     BrainNotFoundError,
     BrainServerError,
-    # Backward compat
-    OmnirouteError,
-    OmnirouteConnectionError,
-    OmnirouteTimeoutError,
-    OmnirouteRateLimitError,
-    OmnirouteBadRequestError,
-    OmnirouteNotFoundError,
-    OmnirouteServerError,
 )
 from kratos_agent.core.latency_tracker import latency_tracker
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Approval/Permission Mode system for Kratos Agent.
 Mirrors Codex CLI (suggest / auto-edit / full-auto) and Kimi Code safe mode.
 
@@ -15,7 +15,6 @@ import json
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.prompt import Prompt

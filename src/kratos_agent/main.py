@@ -1,7 +1,6 @@
 """Kratos application composition root with an explicit agent pipeline."""
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List

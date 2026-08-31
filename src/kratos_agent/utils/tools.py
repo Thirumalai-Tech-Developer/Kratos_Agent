@@ -6,15 +6,13 @@ import json
 import re
 import time
 import difflib
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from kratos_agent.utils.tool_creator import self_tool_creator
 from kratos_agent.utils.step_tracker import step_tracker
 from kratos_agent.core.memory import memory
 from kratos_agent.core.approval_mode import approval_gate

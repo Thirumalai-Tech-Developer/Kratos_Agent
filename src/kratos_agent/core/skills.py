@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
-import json
 import shutil
-import urllib.request
-import urllib.parse
+import urllib
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.markdown import Markdown
 
 console = Console(highlight=False)
 

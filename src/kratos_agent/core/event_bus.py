@@ -7,7 +7,7 @@ structured RuntimeEvents.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional
 from .runtime_contracts import EventKind, RuntimeEvent
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -14,7 +13,7 @@ from .context_pipeline import ContextBuilder
 from .event_bus import event_bus
 from .planner import IntentKind, classify_intent, formulate_agent_plan
 from .runtime_contracts import ChatMessage, EventKind, RuntimeEvent
-from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
+from .task_manager import AgentState, ExecutionPlan, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
 

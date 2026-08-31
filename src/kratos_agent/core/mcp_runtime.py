@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-from .runtime_contracts import ToolPermission, ToolSpec
+from .runtime_contracts import ToolSpec
 
 
 @dataclass

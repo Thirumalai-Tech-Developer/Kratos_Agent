@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict, List, Optional
-from dotenv import load_dotenv
+from typing import Optional
 import httpx
 
 from langchain_openai import ChatOpenAI
 from kratos_agent.brain.config import (
-    authenticate,
     get_api_key,
     get_base_url,
     get_endpoint_url,
     get_default_model,
 )
 from kratos_agent.brain.client import BrainClient
+
 
 def get_http_client() -> httpx.Client:
     """Returns an httpx.Client with trust_env=False to bypass system proxies."""

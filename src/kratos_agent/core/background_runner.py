@@ -1,4 +1,4 @@
-﻿"""
+"""
 Background Async Agent Loop for Kratos Agent.
 Implements Kimi Code "Agent Swarm" + Claude Code background task concepts.
 
@@ -15,7 +15,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from rich.console import Console
 from rich.table import Table

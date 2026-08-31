@@ -6,8 +6,6 @@ directly to sys.stdout.
 """
 from __future__ import annotations
 
-import sys
-import threading
 from typing import Optional
 
 

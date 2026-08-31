@@ -1,4 +1,4 @@
-﻿"""
+"""
 KRATOS.md Project Memory — Claude Code CLAUDE.md equivalent.
 
 On every session start, Kratos:
@@ -11,8 +11,6 @@ It can contain: tech stack, coding conventions, key commands, architecture notes
 """
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 from typing import Optional
 

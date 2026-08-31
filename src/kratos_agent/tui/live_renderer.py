@@ -8,15 +8,13 @@ Renders:
 """
 from __future__ import annotations
 
-import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console, Group
 from rich.live import Live
 from rich.rule import Rule
-from rich.text import Text
 
 from kratos_agent.core.approval_mode import approval_gate
 from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
@@ -26,9 +24,7 @@ from .status_bar import StatusBar
 from .stream_printer import (
     is_interactive,
     pipe_print_error,
-    pipe_print_response,
     pipe_print_step,
-    pipe_print_tool,
 )
 
 

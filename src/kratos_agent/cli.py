@@ -1,4 +1,3 @@
-from kratos_agent.core.memory import AgenticSession
 import os
 import sys
 import re
@@ -6,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
+from kratos_agent.core.memory import AgenticSession
 
 # Ensure Windows terminal handles UTF-8 & emojis properly
 if sys.platform == "win32":
@@ -32,8 +32,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 
 from kratos_agent.main import runtime
-from kratos_agent.brain import PUBLIC_MODELS, BrainClient
-from kratos_agent.brain.fetch_model import get_model
+from kratos_agent.brain import PUBLIC_MODELS
 from kratos_agent.utils.tool_creator import create_or_update_tool
 from kratos_agent.core.memory import memory
 from kratos_agent.core.reloader import code_reloader
@@ -41,9 +40,7 @@ from kratos_agent.core.compactor import compactor
 from kratos_agent.core.prompt_library import prompt_library
 from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
 from kratos_agent.core.background_runner import background_runner
-from kratos_agent.core.hooks import hook_registry
 from kratos_agent.tui import KratosLiveRenderer, render_completion_card
-from kratos_agent.tui.stream_printer import is_interactive
 from kratos_agent.tui.debug_panel import render_step_log, render_event_log
 
 console = Console()

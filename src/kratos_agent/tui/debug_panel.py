@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -125,7 +125,6 @@ def render_event_log(events: List[Dict[str, Any]]) -> None:
 
 def render_full_event_detail(events: List[Dict[str, Any]], event_idx: Optional[int] = None) -> None:
     """Render full JSON detail for a single event or all events."""
-    from typing import Optional as Opt
     target_events = [events[event_idx]] if event_idx is not None and 0 <= event_idx < len(events) else events
     for i, ev in enumerate(target_events):
         kind = ev.get("kind", "?")

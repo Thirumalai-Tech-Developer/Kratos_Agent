@@ -5,8 +5,8 @@ and next-step prompt readiness with strict truthfulness.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from rich.console import Console, Group
+from typing import Any, Dict, Optional
+from rich.console import Group
 from rich.panel import Panel
 from rich.text import Text
 

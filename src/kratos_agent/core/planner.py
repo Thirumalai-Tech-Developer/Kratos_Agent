@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from kratos_agent.core.task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
+from kratos_agent.core.task_manager import ExecutionPlan, TaskItem, TaskState
 
 
 class IntentKind(str, Enum):

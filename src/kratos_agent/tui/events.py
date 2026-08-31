@@ -10,17 +10,14 @@ Renders:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from rich.console import RenderableType, Group
-from rich.panel import Panel
-from rich.rule import Rule
 from rich.spinner import Spinner
-from rich.table import Table
 from rich.text import Text
 
-from kratos_agent.core.task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
+from kratos_agent.core.task_manager import ExecutionPlan, TaskState
 
 
 def _elapsed(since: float) -> str:

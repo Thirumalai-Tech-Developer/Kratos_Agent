@@ -1,8 +1,5 @@
-import re
 from typing import List, Dict, Any, Optional, Tuple
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 console = Console(highlight=False)
 
@@ -96,7 +93,7 @@ class ConversationCompactor:
         # 1. Try LLM compression if brain is provided
         if brain:
             try:
-                from langchain_core.messages import SystemMessage, HumanMessage
+                from langchain_core.messages import HumanMessage
                 history_str = "\n\n".join(
                     f"{m.get('role', 'user').upper()}: {self.prune_tool_output(m.get('content', ''))}"
                     for m in older_messages

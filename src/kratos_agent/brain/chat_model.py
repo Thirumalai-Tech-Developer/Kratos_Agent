@@ -2,23 +2,19 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
-    AIMessageChunk,
     BaseMessage,
-    ChatMessage,
-    FunctionMessage,
     HumanMessage,
     SystemMessage,
-    ToolMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatResult
 
-from kratos_agent.brain.config import PUBLIC_MODELS, DEFAULT_MODEL, get_default_model
+from kratos_agent.brain.config import DEFAULT_MODEL, get_default_model
 from kratos_agent.brain.client import BrainClient
 
 
