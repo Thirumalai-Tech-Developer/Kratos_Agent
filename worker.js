@@ -104,6 +104,8 @@ export default {
   }
 };
 
+export { corsHeaders, jsonResponse, handleApi, SCHEMA_SQL, TOOLS_LIST };
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
