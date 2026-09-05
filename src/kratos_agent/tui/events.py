@@ -66,6 +66,7 @@ class EventRenderer:
         self.plan: Optional[ExecutionPlan] = None
         self.is_chat_mode: bool = False
         self.thinking_label: str = "Thinking…"
+        self.stream_text: str = ""
         self._turn_start: float = time.monotonic()
         self._step_idx: int = 0
         self._open_tool_steps: Dict[str, int] = {}
@@ -76,6 +77,7 @@ class EventRenderer:
         self.plan = None
         self.is_chat_mode = False
         self.thinking_label = "Thinking…"
+        self.stream_text = ""
         self._turn_start = time.monotonic()
         self._step_idx = 0
         self._open_tool_steps.clear()
@@ -149,6 +151,9 @@ class EventRenderer:
         self.steps.append(step)
         self._thinking_step_idx = idx
 
+    def on_model_chunk(self, chunk: str) -> None:
+        self.stream_text += chunk
+
     def on_model_response(self, payload: Dict[str, Any]) -> None:
         if self._thinking_step_idx is not None:
             step = self.steps[self._thinking_step_idx]
@@ -158,6 +163,7 @@ class EventRenderer:
             self._thinking_step_idx = None
 
     def on_tool_requested(self, payload: Dict[str, Any]) -> None:
+        self.stream_text = ""
         name = payload.get("name", "tool")
         args = payload.get("arguments", {})
         call_id = payload.get("call_id", "")

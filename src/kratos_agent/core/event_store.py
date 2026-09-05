@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .runtime_contracts import RuntimeEvent, json_safe
+from .runtime_contracts import EventKind, RuntimeEvent, json_safe
 
 
 class EventStore:
@@ -15,6 +15,8 @@ class EventStore:
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
     def append(self, event: RuntimeEvent) -> None:
+        if event.kind == EventKind.MODEL_CHUNK or getattr(event.kind, "value", str(event.kind)) == "model.chunk":
+            return
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(json_safe(event), ensure_ascii=False) + "\n")
 

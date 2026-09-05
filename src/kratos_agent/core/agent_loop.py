@@ -216,8 +216,17 @@ class AgentLoop:
             self.emit(RuntimeEvent(EventKind.REQUEST_ASSEMBLED, _redacted_request(request), turn_id))
 
             # Complete Model Request
+            def _handle_chunk(chunk: str) -> None:
+                self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {"chunk": chunk}, turn_id))
+
             try:
-                response = self.model.complete(request)
+                try:
+                    response = self.model.complete(request, on_chunk=_handle_chunk)
+                except TypeError as type_err:
+                    if "unexpected keyword argument 'on_chunk'" in str(type_err) or "got an unexpected keyword" in str(type_err):
+                        response = self.model.complete(request)
+                    else:
+                        raise
             except Exception as exc:
                 if self.current_plan:
                     active = self.current_plan.get_active_task()

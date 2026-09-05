@@ -33,6 +33,7 @@ class EventKind(str, Enum):
     REQUEST_ASSEMBLED = "model.request_assembled"
     MODEL_THINKING = "model.thinking"
     MODEL_RESPONSE = "model.response"
+    MODEL_CHUNK = "model.chunk"
     COMPACTED = "context.compacted"
     RETRY = "runtime.retry"
 

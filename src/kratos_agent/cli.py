@@ -43,7 +43,7 @@ from kratos_agent.core.background_runner import background_runner
 from kratos_agent.tui import KratosLiveRenderer, render_completion_card
 from kratos_agent.tui.debug_panel import render_step_log, render_event_log
 
-console = Console()
+console = Console(legacy_windows=False)
 
 # Instantiate the live TUI renderer (wraps runtime with event-driven display)
 _tui = KratosLiveRenderer(runtime)
@@ -1445,7 +1445,7 @@ def main():
             console.print(
                 Panel(
                     Markdown(reply),
-                    title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim]",
+                    title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
                     title_align="left",
                     border_style="red",
                     padding=(1, 2)

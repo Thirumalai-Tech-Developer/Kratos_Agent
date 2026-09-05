@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.rule import Rule
 
 from kratos_agent.core.approval_mode import approval_gate
@@ -36,7 +38,7 @@ class KratosLiveRenderer:
         self._is_tty = is_interactive()
         self._renderer = EventRenderer(is_tty=self._is_tty)
         self._status_bar = StatusBar()
-        self._console = Console(highlight=False, markup=True)
+        self._console = Console(highlight=False, markup=True, legacy_windows=False)
         self._cancel_flag = threading.Event()
         self._live: Optional[Live] = None
         self._last_events: List[Dict[str, Any]] = []
@@ -124,9 +126,9 @@ class KratosLiveRenderer:
         with Live(
             self._build_renderable(),
             console=self._console,
-            refresh_per_second=4,
+            refresh_per_second=10,
             transient=True,
-            vertical_overflow="ellipsis",
+            vertical_overflow="visible",
         ) as live:
             self._live = live
             thread.start()
@@ -142,7 +144,7 @@ class KratosLiveRenderer:
                         self._status_bar.set_task_progress(active_idx, plan.total_count, tname, plan.progress_percent)
 
                     live.update(self._build_renderable())
-                    time.sleep(0.12)
+                    time.sleep(0.05)
                     if self._cancel_flag.is_set():
                         break
             except KeyboardInterrupt:
@@ -180,8 +182,18 @@ class KratosLiveRenderer:
             if plan_tree:
                 parts.append(plan_tree)
 
-        # 3. Contextual Thinking Spinner
-        parts.append(self._renderer.render_thinking_line())
+        # 3. Streamed Response or Contextual Thinking Spinner
+        if self._renderer.stream_text:
+            stream_panel = Panel(
+                Markdown(self._renderer.stream_text),
+                title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({self.runtime.model_name})[/dim] {approval_gate.mode_badge()}",
+                title_align="left",
+                border_style="red",
+                padding=(1, 2),
+            )
+            parts.append(stream_panel)
+        else:
+            parts.append(self._renderer.render_thinking_line())
 
         # 4. Bottom Status Bar
         parts.append(Rule(style="dim #333"))
@@ -251,6 +263,13 @@ class KratosLiveRenderer:
         elif kind == EventKind.REQUEST_ASSEMBLED:
             self._renderer.on_thinking_started()
             self._status_bar.set_thinking("Sending request…")
+        elif kind == EventKind.MODEL_CHUNK:
+            chunk = str(payload.get("chunk", ""))
+            self._renderer.on_model_chunk(chunk)
+            if not self.live_mode or not self._is_tty:
+                import sys
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
         elif kind == EventKind.MODEL_RESPONSE:
             self._renderer.on_model_response(payload)
             usage = payload.get("usage") or {}

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from kratos_agent.brain.config import DEFAULT_MODEL, get_default_model
 from kratos_agent.brain.client import BrainClient
@@ -282,6 +283,37 @@ class BrainChatModel(BaseChatModel):
         clean_text, parsed_tools = extract_tool_calls_from_text(raw_output)
         ai_message = AIMessage(content=clean_text or raw_output)
         return ChatResult(generations=[ChatGeneration(message=ai_message)])
+
+    def _stream(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        dict_messages: List[Dict[str, Any]] = []
+        system_instruction = None
+
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                system_instruction = msg.content
+            elif isinstance(msg, HumanMessage):
+                dict_messages.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                dict_messages.append({"role": "assistant", "content": msg.content})
+            else:
+                dict_messages.append({"role": "user", "content": str(msg.content)})
+
+        for chunk in self.client.stream(
+            model=self.model_name,
+            messages=dict_messages,
+            system_instruction=system_instruction,
+        ):
+            if chunk:
+                generation_chunk = ChatGenerationChunk(message=AIMessageChunk(content=chunk))
+                if run_manager:
+                    run_manager.on_llm_new_token(chunk, chunk=generation_chunk)
+                yield generation_chunk
 
 
 # Backward compatibility alias

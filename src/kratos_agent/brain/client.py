@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 import requests
 
 from kratos_agent.brain.config import (
@@ -102,6 +102,7 @@ class BrainClient:
         timeout: Optional[float] = None,
         task_id: str = "",
         stream: bool = True,
+        on_chunk: Optional[Callable[[str], None]] = None,
     ) -> str:
         """Executes generation with streaming and latency tracking."""
         start_time = time.monotonic()
@@ -127,9 +128,19 @@ class BrainClient:
                         metrics.ttft_ms = (time.monotonic() - start_time) * 1000
                         ttft_recorded = True
                     chunks.append(chunk)
+                    if on_chunk and chunk:
+                        try:
+                            on_chunk(chunk)
+                        except Exception:
+                            pass
                 text = "".join(chunks).strip()
             else:
                 text = self.request_non_streaming(target_model, messages, system_instruction, retries, req_timeout).strip()
+                if on_chunk and text:
+                    try:
+                        on_chunk(text)
+                    except Exception:
+                        pass
 
             total_duration = (time.monotonic() - start_time) * 1000
             metrics.generation_ms = max(0.0, total_duration - metrics.context_build_ms)

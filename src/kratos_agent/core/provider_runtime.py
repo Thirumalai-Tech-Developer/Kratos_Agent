@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Callable, Dict, List, Optional
 import json
 
 from .runtime_contracts import ModelCapabilities, ModelResponse, ToolCall
@@ -13,7 +13,7 @@ class ModelAdapter(ABC):
     capabilities: ModelCapabilities
 
     @abstractmethod
-    def complete(self, request: Dict[str, Any]) -> ModelResponse: ...
+    def complete(self, request: Dict[str, Any], on_chunk: Optional[Callable[[str], None]] = None) -> ModelResponse: ...
 
 
 ModelProvider = ModelAdapter
@@ -26,7 +26,7 @@ class BrainAdapter(ModelAdapter):
         self.client = client
         self.capabilities = ModelCapabilities(streaming=True, tool_calling=True, reasoning=True)
 
-    def complete(self, request: Dict[str, Any]) -> ModelResponse:
+    def complete(self, request: Dict[str, Any], on_chunk: Optional[Callable[[str], None]] = None) -> ModelResponse:
         from kratos_agent.brain.chat_model import extract_tool_calls_from_text
         
         messages = []
@@ -71,11 +71,53 @@ class BrainAdapter(ModelAdapter):
             )
             system_content = (system_content or "") + tool_hint
 
+        # Intelligent tool-call detection for streaming:
+        # Buffer early tokens to detect if output starts with a tool call (call:, <tool_call>, {"name":)
+        buffered_chunks: List[str] = []
+        is_tool_stream = False
+        streaming_active = False
+
+        def _stream_filter(chunk: str) -> None:
+            nonlocal is_tool_stream, streaming_active
+            if not on_chunk or is_tool_stream:
+                return
+
+            if not streaming_active:
+                buffered_chunks.append(chunk)
+                buf_str = "".join(buffered_chunks)
+                stripped = buf_str.lstrip()
+
+                # Check if this looks like a tool call starting
+                if any(stripped.startswith(p) for p in ("call:", "<tool_call", "{\"name\"", "{\n  \"name\"")):
+                    is_tool_stream = True
+                    buffered_chunks.clear()
+                    return
+
+                # If buffer has enough characters or newline and not matching tool call start, flush it
+                has_enough = len(stripped) >= 10 or "\n" in stripped
+                might_be_tool = any(p.startswith(stripped[:min(len(stripped), 5)]) for p in ("call:", "<tool_call>"))
+                if has_enough or not might_be_tool:
+                    streaming_active = True
+                    for c in buffered_chunks:
+                        on_chunk(c)
+                    buffered_chunks.clear()
+            else:
+                if "call:" in chunk or "<tool_call>" in chunk:
+                    is_tool_stream = True
+                    return
+                on_chunk(chunk)
+
         raw = self.client.generate(
             model=self.model,
             messages=messages,
             system_instruction=system_content,
+            on_chunk=_stream_filter if on_chunk else None,
         )
+
+        if on_chunk and not is_tool_stream and buffered_chunks:
+            for c in buffered_chunks:
+                on_chunk(c)
+            buffered_chunks.clear()
         text, parsed = extract_tool_calls_from_text(raw)
         calls = [
             ToolCall(
