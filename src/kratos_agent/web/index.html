@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KRATOS VI · Vice City Agentic Protocol & Cloudflare D1</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700;800;900&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+    <!-- Highlight.js Syntax Highlighter (Local bundle with 36+ languages: Java, Rust, Python, Go, etc.) -->
+    <script src="/highlighter.js"></script>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body class="vice-theme">
+    <!-- Retro CRT Scanline Subtle Overlay -->
+    <div class="crt-overlay"></div>
+
+    <!-- Top Navigation Header (Vice City Cyberpunk HUD) -->
+    <header class="top-nav" id="topNav">
+        <div class="brand">
+            <div class="brand-badge vice-glow">
+                <span class="spartan-icon">⚔️</span>
+            </div>
+            <div class="brand-text">
+                <div class="brand-title">
+                    <span class="title-kratos">KRATOS</span>
+                    <span class="title-vi">VI</span>
+                    <span class="edition-pill">VICE AGENTIC PROTOCOL</span>
+                </div>
+                <div class="brand-sub">Autonomous Tool-Calling Intelligence · Cloudflare D1 Engine</div>
+            </div>
+        </div>
+
+        <!-- Telemetry HUD Pill -->
+        <div class="d1-status-card" id="d1StatusCard">
+            <div class="status-indicator online" id="statusPill">
+                <span class="pulsing-dot"></span>
+                <span id="d1ModeText">Cloudflare D1</span>
+            </div>
+            <div class="d1-meta">
+                <span class="meta-label">LATENCY:</span> <span class="meta-val highlight-cyan" id="d1Latency">-- ms</span>
+                <span class="meta-sep">/</span>
+                <span class="meta-label">DB:</span> <span class="meta-val" id="d1DbId">kratos_d1.db</span>
+            </div>
+        </div>
+
+        <!-- Real-time Counters -->
+        <div class="nav-stats">
+            <div class="stat-pill" title="Total Sessions in D1">
+                <span class="stat-icon">📁</span>
+                <span class="stat-num" id="statSessionsCount">0</span>
+                <span class="stat-lbl">SESSIONS</span>
+            </div>
+            <div class="stat-pill" title="Total Turns Stored in D1">
+                <span class="stat-icon">💬</span>
+                <span class="stat-num" id="statTurnsCount">0</span>
+                <span class="stat-lbl">TURNS</span>
+            </div>
+            <div class="stat-pill" title="Agentic Trace Events">
+                <span class="stat-icon">⚡</span>
+                <span class="stat-num" id="statEventsCount">0</span>
+                <span class="stat-lbl">EVENTS</span>
+            </div>
+            <div class="stat-pill" title="Loaded Agentic Tools">
+                <span class="stat-icon">🗡️</span>
+                <span class="stat-num" id="statToolsCount">12</span>
+                <span class="stat-lbl">TOOLS</span>
+            </div>
+        </div>
+
+        <!-- Header Actions -->
+        <div class="header-actions">
+            <!-- Agent Mode Toggle Button & Floating Popover -->
+            <div class="agent-mode-container" id="agentModeContainer">
+                <button class="btn btn-mode-toggle active-static" id="btnAgentModeToggle" title="Toggle Autonomous Agent Mode vs Normal Chat Mode">
+                    <span class="mode-led" id="agentModeLed"></span>
+                    <span class="mode-text" id="agentModeText">AGENT MODE: OFF</span>
+                </button>
+                <!-- Popover in the exact same place -->
+                <div class="mode-popover d-none" id="modePopover">
+                    <div class="popover-arrow"></div>
+                    <div class="popover-header">
+                        <span class="popover-tag">⚠️ HOSTED ENVIRONMENT NOTICE</span>
+                        <button class="popover-close" id="btnCloseModePopover">&times;</button>
+                    </div>
+                    <div class="popover-body">
+                        <div class="popover-badge">STATIC HOSTING · NORMAL CHAT MODE</div>
+                        <p>This is now running static, you can chat. This is not a VPS to run agent.</p>
+                        <p class="popover-sub">Autonomous terminal execution and file-system modification tools are disabled in this hosted preview.</p>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-secondary" id="btnRefresh" title="Sync real-time data from Cloudflare D1">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <span class="btn-label">SYNC</span>
+            </button>
+            <button class="btn btn-info" id="btnTechSpecs" title="View Architecture & Recruiter Highlights">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                <span class="btn-label">TECH SPECS</span>
+            </button>
+            <button class="btn btn-vice" id="btnNewSession" title="Start a fresh autonomous session">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span class="btn-label">NEW RUN</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Content Tabs Header -->
+    <nav class="content-tabs" id="contentTabs">
+        <button class="tab-btn active" data-tab="arenaTab" id="tabBtnArena">
+            <span class="tab-icon">🎮</span>
+            AGENT ARENA & LIVE HUD
+            <span class="hud-pulse-tag">LIVE</span>
+        </button>
+        <button class="tab-btn" data-tab="chatTab" id="tabBtnChat">
+            <span class="tab-icon">💬</span>
+            D1 SESSIONS & TURNS
+            <span class="tab-badge" id="tabBadgeTurns">0</span>
+        </button>
+        <button class="tab-btn" data-tab="traceTab" id="tabBtnTrace">
+            <span class="tab-icon">⚡</span>
+            AGENTIC TRACE REPLAY
+            <span class="tab-badge" id="tabBadgeEvents">0</span>
+        </button>
+        <button class="tab-btn" data-tab="d1Tab" id="tabBtnD1">
+            <span class="tab-icon">🗄️</span>
+            D1 SQL PLAYGROUND
+        </button>
+    </nav>
+
+    <!-- Recruiter Quick-Action Demo Strip -->
+    <div class="recruiter-strip" id="recruiterStrip">
+        <div class="strip-label">
+            <span class="flame-icon">🔥</span>
+            <span>RECRUITER DEMO SHORTCUTS:</span>
+        </div>
+        <div class="strip-pills">
+            <button class="demo-pill" data-prompt="Inspect this project's architecture, tools, and recent files, then report any improvements.">
+                🏎️ Project Architecture Audit
+            </button>
+            <button class="demo-pill" data-prompt="What autonomous tools do you have loaded, what permissions do they need, and what model are you using?">
+                🗡️ Autonomous Tools Arsenal
+            </button>
+            <button class="demo-pill" data-prompt="Execute unit test discovery with python -m unittest discover -s tests and verify results.">
+                ⚡ Test & Verification Sweep
+            </button>
+            <button class="demo-pill" data-prompt="Explain how you store sessions and agentic traces in Cloudflare D1 and show an example schema.">
+                🌴 Cloudflare D1 Architecture
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Workspace Container -->
+    <main class="app-layout" id="appLayout">
+
+        <!-- ====================================================================
+             TAB 1: LIVE AGENT ARENA & REAL-TIME HUD
+             ==================================================================== -->
+        <section class="tab-pane active" id="arenaTab">
+            <div class="arena-layout">
+                <!-- Left: Interactive Chat & Live Stream Stream -->
+                <div class="arena-chat-panel">
+                    <div class="arena-chat-header">
+                        <div class="header-left">
+                            <span class="terminal-dot red"></span>
+                            <span class="terminal-dot yellow"></span>
+                            <span class="terminal-dot green"></span>
+                            <span class="terminal-title">AUTONOMOUS AGENT STREAM // <span id="arenaSessionLabel">SESSION ACTIVE</span></span>
+                        </div>
+                        <div class="header-right">
+                            <span class="badge badge-model" id="arenaModelBadge">Model: Auto</span>
+                            <span class="badge badge-status" id="arenaStatusBadge">READY</span>
+                            <button class="btn-hud-toggle" id="btnHudToggle" title="Toggle Real-time Agent HUD">⚡ HUD</button>
+                        </div>
+                    </div>
+
+                    <!-- Messages Stream Area -->
+                    <div class="arena-messages" id="arenaMessages">
+                        <div class="welcome-card" id="welcomeCard">
+                            <div class="welcome-header">
+                                <span class="welcome-icon">⚔️🌴</span>
+                                <h2>KRATOS VI AUTONOMOUS ENGINE</h2>
+                            </div>
+                            <p class="welcome-desc">
+                                Welcome to the Kratos Agent web console. This platform integrates multi-step reasoning, autonomous tool execution loops, self-healing test verification, and global Cloudflare D1 persistence.
+                            </p>
+                            <div class="welcome-features">
+                                <div class="feature-item">
+                                    <span class="feat-icon">⚡</span>
+                                    <div><strong>Autonomous Tool Loop:</strong> Automatically inspects files, runs shell commands, updates code, and verifies results.</div>
+                                </div>
+                                <div class="feature-item">
+                                    <span class="feat-icon">🗄️</span>
+                                    <div><strong>Cloudflare D1 Relational DB:</strong> High-speed serverless storage for all turns, execution traces, and commands.</div>
+                                </div>
+                                <div class="feature-item">
+                                    <span class="feat-icon">🎯</span>
+                                    <div><strong>Real-time HUD:</strong> Watch the agent's current step, active tools, and streaming tokens live.</div>
+                                </div>
+                            </div>
+                            <div class="welcome-hint">Click a demo shortcut above or type any instruction below to launch the autonomous agent!</div>
+                        </div>
+                    </div>
+
+                    <!-- Cyberpunk Prompt Input Dock -->
+                    <div class="arena-input-dock">
+                        <div class="input-glow-wrapper">
+                            <div class="input-prefix">
+                                <span class="prompt-arrow">kratos ❯</span>
+                            </div>
+                            <textarea id="arenaInput" placeholder="Command Kratos... (e.g. 'Read src/main.py, run tests, and check status')" rows="1"></textarea>
+                            <div class="input-actions">
+                                <button class="btn btn-icon" id="btnClearChat" title="Clear chat view">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                                <button class="btn btn-send" id="btnSendPrompt">
+                                    <span class="btn-text">DISPATCH</span>
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="input-footer-meta">
+                            <span class="meta-tip">Press <kbd>Enter</kbd> to dispatch · <kbd>Shift+Enter</kbd> for newline</span>
+                            <span class="meta-mode">EXECUTION MODE: <strong class="text-green">FULL AUTONOMOUS</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Real-time Cyberpunk Agent HUD & Step Matrix -->
+                <aside class="arena-hud-panel" id="arenaHudPanel">
+                    <div class="hud-drawer-header">
+                        <span class="hud-drawer-title">⚡ REAL-TIME AGENT HUD</span>
+                        <button class="hud-drawer-close" id="btnCloseHudDrawer" title="Close HUD">&times;</button>
+                    </div>
+                    <!-- Gauge 1: Current Step Meter -->
+                    <div class="hud-card hud-step-card">
+                        <div class="hud-card-header">
+                            <span class="hud-title">CURRENT AGENT STEP</span>
+                            <span class="step-live-dot" id="stepLiveDot"></span>
+                        </div>
+                        <div class="step-display-box" id="stepDisplayBox">
+                            <div class="step-status-tag" id="currentStepTag">IDLE / READY</div>
+                            <div class="step-label" id="currentStepLabel">Standing by for next instruction.</div>
+                        </div>
+
+                        <!-- 4-Stage Step Progression Color Bars (Pure color indication: Reasoning [Pink], Planning [Orange], Tool [Cyan], Verify [Green]) -->
+                        <div class="step-pipeline" role="progressbar" aria-label="Agent execution progression">
+                            <div class="pipeline-bar bar-reasoning" id="nodeReasoning" title="Reasoning Phase"></div>
+                            <div class="pipeline-bar bar-planning" id="nodePlanning" title="Planning Phase"></div>
+                            <div class="pipeline-bar bar-toolcall" id="nodeToolCall" title="Tool Execution Phase"></div>
+                            <div class="pipeline-bar bar-verifying" id="nodeVerifying" title="Verification & Synthesis Phase"></div>
+                        </div>
+                    </div>
+
+                    <!-- Gauge 2: Active In-Flight Tool Monitor -->
+                    <div class="hud-card hud-tool-card">
+                        <div class="hud-card-header">
+                            <span class="hud-title">ACTIVE TOOL MONITOR</span>
+                            <span class="tool-tag-badge" id="toolInFlightBadge">STANDBY</span>
+                        </div>
+                        <div class="active-tool-content" id="activeToolContent">
+                            <div class="no-tool-active">
+                                <span class="dim-icon">🔧</span>
+                                <span>No tool currently executing</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gauge 3: Tools Arsenal Matrix -->
+                    <div class="hud-card hud-arsenal-card">
+                        <div class="hud-card-header">
+                            <span class="hud-title">REGISTERED TOOLS ARSENAL (<span id="arsenalCount">12</span>)</span>
+                            <button class="btn-micro" id="btnRefreshTools" title="Refresh tools">⟳</button>
+                        </div>
+                        <div class="tools-arsenal-list" id="toolsArsenalList">
+                            <div class="loading-spinner-box">
+                                <div class="spinner"></div>
+                                <span>Loading tools...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gauge 4: System Architecture & Telemetry -->
+                    <div class="hud-card hud-telemetry-card">
+                        <div class="hud-card-header">
+                            <span class="hud-title">SYSTEM TELEMETRY</span>
+                        </div>
+                        <div class="telemetry-grid">
+                            <div class="telemetry-item">
+                                <span class="t-lbl">RUNTIME:</span>
+                                <span class="t-val text-gold" id="telemRuntime">KratosAutonomous</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="t-lbl">WORKSPACE:</span>
+                                <span class="t-val" id="telemWorkspace">Kratos_Agent</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="t-lbl">STORAGE:</span>
+                                <span class="t-val text-cyan" id="telemStorage">Cloudflare D1</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="t-lbl">GATEWAY:</span>
+                                <span class="t-val text-green" id="telemGateway">Brain v1 (Proxy Bypass)</span>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <!-- ====================================================================
+             TAB 2: CLOUDFLARE D1 SESSIONS & CONVERSATION EXPLORER
+             ==================================================================== -->
+        <section class="tab-pane" id="chatTab">
+            <div class="d1-explorer-layout">
+                <!-- Left Sidebar: Session Navigator -->
+                <aside class="sessions-sidebar" id="sessionsSidebar">
+                    <div class="sidebar-header">
+                        <div class="search-box">
+                            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <input type="text" id="sessionSearch" placeholder="Search sessions..." autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="session-list" id="sessionList">
+                        <div class="loading-spinner-box">
+                            <div class="spinner"></div>
+                            <span>Loading Cloudflare D1 sessions...</span>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Right: Session Detail Viewer -->
+                <div class="session-detail-view">
+                    <!-- Session Overview Top Bar -->
+                    <div class="session-hero" id="sessionHero">
+                        <div class="hero-left">
+                            <h1 class="session-title" id="activeSessionTitle">Select a Session</h1>
+                            <div class="session-tags">
+                                <span class="badge badge-model" id="activeModelBadge">Model: --</span>
+                                <span class="badge badge-status" id="activeStatusBadge">Status: --</span>
+                                <span class="badge badge-time" id="activeUpdatedBadge">Updated: --</span>
+                                <span class="badge badge-id" id="activeIdBadge">ID: --</span>
+                            </div>
+                        </div>
+                        <div class="hero-right" style="display:flex;gap:8px;align-items:center;">
+                            <button class="btn btn-cyan btn-sm" id="btnContinueChat" title="Resume this conversation in the Arena">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                                CONTINUE CHAT
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="btnDeleteSession" title="Delete session from Cloudflare D1">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                DELETE
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="chat-container" id="chatContainer">
+                        <div class="empty-state" id="chatEmptyState">
+                            <div class="empty-icon">⚔️</div>
+                            <h3>No conversation recorded yet</h3>
+                            <p>Select a session on the left or run commands in the Agent Arena.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====================================================================
+             TAB 3: AGENTIC TRACE & EVENT REPLAY
+             ==================================================================== -->
+        <section class="tab-pane" id="traceTab">
+            <div class="trace-toolbar">
+                <div class="trace-filters">
+                    <button class="filter-chip active" data-filter="all">All Events</button>
+                    <button class="filter-chip" data-filter="tool">Tools</button>
+                    <button class="filter-chip" data-filter="model">Model</button>
+                    <button class="filter-chip" data-filter="task">Tasks & Plan</button>
+                    <button class="filter-chip" data-filter="verification">Verification</button>
+                </div>
+                <div class="trace-meta">
+                    <span id="eventCountDisplay">0 events loaded from D1</span>
+                </div>
+            </div>
+
+            <div class="timeline-container" id="timelineContainer">
+                <div class="empty-state">
+                    <div class="empty-icon">⚡</div>
+                    <h3>No trace events for this session</h3>
+                    <p>Agentic runtime events will appear here as Kratos executes autonomous steps.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====================================================================
+             TAB 4: D1 SQL PLAYGROUND
+             ==================================================================== -->
+        <section class="tab-pane" id="d1Tab">
+            <div class="sql-playground">
+                <div class="sql-top-bar">
+                    <div class="sql-presets">
+                        <span class="presets-lbl">Quick Queries:</span>
+                        <button class="preset-btn" data-sql="SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 10;">Recent Sessions</button>
+                        <button class="preset-btn" data-sql="SELECT id, session_id, turn_index, user_query, timestamp FROM turns ORDER BY timestamp DESC LIMIT 20;">Latest Turns</button>
+                        <button class="preset-btn" data-sql="SELECT kind, COUNT(*) as total_events FROM agentic_events GROUP BY kind ORDER BY total_events DESC;">Event Breakdown</button>
+                        <button class="preset-btn" data-sql="SELECT * FROM commands ORDER BY timestamp DESC LIMIT 15;">Shell Commands</button>
+                    </div>
+                </div>
+
+                <div class="editor-container">
+                    <textarea id="sqlEditor" spellcheck="false">SELECT id, title, model, updated_at, last_status FROM sessions ORDER BY updated_at DESC LIMIT 10;</textarea>
+                    <div class="editor-footer">
+                        <span class="editor-hint">Press <kbd>Ctrl+Enter</kbd> to execute</span>
+                        <button class="btn btn-vice" id="btnRunSql">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                            EXECUTE ON D1
+                        </button>
+                    </div>
+                </div>
+
+                <div class="sql-results-box">
+                    <div class="results-header">
+                        <span class="results-title">QUERY RESULTS</span>
+                        <span class="results-meta" id="sqlResultsMeta">Ready</span>
+                    </div>
+                    <div class="table-responsive" id="sqlTableContainer">
+                        <div class="sql-empty">Execute a query above to inspect Cloudflare D1 tables in real time.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Event Payload Inspector -->
+    <div class="modal-overlay" id="payloadModal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalEventTitle">Event Payload Inspector</h3>
+                <button class="modal-close" id="btnCloseModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre><code class="json-code" id="modalEventJson"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Tech Specs / Recruiter Highlight -->
+    <div class="modal-overlay" id="techSpecsModal">
+        <div class="modal-dialog modal-large">
+            <div class="modal-header">
+                <div class="modal-brand">
+                    <span class="spartan-icon">⚔️</span>
+                    <h3 class="modal-title">KRATOS AGENT · RECRUITER ARCHITECTURE BRIEF</h3>
+                </div>
+                <button class="modal-close" id="btnCloseTechSpecs">&times;</button>
+            </div>
+            <div class="modal-body tech-specs-body">
+                <div class="specs-grid">
+                    <div class="spec-card">
+                        <h4>🧠 Autonomous Agent Loop</h4>
+                        <p>Implements multi-step reasoning, intent classification, plan formulation, surgical file modifications, and self-healing error recovery loops without requiring human intervention.</p>
+                    </div>
+                    <div class="spec-card">
+                        <h4>🗄️ Cloudflare D1 Database</h4>
+                        <p>Serverless relational SQLite on Cloudflare's global edge network. Zero heavy drivers; connects via secure REST API with an automatic local SQLite mirror fallback.</p>
+                    </div>
+                    <div class="spec-card">
+                        <h4>⚡ Live Streaming & Tool Monitoring</h4>
+                        <p>Emits real-time Server-Sent Events (SSE) tracking <code>[tool call] inspecting file</code>, <code>[tool call] updating file</code>, and streaming LLM tokens.</p>
+                    </div>
+                    <div class="spec-card">
+                        <h4>🛡️ Zero External Dependencies</h4>
+                        <p>Web layer built with pure Python <code>http.server</code>, Vanilla CSS, and modern JavaScript. Extremely lightweight, reproducible, and fast.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

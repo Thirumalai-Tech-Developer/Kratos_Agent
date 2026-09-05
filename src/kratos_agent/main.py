@@ -78,7 +78,7 @@ class KratosRuntime:
 
     def _open_event_store(self) -> EventStore:
         session_id = self.memory.active_session.session_id if self.memory.active_session else "default"
-        return EventStore(self.workspace / ".kratos" / "sessions" / session_id)
+        return EventStore(self.workspace / ".kratos" / "sessions" / session_id, session_id=session_id, db=getattr(self.memory, "db", None))
 
     def activate_session(self) -> None:
         """Rebind runtime history and trace after the session manager switches sessions."""
@@ -168,7 +168,62 @@ class KratosRuntime:
         )
         return result
 
-    def run_agent(self, query: str) -> str:
+    def run_chat_restricted(self, query: str) -> str:
+        """Run Kratos in highly restricted Normal Chat Mode without VPS / autonomous tool execution."""
+        from kratos_agent.brain.config import get_normal_mode_model
+        from kratos_agent.core.event_bus import event_bus
+        from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
+
+        normal_model = get_normal_mode_model()
+        self._current_tool_calls = []
+        self._history.append(ChatMessage("user", query))
+
+        system_instruction = (
+            "You are Kratos, an elite AI assistant, operating in HIGHLY RESTRICTED AGENT MODE / NORMAL CHAT MODE.\n"
+            "Autonomous terminal execution and file-system modification tools are DISABLED because this session is hosted as a public web showcase without a VPS sandbox.\n"
+            "You can answer questions, discuss architecture, analyze code, write snippets, and chat helpfully in Kratos's signature sharp persona.\n"
+            "If the user asks you to inspect files, edit files, or execute shell commands, politely inform them:\n"
+            "\"Notice: Terminal and file-system agent tool execution is restricted in this hosted web preview (no VPS backend sandbox connected). I am operating in Normal Chat Mode. You can discuss code, architecture, and chat freely!\""
+        )
+
+        event_bus.publish(RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": True, "model": normal_model}))
+
+        messages = [{"role": msg.role, "content": msg.content} for msg in self._history]
+        response_chunks: List[str] = []
+
+        def on_chunk(chunk: str) -> None:
+            if chunk:
+                response_chunks.append(chunk)
+                event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": chunk}))
+
+        try:
+            full_text, _ = self.brain.client.complete(
+                model=normal_model,
+                messages=messages,
+                system_instruction=system_instruction,
+                tools=None,
+                stream=True,
+                on_chunk=on_chunk
+            )
+            result = full_text or "".join(response_chunks)
+        except Exception as ex:
+            result = f"I am running in static Normal Chat Mode without a connected VPS backend sandbox. (Error: {ex})"
+            event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": result}))
+
+        self._history.append(ChatMessage("assistant", result))
+
+        self.memory.record_turn(
+            query,
+            result,
+            [],
+            status="completed"
+        )
+        return result
+
+    def run_agent(self, query: str, agent_mode: bool = True) -> str:
+        if not agent_mode:
+            return self.run_chat_restricted(query)
+
         self._current_tool_calls = []
         self._history.append(ChatMessage("user", query))
         resume_plan = None

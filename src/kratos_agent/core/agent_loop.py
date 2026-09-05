@@ -18,46 +18,52 @@ from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
 
 
-def _format_tool_substep(name: str, args: Dict[str, Any]) -> str:
-    if name == "write_file":
-        fp = str(args.get("file_path", ""))
-        return f"Creating {fp}"
-    if name == "edit_file":
-        fp = str(args.get("file_path", ""))
-        return f"Updating {fp}"
+def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
+    """Formats a concise lowercase action string such as 'inspecting file'."""
     if name == "read_file":
-        fp = str(args.get("file_path", ""))
-        return f"Inspecting {fp}"
+        fp = str(args.get("file_path", "")).strip()
+        return f"inspecting {fp}" if fp else "inspecting file"
     if name == "list_directory":
-        path = str(args.get("directory_path", "") or args.get("path", "."))
-        return f"Inspecting {path}/"
+        path = str(args.get("directory_path", "") or args.get("path", ".")).strip()
+        return f"inspecting {path}/" if path and path != "." else "inspecting directory"
     if name == "grep_search":
-        q = str(args.get("query", ""))
-        return f"Searching for '{q[:30]}'"
+        q = str(args.get("query", "")).strip()
+        return f"searching for '{q[:30]}'" if q else "searching files"
+    if name == "edit_file":
+        fp = str(args.get("file_path", "")).strip()
+        return f"updating {fp}" if fp else "updating file"
+    if name == "write_file":
+        fp = str(args.get("file_path", "")).strip()
+        return f"creating {fp}" if fp else "creating file"
     if name == "run_terminal_command":
-        cmd = str(args.get("command", ""))
-        return f"Running {cmd[:45]}"
-    return f"Executing {name}"
+        cmd = str(args.get("command", "")).strip()
+        return f"running command {cmd[:45]}" if cmd else "running command"
+    return f"executing {name}"
+
+
+def _format_tool_substep(name: str, args: Dict[str, Any]) -> str:
+    action = format_tool_action_label(name, args)
+    return f"[tool call] {action}"
 
 
 def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -> str:
     if name == "write_file":
-        fp = str(args.get("file_path", ""))
-        return f"Created {fp}"
+        fp = str(args.get("file_path", "")).strip()
+        return f"[tool call] created {fp}" if fp else "[tool call] created file"
     if name == "edit_file":
-        fp = str(args.get("file_path", ""))
-        return f"Updated {fp}"
+        fp = str(args.get("file_path", "")).strip()
+        return f"[tool call] updated {fp}" if fp else "[tool call] updated file"
     if name == "read_file":
-        fp = str(args.get("file_path", ""))
-        return f"Inspected {fp}"
+        fp = str(args.get("file_path", "")).strip()
+        return f"[tool call] inspected {fp}" if fp else "[tool call] inspected file"
     if name == "list_directory":
-        return "Inspected directory structure"
+        return "[tool call] inspected directory"
     if name == "grep_search":
-        return "Search completed"
+        return "[tool call] search completed"
     if name == "run_terminal_command":
-        cmd = str(args.get("command", ""))
-        return f"Ran {cmd[:45]}"
-    return f"Completed {name}"
+        cmd = str(args.get("command", "")).strip()
+        return f"[tool call] ran {cmd[:45]}" if cmd else "[tool call] command executed"
+    return f"[tool call] completed {name}"
 
 
 class AgentLoop:
@@ -274,7 +280,9 @@ class AgentLoop:
                     changed = self.workspace_tracker.all_changed_files
                     verif_types = [t.verification for t in self.current_plan.tasks if getattr(t, "verification", "none") != "none"]
                     verif_type = "+".join(sorted(set(verif_types))) if verif_types else "auto"
-                    require_files = any(len(t.files_affected) > 0 for t in self.current_plan.tasks) or len(self.workspace_tracker.created_files) > 0 or any("file" in t.title.lower() or "scaffold" in t.title.lower() or "html" in t.title.lower() or "app" in t.title.lower() for t in self.current_plan.tasks)
+                    is_read_only_goal = any(kw in str(self.current_plan.goal or user_query).lower() for kw in ("read", "check", "inspect", "what is", "tell me", "explain", "find", "show", "search", "version"))
+                    is_mutation_task = any(any(kw in t.title.lower() for kw in ("create", "write", "edit", "modify", "scaffold", "html", "webapp", "build")) for t in self.current_plan.tasks)
+                    require_files = not is_read_only_goal and (is_mutation_task or len(self.workspace_tracker.created_files) > 0 or len(self.workspace_tracker.modified_files) > 0)
                     browser_done = any("browser" in e.get("kind", "").lower() for t in self.current_plan.tasks for e in t.evidence)
                     self.last_verification = self.verification_manager.verify_workspace(
                         changed,
@@ -293,7 +301,7 @@ class AgentLoop:
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
                     elif self.last_verification.passed and not require_files:
                         for t in self.current_plan.tasks:
-                            if t.has_evidence() and t.state != TaskState.COMPLETED:
+                            if t.state != TaskState.COMPLETED:
                                 t.complete("Completed")
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
 
@@ -379,9 +387,17 @@ class AgentLoop:
                         self.current_plan.update_task_activity(active_task.id, file_path=file_path, increment_tool=True)
                         self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
 
+                action_label = format_tool_action_label(call.name, call.arguments)
+                display_label = f"[tool call] {action_label}"
                 self.emit(RuntimeEvent(
                     EventKind.TOOL_CALL_STARTED,
-                    {"name": call.name, "arguments": call.arguments, "call_id": call.call_id},
+                    {
+                        "name": call.name,
+                        "arguments": call.arguments,
+                        "call_id": call.call_id,
+                        "action_label": action_label,
+                        "display": display_label,
+                    },
                     turn_id,
                 ))
                 if call.name == "run_terminal_command":

@@ -96,6 +96,8 @@ HELP_TEXT = """
   [bold cyan]/compact[/bold cyan]                 - Compress conversation context (alias: /compress)
   [bold cyan]/reload[/bold cyan]                  - Live hot-reload all code, tools & skills (alias: /r)
   [bold cyan]/memory[/bold cyan]                  - View persistent agentic memory & command log
+  [bold cyan]/web[/bold cyan] [dim][port][/dim]            - Launch interactive Cloudflare D1 Web Console & Trace viewer
+  [bold cyan]/d1[/bold cyan]                     - Inspect Cloudflare D1 connection, database stats & diagnostics
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
   [bold cyan]/debug[/bold cyan]                   - Inspect full execution/event trace from last turn
   [bold cyan]/debug live[/bold cyan]              - Toggle live step display on/off
@@ -159,6 +161,8 @@ class KratosCompleter(Completer):
         ("/compact", "Compress conversation history & optimize token context"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
+        ("/web", "Launch interactive Cloudflare D1 Web Console & Trace viewer"),
+        ("/d1", "Inspect Cloudflare D1 connection, database stats & diagnostics"),
         ("/accounts", "View Brain gateway configuration"),
         ("/health", "Check Brain gateway health status"),
         ("/debug", "Inspect full execution/event trace from last turn"),
@@ -451,6 +455,57 @@ def handle_memory_command():
 
     sessions_count = len(memory.data.get("sessions", []))
     console.print(f"[dim]Stored Turns: {sessions_count} | Memory File: .kratos/agent_memory.json[/dim]\n")
+
+
+def handle_web_command(arg: str = ""):
+    """Launches the Kratos Cloudflare D1 Web Console in browser."""
+    from kratos_agent.web.server import start_server
+    port = 7860
+    if arg.strip().isdigit():
+        port = int(arg.strip())
+
+    try:
+        start_server(port=port, open_browser=True, d1_db=runtime.d1_db, memory=memory, daemon=True)
+        console.print()
+        console.print(
+            Panel(
+                f"[bold green]✓ Kratos D1 Web Console active at:[/bold green] [bold cyan]http://127.0.0.1:{port}[/bold cyan]\n"
+                f"[dim]• Mode: {'Cloudflare D1 (Cloud)' if runtime.d1_db.is_remote else 'D1 SQLite Mirror (Local)'}\n"
+                f"• Inspect sessions, turns, tool-calls, and autonomous event traces in your browser.\n"
+                f"• Live SQL Playground enabled for Cloudflare D1 tables.[/dim]",
+                title="[bold gold1]⚡ CLOUDFLARE D1 WEB CONSOLE[/bold gold1]",
+                border_style="gold1",
+                padding=(1, 2)
+            )
+        )
+        console.print()
+    except Exception as e:
+        console.print(f"[bold red]❌ Failed to start web console:[/bold red] {e}\n")
+
+
+def handle_d1_command(arg: str = ""):
+    """Displays Cloudflare D1 connection, database stats & diagnostics."""
+    d1 = runtime.d1_db
+    stats = d1.get_stats()
+
+    table = Table(title="🗄️ Cloudflare D1 Database Diagnostics", border_style="gold1")
+    table.add_column("Property", style="bold gold1", width=22)
+    table.add_column("Value / Status", style="white")
+
+    mode_val = "[bold green]Cloudflare D1 (Cloud REST API)[/bold green]" if stats.get("mode") == "remote" else "[bold yellow]Local SQLite Mirror (.kratos/kratos_d1.db)[/bold yellow]"
+    table.add_row("Connection Mode", mode_val)
+    table.add_row("Database ID", f"[cyan]{stats.get('database_id') or 'local'}[/cyan]")
+    table.add_row("Sessions Stored", str(stats.get("sessions_count", 0)))
+    table.add_row("Turns Stored", str(stats.get("turns_count", 0)))
+    table.add_row("Trace Events", str(stats.get("events_count", 0)))
+    table.add_row("Commands Logged", str(stats.get("commands_count", 0)))
+
+    console.print()
+    console.print(table)
+    console.print("[dim]Use '/web' to open the interactive D1 Web Dashboard & SQL playground.[/dim]")
+    if not stats.get("configured"):
+        console.print("[dim]To connect to remote Cloudflare D1, set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID & CLOUDFLARE_API_TOKEN in .env.[/dim]")
+    console.print()
 
 
 def handle_accounts_command():
@@ -1125,6 +1180,18 @@ def start_interactive_cli():
 
             if user_input.lower() == "/memory":
                 handle_memory_command()
+                continue
+
+            if user_input.lower().startswith("/web"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_web_command(arg)
+                continue
+
+            if user_input.lower().startswith("/d1"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_d1_command(arg)
                 continue
 
             if user_input.lower() in ("/accounts", "/gateway"):

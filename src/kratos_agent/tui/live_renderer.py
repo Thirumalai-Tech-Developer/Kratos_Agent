@@ -219,6 +219,10 @@ class KratosLiveRenderer:
     # ── Event Interception Hook ────────────────────────────────────────────────
 
     def _hooked_emit(self, event: RuntimeEvent) -> None:
+        if getattr(self, "_last_handled_event", None) is event:
+            return
+        self._last_handled_event = event
+
         try:
             self.runtime._event_store.append(event)
         except Exception:
@@ -277,7 +281,21 @@ class KratosLiveRenderer:
         elif kind in (EventKind.TOOL_REQUESTED, EventKind.TOOL_CALL_STARTED):
             self._renderer.on_tool_requested(payload)
             name = payload.get("name", "tool")
-            self._status_bar.set_running_tool(name)
+            args = payload.get("arguments", {})
+            action_label = payload.get("action_label")
+            if not action_label:
+                from kratos_agent.core.agent_loop import format_tool_action_label
+                action_label = format_tool_action_label(name, args)
+            display = payload.get("display") or f"[tool call] {action_label}"
+            self._status_bar.set_thinking(display)
+            if self._live is not None:
+                try:
+                    self._live.console.print(f"[bold cyan]\\[tool call][/bold cyan] [white]{action_label}[/white]")
+                except Exception:
+                    pass
+            elif not self.live_mode or not self._is_tty:
+                from .stream_printer import plain_print
+                plain_print(display)
         elif kind == EventKind.TOOL_COMPLETED:
             self._renderer.on_tool_completed(payload, failed=False)
             self._status_bar.set_thinking("Processing…")

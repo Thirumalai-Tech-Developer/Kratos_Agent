@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kratos-agent",
+  "main": "worker.js",
+  "compatibility_date": "2024-09-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./src/kratos_agent/web",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kratos",
+      "database_id": "0e785bd7-3efa-435a-bed6-d205d849d9d7"
+    }
+  ],
+  "vars": {
+    "NORMAL_MODE_MODEL": "deepseek-web/deepseek-v4-pro",
+    "AGENT_MODEL": "antigravity/gemini-3.7-flash-high"
+  }
+}

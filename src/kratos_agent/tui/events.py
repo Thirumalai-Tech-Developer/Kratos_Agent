@@ -189,12 +189,13 @@ class EventRenderer:
         self.steps.append(step)
         self._open_tool_steps[call_id] = idx
 
-        if name == "write_file":
-            self.thinking_label = f"Writing {args.get('file_path', '')}…"
-        elif name == "edit_file":
-            self.thinking_label = f"Editing {args.get('file_path', '')}…"
-        elif name == "run_terminal_command":
-            self.thinking_label = f"Running command…"
+        display = payload.get("display")
+        action_label = payload.get("action_label")
+        if not display:
+            from kratos_agent.core.agent_loop import format_tool_action_label
+            action = action_label or format_tool_action_label(name, args)
+            display = f"[tool call] {action}"
+        self.thinking_label = display
 
     def on_tool_completed(self, payload: Dict[str, Any], failed: bool = False) -> None:
         call_id = payload.get("call_id", "")

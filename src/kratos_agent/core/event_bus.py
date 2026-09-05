@@ -72,6 +72,9 @@ class EventBus:
             self._listeners.clear()
             self._kind_listeners.clear()
 
+    # Convenience alias for publish
+    emit = publish
+
 
 # Global default event bus
 event_bus = EventBus()

@@ -135,6 +135,11 @@ def get_default_model() -> str:
     )
 
 
+def get_normal_mode_model() -> str:
+    """Returns the configured model name for normal chat mode."""
+    return os.getenv("NORMAL_MODE_MODEL") or "deepseek-web/deepseek-v4-pro"
+
+
 def get_request_timeout() -> float:
     """Returns the request timeout in seconds."""
     raw = (

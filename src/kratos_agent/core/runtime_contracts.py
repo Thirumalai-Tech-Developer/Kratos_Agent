@@ -114,8 +114,8 @@ class ModelResponse:
 @dataclass
 class RuntimeEvent:
     kind: EventKind
-    payload: Dict[str, Any]
-    turn_id: str
+    payload: Dict[str, Any] = field(default_factory=dict)
+    turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:

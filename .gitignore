@@ -44,10 +44,20 @@ client_id*.json
 *.pfx
 
 
+# Cloudflare Wrangler
+.wrangler/
+worker-configuration.d.ts
+*.sqlite
+*.sqlite3
+
 # Kratos runtime state & session memory
-.kratos/sessions/
-.kratos/temp/
-.kratos/agent_memory.json
+.kratos/
+*.db
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Temporary generated artifacts
 *.pptx
@@ -76,3 +86,6 @@ Thumbs.db
 desktop.ini
 ben10_app
 tests
+
+# Gitignore
+.gitignore

@@ -30,10 +30,13 @@ def is_no_color() -> bool:
 
 
 def plain_print(text: str, file=None) -> None:
-    """Print stripped plain text (no Rich markup), always to stdout."""
-    # Strip Rich markup tags
+    """Print stripped plain text (no Rich style markup), always to stdout."""
     import re
-    clean = re.sub(r"\[/?[^\[\]]+\]", "", text)
+    clean = re.sub(
+        r"\[/?(?:bold|dim|italic|underline|reverse|strike|red|green|yellow|blue|magenta|cyan|white|black|gold\d*|#[0-9a-fA-F]{3,8})(?:\s+[^\]]*)?\]",
+        "",
+        text,
+    )
     print(clean, file=file or sys.stdout, flush=True)
 
 
