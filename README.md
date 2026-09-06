@@ -311,7 +311,7 @@ Edit `.env`:
 ```env
 CHAT_ENDPOINT="http://138.252.100.105:20128/v1/chat/completions"
 MODEL_ENDPOINT="http://138.252.100.105:20128/v1/models"
-OMNI_KEY="sk-83463e3b38939d25-b68891-a1693fd2"
+OMNI_KEY="Your_API_Key"
 BRAIN_BASE_URL="http://138.252.100.105:20128/v1"
 BRAIN_MODEL="ds-web/DeepSeek-V3.2"
 NORMAL_MODE_MODEL="ds-web/DeepSeek-V3.2"
