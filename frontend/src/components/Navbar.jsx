@@ -34,8 +34,8 @@ export default function Navbar({
 
   return (
     <header className="sticky top-0 z-40 w-full glass-panel border-b border-pink-500/20 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20 gap-2 sm:gap-3">
+      <div className="max-w-[1600px] mx-auto px-3 sm:px-5 lg:px-8 w-full">
+        <div className="flex items-center justify-between h-16 sm:h-20 gap-1.5 sm:gap-3">
           
           {/* Brand Identity */}
           <div 
@@ -59,14 +59,14 @@ export default function Navbar({
                   VICE CYBERPUNK
                 </span>
               </div>
-              <p className="text-[10px] sm:text-[11px] font-rajdhani font-medium text-slate-400 hidden md:block truncate max-w-[280px] lg:max-w-none">
+              <p className="text-[10px] sm:text-[11px] font-rajdhani font-medium text-slate-400 hidden xl:block truncate max-w-[240px] 2xl:max-w-none">
                 Autonomous Protocol & Cloudflare D1 Intelligence
               </p>
             </div>
           </div>
 
           {/* Center Telemetry Card (Wide screens) */}
-          <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 rounded-lg glass-card border border-white/10 flex-shrink-0">
+          <div className="hidden xl:flex items-center gap-2.5 px-2.5 py-1 rounded-lg glass-card border border-white/10 flex-shrink-0">
             <div className="flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -82,26 +82,26 @@ export default function Navbar({
               <span className="text-[#00f3ff] font-semibold">{stats?.latency_ms ?? 14}ms</span>
               <span className="text-slate-600">/</span>
               <span className="text-slate-500 font-pixl">DB:</span>
-              <span className="text-slate-300 truncate max-w-[80px]">{stats?.database_id ?? 'bound'}</span>
+              <span className="text-slate-300 truncate max-w-[70px]">{stats?.database_id ?? 'bound'}</span>
             </div>
           </div>
 
-          {/* Real-time Stats Pills (2XL screens) */}
-          <div className="hidden 2xl:flex items-center gap-2 text-xs font-rajdhani flex-shrink-0">
-            <div className="px-2.5 py-1 rounded-md glass-card flex items-center gap-1.5 text-slate-300">
+          {/* Real-time Stats Pills (2XL screens >= 1536px) */}
+          <div className="hidden 2xl:flex items-center gap-1.5 text-xs font-rajdhani flex-shrink-0">
+            <div className="px-2 py-0.5 rounded-md glass-card flex items-center gap-1 text-slate-300">
               <Database className="w-3.5 h-3.5 text-pink-400" />
               <span className="font-pixl font-bold text-white">{stats?.sessions_count ?? 0}</span>
-              <span className="text-[10px] text-slate-400">SESSIONS</span>
+              <span className="text-[9px] text-slate-400">SESSIONS</span>
             </div>
-            <div className="px-2.5 py-1 rounded-md glass-card flex items-center gap-1.5 text-slate-300">
+            <div className="px-2 py-0.5 rounded-md glass-card flex items-center gap-1 text-slate-300">
               <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
               <span className="font-pixl font-bold text-white">{stats?.turns_count ?? 0}</span>
-              <span className="text-[10px] text-slate-400">TURNS</span>
+              <span className="text-[9px] text-slate-400">TURNS</span>
             </div>
-            <div className="px-2.5 py-1 rounded-md glass-card flex items-center gap-1.5 text-slate-300">
+            <div className="px-2 py-0.5 rounded-md glass-card flex items-center gap-1 text-slate-300">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
               <span className="font-pixl font-bold text-white">{stats?.events_count ?? 0}</span>
-              <span className="text-[10px] text-slate-400">EVENTS</span>
+              <span className="text-[9px] text-slate-400">EVENTS</span>
             </div>
           </div>
 

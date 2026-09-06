@@ -32,6 +32,8 @@ venv.bak/
 .env
 .env.*
 *.env
+.dev.vars
+.dev.vars.*
 accounts.json
 creds.json
 current_account.json

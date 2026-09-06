@@ -397,7 +397,7 @@ export default function App() {
 
       {/* Navigation Tabs Bar */}
       <div className="w-full bg-[#0b0616] border-b border-pink-500/15 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto flex items-center justify-between overflow-x-auto scrollbar-none">
+        <div className="max-w-[1600px] mx-auto flex items-center justify-between overflow-x-auto scrollbar-none">
           <div className="flex items-center gap-1 sm:gap-2 py-2">
             <button
               onClick={() => setActiveTab('arena')}
@@ -466,11 +466,11 @@ export default function App() {
       }} />
 
       {/* Main Workspace Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-hidden flex flex-col">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-5 overflow-hidden flex flex-col min-w-0">
         {activeTab === 'arena' && (
-          <div className="flex-1 flex flex-col lg:flex-row gap-4 sm:gap-6 min-h-[580px] h-[calc(100vh-210px)]">
+          <div className="flex-1 flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 min-h-0 h-[calc(100vh-200px)] w-full min-w-0 overflow-hidden">
             {/* Arena Chat Panel */}
-            <div className="flex-1 h-full min-h-0">
+            <div className="flex-1 min-w-0 h-full min-h-0 overflow-hidden flex flex-col">
               <AgentArena
                 messages={messages}
                 inputPrompt={inputPrompt}

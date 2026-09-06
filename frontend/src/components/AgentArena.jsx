@@ -32,7 +32,7 @@ export default function AgentArena({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
+    <div className="flex flex-col h-full w-full min-w-0 bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
       
       {/* Arena Stream Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-[#0d071a] border-b border-pink-500/15">
@@ -63,7 +63,7 @@ export default function AgentArena({
       </div>
 
       {/* Messages Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0">
         {messages.length === 0 ? (
           /* Welcome Card with Generated Banner */
           <div className="relative rounded-2xl overflow-hidden border border-pink-500/30 glass-panel p-6 sm:p-8 max-w-3xl mx-auto my-auto shadow-2xl">
@@ -129,7 +129,7 @@ export default function AgentArena({
           messages.map((msg, index) => (
             <div 
               key={index}
-              className={`flex gap-3 sm:gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
+              className={`flex gap-2.5 sm:gap-3.5 w-full min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
             >
               {/* Agent Avatar */}
               {msg.role !== 'user' && (
@@ -145,7 +145,7 @@ export default function AgentArena({
               )}
 
               {/* Message Bubble */}
-              <div className={`max-w-[88%] sm:max-w-[80%] rounded-2xl p-4 sm:p-5 shadow-xl ${
+              <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 overflow-hidden rounded-2xl p-3.5 sm:p-5 shadow-xl ${
                 msg.role === 'user' 
                   ? 'bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 text-slate-100 rounded-tr-sm' 
                   : 'glass-card border-slate-700/60 text-slate-100 rounded-tl-sm'
@@ -171,7 +171,7 @@ export default function AgentArena({
                 </div>
 
                 {/* Content */}
-                <div className="prose prose-invert max-w-none text-sm leading-relaxed">
+                <div className="prose prose-invert max-w-none text-sm leading-relaxed min-w-0 w-full overflow-x-auto break-words">
                   <MarkdownRenderer 
                     content={msg.content} 
                     isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user'} 

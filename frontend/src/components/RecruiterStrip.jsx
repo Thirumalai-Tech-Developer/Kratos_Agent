@@ -27,7 +27,7 @@ const SHORTCUTS = [
 export default function RecruiterStrip({ onSelectPrompt }) {
   return (
     <div className="w-full bg-[#0d071a]/90 border-b border-pink-500/15 px-4 sm:px-6 lg:px-8 py-2.5">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
+      <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
         
         {/* Label */}
         <div className="flex items-center gap-2 text-xs font-pixl font-bold text-slate-300 tracking-wider whitespace-nowrap">

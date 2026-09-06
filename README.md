@@ -309,12 +309,12 @@ cp .env.example .env
 ```
 Edit `.env`:
 ```env
-CHAT_ENDPOINT="http://138.252.100.105:20128/v1/chat/completions"
-MODEL_ENDPOINT="http://138.252.100.105:20128/v1/models"
+CHAT_ENDPOINT="API_Provider_Endpoint_For_Chat"
+MODEL_ENDPOINT="API_Provider_Endpoint_For_Model"
 OMNI_KEY="Your_API_Key"
-BRAIN_BASE_URL="http://138.252.100.105:20128/v1"
-BRAIN_MODEL="ds-web/DeepSeek-V3.2"
-NORMAL_MODE_MODEL="ds-web/DeepSeek-V3.2"
+BRAIN_BASE_URL="API_Provider_Base_Endpoint"
+BRAIN_MODEL="Your_Model_Name"
+NORMAL_MODE_MODEL="Your_Model_Name"
 AGENT_PASSWORD="kratos"
 ```
 

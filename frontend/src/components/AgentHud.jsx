@@ -25,7 +25,7 @@ export default function AgentHud({
   const isVerifying = stepKind.includes('verify') || stepKind.includes('test');
 
   const hudContent = (
-    <div className="flex flex-col h-full space-y-4 overflow-y-auto scrollbar-thin pr-1">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 overflow-y-auto overflow-x-hidden scrollbar-thin pr-1 w-full min-w-0">
       
       {/* Gauge 1: Current Step Meter */}
       <div className="p-4 rounded-xl glass-panel border border-pink-500/20">
@@ -143,13 +143,13 @@ export default function AgentHud({
             filteredTools.map((t, idx) => (
               <div 
                 key={idx} 
-                className="p-2 rounded-lg bg-black/30 border border-white/5 hover:border-pink-500/30 transition text-xs"
+                className="p-2 rounded-lg bg-black/30 border border-white/5 hover:border-pink-500/30 transition text-xs min-w-0 overflow-hidden"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-code font-semibold text-slate-200 text-[11px] truncate">
+                <div className="flex items-center justify-between gap-1 min-w-0">
+                  <span className="font-code font-semibold text-slate-200 text-[11px] truncate min-w-0">
                     {t.name}
                   </span>
-                  <span className={`text-[9px] font-rajdhani font-bold px-1.5 py-0.2 rounded uppercase ${
+                  <span className={`text-[9px] font-rajdhani font-bold px-1.5 py-0.2 rounded uppercase flex-shrink-0 ${
                     t.permission === 'execute' 
                       ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' 
                       : t.permission === 'write' 
@@ -159,7 +159,7 @@ export default function AgentHud({
                     {t.permission || 'read'}
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">
+                <p className="text-[10px] text-slate-400 mt-1 line-clamp-1 truncate min-w-0">
                   {t.description}
                 </p>
               </div>
@@ -174,19 +174,19 @@ export default function AgentHud({
           SYSTEM TELEMETRY
         </div>
         <div className="grid grid-cols-2 gap-2 text-[11px] font-code">
-          <div className="p-2 rounded bg-black/40 border border-white/5">
+          <div className="p-2 rounded bg-black/40 border border-white/5 min-w-0 overflow-hidden">
             <span className="text-slate-500 block text-[9px]">RUNTIME:</span>
             <span className="text-amber-400 font-semibold truncate block">KratosAutonomous</span>
           </div>
-          <div className="p-2 rounded bg-black/40 border border-white/5">
+          <div className="p-2 rounded bg-black/40 border border-white/5 min-w-0 overflow-hidden">
             <span className="text-slate-500 block text-[9px]">WORKSPACE:</span>
             <span className="text-slate-300 font-semibold truncate block">Kratos_Agent</span>
           </div>
-          <div className="p-2 rounded bg-black/40 border border-white/5">
+          <div className="p-2 rounded bg-black/40 border border-white/5 min-w-0 overflow-hidden">
             <span className="text-slate-500 block text-[9px]">STORAGE:</span>
             <span className="text-cyan-400 font-semibold truncate block">Cloudflare D1</span>
           </div>
-          <div className="p-2 rounded bg-black/40 border border-white/5">
+          <div className="p-2 rounded bg-black/40 border border-white/5 min-w-0 overflow-hidden">
             <span className="text-slate-500 block text-[9px]">GATEWAY:</span>
             <span className="text-emerald-400 font-semibold truncate block">Socket Tunnel</span>
           </div>
@@ -199,7 +199,7 @@ export default function AgentHud({
   return (
     <>
       {/* Desktop Persistent / Docked Panel */}
-      <aside className="hidden lg:block w-80 xl:w-96 flex-shrink-0 h-full">
+      <aside className="hidden lg:block w-72 xl:w-80 flex-shrink-0 h-full min-w-0 overflow-hidden">
         {hudContent}
       </aside>
 
