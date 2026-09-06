@@ -477,6 +477,37 @@
         </div>
     </div>
 
+    <!-- Modal for Commander Passcode / Unlock Agent Mode -->
+    <div class="modal-overlay" id="agentAuthModal">
+        <div class="modal-dialog auth-modal-dialog">
+            <div class="modal-header auth-modal-header">
+                <div class="modal-brand">
+                    <span class="spartan-icon">🛡️</span>
+                    <h3 class="modal-title">COMMANDER SECURITY CLEARANCE</h3>
+                </div>
+                <button class="modal-close" id="btnCloseAgentAuth">&times;</button>
+            </div>
+            <div class="modal-body auth-modal-body">
+                <div class="auth-icon-badge">🔒</div>
+                <div class="auth-prompt-title">AUTONOMOUS AGENT MODE LOCKED</div>
+                <p class="auth-desc">Autonomous file modifications and terminal command execution require Commander Authorization Passcode.</p>
+                <div class="auth-input-wrapper">
+                    <input type="password" id="agentPasswordInput" class="auth-pass-input" placeholder="Enter commander passcode..." autocomplete="current-password">
+                    <button class="btn-toggle-pwd" id="btnTogglePwdView" type="button" title="Show/Hide Passcode">👁️</button>
+                </div>
+                <div class="auth-error-msg d-none" id="agentAuthError">ACCESS DENIED // Invalid Passcode</div>
+                <div class="auth-actions">
+                    <button class="btn btn-secondary" id="btnCancelAgentAuth">CANCEL</button>
+                    <button class="btn btn-vice" id="btnSubmitAgentAuth">
+                        <span>AUTHENTICATE & UNLOCK</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+                <div class="auth-hint">Default clearance passcode: <code>kratos</code></div>
+            </div>
+        </div>
+    </div>
+
     <script src="/app.js"></script>
 </body>
 </html>

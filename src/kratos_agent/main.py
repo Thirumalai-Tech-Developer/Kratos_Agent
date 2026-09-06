@@ -186,7 +186,9 @@ class KratosRuntime:
             "\"Notice: Terminal and file-system agent tool execution is restricted in this hosted web preview (no VPS backend sandbox connected). I am operating in Normal Chat Mode. You can discuss code, architecture, and chat freely!\""
         )
 
-        event_bus.publish(RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": True, "model": normal_model}))
+        start_evt = RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": True, "model": normal_model})
+        event_bus.publish(start_evt)
+        self._emit(start_evt)
 
         messages = [{"role": msg.role, "content": msg.content} for msg in self._history]
         response_chunks: List[str] = []
@@ -218,6 +220,9 @@ class KratosRuntime:
             [],
             status="completed"
         )
+        done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": "completed", "preview": result[:150]})
+        event_bus.publish(done_evt)
+        self._emit(done_evt)
         return result
 
     def run_agent(self, query: str, agent_mode: bool = True) -> str:
@@ -245,6 +250,9 @@ class KratosRuntime:
             verification_status=verif_dict,
             status=status
         )
+        done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": status, "preview": result[:150]})
+        event_bus.publish(done_evt)
+        self._emit(done_evt)
         return result
 
     def debug_context(self) -> Dict[str, Any]:

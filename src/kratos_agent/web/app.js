@@ -114,7 +114,16 @@
         modalEventJson: document.getElementById('modalEventJson'),
         btnCloseModal: document.getElementById('btnCloseModal'),
         techSpecsModal: document.getElementById('techSpecsModal'),
-        btnCloseTechSpecs: document.getElementById('btnCloseTechSpecs')
+        btnCloseTechSpecs: document.getElementById('btnCloseTechSpecs'),
+
+        // Commander Security Clearance Modal
+        agentAuthModal: document.getElementById('agentAuthModal'),
+        btnCloseAgentAuth: document.getElementById('btnCloseAgentAuth'),
+        btnCancelAgentAuth: document.getElementById('btnCancelAgentAuth'),
+        btnSubmitAgentAuth: document.getElementById('btnSubmitAgentAuth'),
+        agentPasswordInput: document.getElementById('agentPasswordInput'),
+        btnTogglePwdView: document.getElementById('btnTogglePwdView'),
+        agentAuthError: document.getElementById('agentAuthError')
     };
 
     // Initialize Application
@@ -270,17 +279,138 @@
             if (e.key === 'Escape') {
                 el.payloadModal.classList.remove('open');
                 el.techSpecsModal.classList.remove('open');
+                closeAgentAuthModal();
             }
         });
+
+        // Commander Passcode Modal Event Listeners
+        if (el.btnCloseAgentAuth) {
+            el.btnCloseAgentAuth.addEventListener('click', closeAgentAuthModal);
+        }
+        if (el.btnCancelAgentAuth) {
+            el.btnCancelAgentAuth.addEventListener('click', closeAgentAuthModal);
+        }
+        if (el.btnSubmitAgentAuth) {
+            el.btnSubmitAgentAuth.addEventListener('click', submitAgentAuth);
+        }
+        if (el.agentPasswordInput) {
+            el.agentPasswordInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    submitAgentAuth();
+                }
+            });
+        }
+        if (el.btnTogglePwdView && el.agentPasswordInput) {
+            el.btnTogglePwdView.addEventListener('click', () => {
+                const isPass = el.agentPasswordInput.type === 'password';
+                el.agentPasswordInput.type = isPass ? 'text' : 'password';
+                el.btnTogglePwdView.textContent = isPass ? '🔒' : '👁️';
+            });
+        }
+        if (el.agentAuthModal) {
+            el.agentAuthModal.addEventListener('click', (e) => {
+                if (e.target === el.agentAuthModal) closeAgentAuthModal();
+            });
+        }
     }
 
     // ==========================================================================
-    // AGENT MODE CONTROLLER (ON: Autonomous Tools / OFF: Static Normal Chat)
+    // AGENT MODE CONTROLLER (Passcode-Protected Autonomous Mode)
     // ==========================================================================
 
     function toggleAgentMode() {
-        state.isAgentMode = !state.isAgentMode;
-        updateAgentModeUI(true);
+        if (state.isAgentMode) {
+            // Turning OFF Agent Mode: single click, immediate deactivation
+            state.isAgentMode = false;
+            updateAgentModeUI(true);
+            showToast('Autonomous Agent Mode deactivated · Restricted Chat active', 'info');
+        } else {
+            // Turning ON Agent Mode: requires Commander Authorization Passcode
+            openAgentAuthModal();
+        }
+    }
+
+    function openAgentAuthModal() {
+        if (!el.agentAuthModal) {
+            state.isAgentMode = true;
+            updateAgentModeUI(false);
+            return;
+        }
+        if (el.agentPasswordInput) {
+            el.agentPasswordInput.value = '';
+            el.agentPasswordInput.classList.remove('shake');
+        }
+        if (el.agentAuthError) {
+            el.agentAuthError.classList.add('d-none');
+        }
+        el.agentAuthModal.classList.add('open');
+        setTimeout(() => {
+            if (el.agentPasswordInput) el.agentPasswordInput.focus();
+        }, 80);
+    }
+
+    function closeAgentAuthModal() {
+        if (el.agentAuthModal) {
+            el.agentAuthModal.classList.remove('open');
+        }
+        if (el.agentPasswordInput) {
+            el.agentPasswordInput.value = '';
+        }
+        if (el.agentAuthError) {
+            el.agentAuthError.classList.add('d-none');
+        }
+    }
+
+    async function submitAgentAuth() {
+        const pwd = el.agentPasswordInput ? el.agentPasswordInput.value.trim() : '';
+        if (!pwd) {
+            showAuthError('Please enter commander passcode');
+            return;
+        }
+
+        let authorized = false;
+        try {
+            const res = await fetch('/api/auth/agent-mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pwd })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                authorized = Boolean(data.success);
+            } else if (res.status === 401 || res.status === 403) {
+                authorized = false;
+            } else {
+                // Fallback for static demo environments without custom endpoint
+                authorized = (pwd.toLowerCase() === 'kratos');
+            }
+        } catch (_) {
+            authorized = (pwd.toLowerCase() === 'kratos');
+        }
+
+        if (authorized) {
+            closeAgentAuthModal();
+            state.isAgentMode = true;
+            updateAgentModeUI(false);
+            showToast('🛡️ Clearance granted · Autonomous Agent Mode unlocked!', 'success');
+        } else {
+            showAuthError('ACCESS DENIED // Invalid Passcode');
+        }
+    }
+
+    function showAuthError(msg) {
+        if (el.agentAuthError) {
+            el.agentAuthError.textContent = msg;
+            el.agentAuthError.classList.remove('d-none');
+        }
+        if (el.agentPasswordInput) {
+            el.agentPasswordInput.classList.remove('shake');
+            void el.agentPasswordInput.offsetWidth; // trigger reflow
+            el.agentPasswordInput.classList.add('shake');
+            el.agentPasswordInput.focus();
+            el.agentPasswordInput.select();
+        }
     }
 
     function updateAgentModeUI(showPopoverIfStatic = false) {

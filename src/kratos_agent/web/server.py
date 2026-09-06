@@ -125,6 +125,9 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         elif path == "/api/query":
             self._handle_sql_query(payload)
             return
+        elif path == "/api/auth/agent-mode":
+            self._handle_auth_agent_mode(payload)
+            return
 
         self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -314,6 +317,16 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_auth_agent_mode(self, payload: Dict[str, Any]) -> None:
+        """Verifies commander security clearance passcode to unlock Autonomous Agent Mode."""
+        import os
+        password = str(payload.get("password", "")).strip()
+        expected = os.environ.get("AGENT_PASSWORD", "kratos").strip()
+        if password == expected:
+            self._send_json({"success": True, "message": "Security clearance granted"})
+        else:
+            self._send_json({"success": False, "error": "ACCESS DENIED // Invalid Passcode"}, status=HTTPStatus.UNAUTHORIZED)
 
     # ── REST API Handlers ──────────────────────────────────────────────────────
 
