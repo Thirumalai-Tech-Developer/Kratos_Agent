@@ -1,19 +1,23 @@
 <div align="center">
 
-<img src="kratos_banner.png" alt="Kratos Agent Banner" width="100%" />
+<img src="kratos_banner.png" alt="Kratos Agent - Vice Cyberpunk Edition" width="100%" />
 
-# ⚔️ KRATOS AGENT
+# ⚔️ KRATOS AGENT // VICE CYBERPUNK EDITION
 
 ### *"Do not be sorry. Be better."* — Ghost of Sparta
 
-**Autonomous Terminal AI Coding Agent with Universal LLM Brain, Real-Time Planning, Autonomous Tool Forging, Multi-Session Memory, and Senior Claude Code Engineering Workflows.**
+**Autonomous Full-Stack AI Coding Agent featuring Universal LLM Brain, Real-Time Token Streaming, Dynamic Step Planning, Self-Forging Tool Engine, Multi-Session D1 Memory, and Senior Claude Code Engineering Workflows.**
 
-[![Python](https://img.shields.io/badge/Python-3.14%2B-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9.svg)](https://github.com/astral-sh/uv)
+[![React](https://img.shields.io/badge/Frontend-React%2019%20%2B%20Vite%208-00f0ff.svg)](https://vitejs.dev/)
+[![Cloudflare](https://img.shields.io/badge/Edge-Cloudflare%20Workers%20%2B%20D1-f38020.svg)](https://workers.cloudflare.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Prompts](https://img.shields.io/badge/Claude%20Code%20Prompts-695%2B-red.svg)](https://github.com/Piebald-AI/claude-code-system-prompts)
-[![Skills](https://img.shields.io/badge/Skills-148%2B-gold.svg)](#-skills-ecosystem)
-[![Tests](https://img.shields.io/badge/tests-48%20passing-brightgreen.svg)](#-testing--quality-assurance)
+[![Prompts](https://img.shields.io/badge/Claude%20Code%20Prompts-695%2B-ff007f.svg)](https://github.com/Piebald-AI/claude-code-system-prompts)
+[![Skills](https://img.shields.io/badge/Skills-140%2B-gold.svg)](#-skills-ecosystem)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#-testing--quality-assurance)
+
+[🌐 Live Cloudflare Web Version](https://kratos-agent.thirutechdeveloper.workers.dev) • [🎮 Quickstart](#-quickstart-cli-version-vs-web-version) • [🖥️ CLI Version](#️-cli-version-usage) • [🌐 Web Version](#-web-version-usage) • [📜 Slash Commands](#-complete-cli-slash-commands-reference)
 
 </div>
 
@@ -22,57 +26,173 @@
 ## 📑 Table of Contents
 
 - [⚡ Overview](#-overview)
+- [🎮 Quickstart: CLI Version vs Web Version](#-quickstart-cli-version-vs-web-version)
+  - [🖥️ 1. CLI Version (Terminal Shell & One-Shot Mode)](#️-1-cli-version-terminal-shell--one-shot-mode)
+  - [🌐 2. Web Version (Vice City Cyberpunk Console)](#-2-web-version-vice-city-cyberpunk-console)
+  - [☁️ 3. Cloudflare Edge Version (Live Serverless Web App)](#️-3-cloudflare-edge-version-live-serverless-web-app)
 - [🚀 Key Features](#-key-features)
-- [🧠 The Brain Subsystem & Gateway](#-the-brain-subsystem--gateway)
+- [🧠 The Brain Subsystem & Streaming Gateway](#-the-brain-subsystem--streaming-gateway)
 - [⚙️ Architecture & Execution Pipeline](#️-architecture--execution-pipeline)
-- [📦 Installation & Quickstart](#-installation--quickstart)
+- [📦 Installation & Environment Setup](#-installation--environment-setup)
+- [🔑 Configuration & Environment Variables (.env)](#-configuration--environment-variables-env)
 - [🖥️ Standalone Windows Executable (.exe)](#️-standalone-windows-executable-exe)
-- [🔑 Configuration & Environment Variables](#-configuration--environment-variables)
 - [📜 Complete CLI Slash Commands Reference](#-complete-cli-slash-commands-reference)
 - [🛡️ Execution & Approval Modes](#️-execution--approval-modes)
 - [🗡️ Autonomous Tool Forging](#️-autonomous-tool-forging)
 - [🧪 Testing & Quality Assurance](#-testing--quality-assurance)
 - [🏗️ Directory Structure](#️-directory-structure)
-- [🤝 Contributing & License](#-contributing--license)
+- [🛡️ License](#️-license)
 
 ---
 
 ## ⚡ Overview
 
-**Kratos Agent** is an autonomous terminal AI engineer designed for deep developer autonomy, workspace engineering, and shell execution. It executes multi-step plans, writes full-stack applications, creates its own tools dynamically on demand, and includes the complete **Claude Code System Prompts & Sub-Agents suite** (695+ system prompts, sub-agents, data protocols, and tools).
+**Kratos Agent** is a dual-interface autonomous AI coding agent designed for senior developer workflows, workspace mutation, and shell execution. It operates both as a high-octane **Interactive Terminal CLI** and as a **Vice City Cyberpunk Web Console** with true real-time token-by-token streaming, Cloudflare D1 persistence, and live tool orchestration.
 
-Unlike basic code chatbots, Kratos functions as a true autonomous agent:
-- **Formulates Dynamic Step Plans**: Breaks complex goals into actionable, verifiable subtasks with real-time state tracking.
-- **Inspects & Modifies Files**: Reads, edits, rewrites, and searches workspaces using localized context and grep tools.
-- **Executes Terminal Commands**: Runs build scripts, package managers, development servers, test suites, and diagnostic checks directly.
-- **Verifies Output**: Tests created code, validates syntax, inspects git diffs, and ensures error-free deliverables before concluding.
-- **Universal Model Gateway**: Connects directly to local Brain / OpenAI-compatible gateways with zero proxy interference.
+Equipped with the complete **Claude Code System Prompts & Sub-Agents suite** (695+ indexed prompts, workflows, and sub-agents), Kratos delivers:
+- **True Autonomous Planning**: Breaks complex tasks into verifiable sub-goals with dynamic state machines (`PENDING` → `RUNNING` → `COMPLETED`).
+- **Real-Time Token Streaming**: True SSE incremental token streaming across both local Python runtime and Cloudflare Edge Worker (`cloudflare:sockets`).
+- **Workspace File Operations**: Inspects, searches, creates, and surgical-edits files with localized context.
+- **Terminal Execution & Verification**: Executes tests, compiles code, runs linters, and verifies deliverables before completing turns.
+- **Self-Forging Tool Engine**: Synthesizes and hot-reloads new Python tools at runtime when needed.
+- **Persistent Multi-Session Memory**: Isolated local SQLite session files and Cloudflare D1 database storage.
+
+---
+
+## 🎮 Quickstart: CLI Version vs Web Version
+
+Kratos Agent can be launched in **CLI Mode** for terminal enthusiasts or **Web Mode** for a rich graphical experience:
+
+```
+                               ┌─────────────────────────────┐
+                               │     uv run kratos / CLI     │
+                               └──────────────┬──────────────┘
+                                              │
+                     ┌────────────────────────┴────────────────────────┐
+                     ▼                                                 ▼
+        ┌───────────────────────────┐                     ┌───────────────────────────┐
+        │   🖥️  CLI VERSION         │                     │   🌐  WEB VERSION         │
+        │   uv run kratos --cli     │                     │   uv run kratos           │
+        ├───────────────────────────┤                     ├───────────────────────────┤
+        │ • Interactive prompt shell│                     │ • Vice Cyberpunk 2077 UI  │
+        │ • Live Task Tree TUI      │                     │ • Live Token Streaming    │
+        │ • 30+ Slash Commands      │                     │ • Agent & Normal Chat     │
+        │ • Approval Gates          │                     │ • D1 Intelligence & SQL   │
+        │ • Direct 1-shot execution │                     │ • Code Highlighter + Copy │
+        └───────────────────────────┘                     └───────────────────────────┘
+```
+
+---
+
+### 🖥️ 1. CLI Version (Terminal Shell & One-Shot Mode)
+
+The CLI version runs directly in your terminal with animated step trees, syntax highlighting, and slash commands:
+
+#### A. Interactive Shell Mode
+Start the interactive prompt_toolkit shell:
+```bash
+# Recommended command:
+uv run kratos --cli
+
+# Alternative alias:
+uv run kratos-agent --cli
+```
+Inside the interactive shell:
+- Type your prompt and press **Enter** to start autonomous execution.
+- Use **Tab** to autocomplete commands and file paths.
+- Attach files to prompts with `@filename` (e.g. `explain the architecture of @server.py`).
+- Run slash commands like `/session`, `/review`, `/simplify`, `/security`, `/model`, `/mode`.
+
+#### B. Direct One-Shot Command Execution
+Pass a prompt directly to execute without entering the interactive shell:
+```bash
+# Run a one-shot coding task:
+uv run kratos "Audit src/kratos_agent/brain for error handling and write unit tests"
+
+# Build a full web application:
+uv run kratos "Create a full-stack Flask application in ./demo with JWT auth and SQLite"
+```
+
+---
+
+### 🌐 2. Web Version (Vice City Cyberpunk Console)
+
+The Web version runs a local server connecting the Python runtime with the React 19 / Vite Vice City Cyberpunk web interface:
+
+<div align="center">
+<img src="docs/kratos_web_ui.png" alt="Kratos Web UI - Vice Cyberpunk" width="95%" />
+</div>
+
+#### A. Starting the Web Server
+```bash
+# Start the Web Console (opens your default browser at http://127.0.0.1:7860 automatically):
+uv run kratos
+
+# Or explicitly pass the --web flag:
+uv run kratos --web
+
+# Custom port (e.g., port 8080):
+uv run kratos --web 8080
+```
+
+#### B. Web Console Features
+- **Vice City Cyberpunk Aesthetic**: High-energy neon magenta, cyan, and purple theme, CRT scanline effects, and custom `Pixl` font typography.
+- **Dual Execution Modes**:
+  - 🛡️ **Autonomous Agent Mode**: Protected by security clearance (Passcode: `kratos`). Executes multi-step autonomous planning, shell commands, file modifications, and live verification.
+  - 💬 **Normal Chat Mode**: Fast unrestricted technical conversation with live model streaming.
+- **Real-Time Token Streaming**: Server-Sent Events (SSE) deliver tokens live as the model generates them.
+- **Code Highlighter**: Complete Highlight.js syntax highlighting with language detection and 1-click clipboard copy.
+- **Cloudflare D1 Intelligence**: Live turn telemetry, active session switcher, trace visualizer, and an interactive **SQL Playground** for querying the database.
+- **100% Responsive**: Built with responsive desktop, tablet, and mobile layouts with compact navigation drawers.
+
+---
+
+### ☁️ 3. Cloudflare Edge Version (Live Serverless Web App)
+
+Kratos Agent is also deployed to Cloudflare Workers with serverless edge streaming and Cloudflare D1 database:
+
+- **Live URL**: [https://kratos-agent.thirutechdeveloper.workers.dev](https://kratos-agent.thirutechdeveloper.workers.dev)
+
+#### Deploying Your Own Cloudflare Worker:
+```bash
+# 1. Build the frontend production assets
+npm run build --prefix frontend
+
+# 2. Deploy worker script and static assets to Cloudflare Workers
+npx wrangler deploy
+```
+
+The edge worker (`worker.js`) features:
+- **`cloudflare:sockets` TCP Streaming**: Connects directly to model gateways on non-standard ports (e.g., OmniRoute port `20128`), parsing chunked HTTP/1.1 and SSE tokens on-the-fly.
+- **Cloudflare D1 SQL Database**: Persists all chat sessions, turns, tool executions, and commands to serverless SQLite.
+- **Static Asset Serving**: Serves the Vite React production bundle directly from Cloudflare's global edge network.
 
 ---
 
 ## 🚀 Key Features
 
-| Capability | Description |
-| :--- | :--- |
-| 🧠 **Universal LLM Brain** | High-performance client with proxy bypass (`trust_env=False`), SSE streaming, and multi-format tool call parsing (Harmony, XML, ChatML, and JSON). |
-| 🗡️ **Autonomous Tool Forging** | When a tool does not exist, Kratos synthesizes the Python code, saves it to `tools.py`, updates `tools_list.json`, and live hot-reloads it in runtime. |
-| 📋 **Real-Time Step Planner** | Decomposes complex coding goals into discrete tasks, tracks execution states, and displays a live task tree during execution. |
-| 📁 **Multi-Session Memory** | Isolated session storage (`.kratos/sessions/`) tracking multi-turn conversations, tool calls, and workspace changes with instant switching (`/session`). |
-| 🔍 **Senior Engineering Workflows** | Built-in commands for multi-angle Senior Code Review (`/review`), Code Simplification (`/simplify`), and Security Auditing (`/security`). |
-| ⚡ **Live Event-Driven TUI** | Rich-powered terminal interface displaying animated thinking statuses, step progress, elapsed timing, and completion cards. |
-| ⚙️ **Approval Gates** | Three execution security modes: `suggest` (read-only), `auto-edit` (file edits automated, commands prompt), and `full-auto` (complete autonomy). |
-| 📦 **140+ Packaged Skills** | Rich domain knowledge covering React 19, Tailwind CSS, TypeScript, Docx, PDF generation, security testing, and scientific databases. |
-| 🌐 **Model Context Protocol (MCP)** | Support for external MCP tools configured via `.kratos/mcp.json`. |
+| Capability | CLI Version | Web Version | Cloudflare Edge | Description |
+| :--- | :---: | :---: | :---: | :--- |
+| ⚡ **Live Token Streaming** | ✅ | ✅ | ✅ | True real-time token-by-token output with zero artificial batch delays. |
+| 📋 **Dynamic Step Planner** | ✅ | ✅ | ✅ | Formulates multi-phase task trees with real-time state tracking. |
+| 💬 **Normal Chat Mode** | ✅ | ✅ | ✅ | Quick, unrestricted answers and code generation without tool execution. |
+| 🛡️ **Autonomous Agent Mode** | ✅ | ✅ | ✅ | Full autonomous file inspection, execution, and verification. |
+| 🗡️ **Autonomous Tool Forging** | ✅ | ✅ | ─ | Dynamically writes and hot-reloads new Python tools at runtime. |
+| 📁 **Multi-Session Memory** | ✅ | ✅ | ✅ | Isolated multi-turn history with instant switching and persistence. |
+| 📊 **D1 Database Console** | ─ | ✅ | ✅ | SQL Playground and telemetry for inspecting agent database records. |
+| 🎨 **Highlighter.js Code Box** | Rich | ✅ | ✅ | Beautiful code blocks with syntax highlighting and 1-click copy. |
+| 🔍 **Senior Engineering Workflows**| ✅ | ✅ | ✅ | `/review`, `/simplify`, and `/security` sweeps powered by 695+ Claude Code prompts. |
+| 📱 **Responsive Layout** | Terminal | ✅ | ✅ | Optimized layouts across desktop (1536px), tablet (768px), and mobile (375px). |
 
 ---
 
-## 🧠 The Brain Subsystem & Gateway
+## 🧠 The Brain Subsystem & Streaming Gateway
 
-The **Brain** layer (`src/kratos_agent/brain/`) provides the LLM engine for Kratos Agent:
+The **Brain** subsystem (`src/kratos_agent/brain/`) provides the LLM engine for Kratos Agent:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Kratos CLI / TUI                     │
+│                 Kratos Interfaces (CLI / Web)               │
 └──────────────────────────────┬──────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────┐
@@ -92,15 +212,15 @@ The **Brain** layer (`src/kratos_agent/brain/`) provides the LLM engine for Krat
 │                              │                              │
 │   ┌──────────────────────────▼──────────────────────────┐   │
 │   │ BrainClient (HTTP Session / trust_env=False)        │   │
-│   │   • SSE Streaming & Non-Streaming Fallback          │   │
+│   │   • SSE Incremental Streaming (on_chunk callback)   │   │
 │   │   • Request Retries & Exponential Backoff           │   │
 │   │   • Latency & TTFT Tracker                          │   │
 │   └──────────────────────────┬──────────────────────────┘   │
 └──────────────────────────────┼──────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────┐
-│            Brain Gateway / OpenAI-Compatible Endpoint       │
-│           (http://127.0.0.1:20128/v1/chat/completions)      │
+│       Brain Gateway / OmniRoute / OpenAI Endpoint           │
+│           (http://138.252.100.105:20128/v1)                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -136,72 +256,99 @@ When a user submits a prompt, Kratos executes a structured, multi-phase autonomo
 [User Request] 
       │
       ▼
-1. [Intent Classification] ──── (Chat / Question / Complex Task)
+1. [Intent Classification] ──── (Chat / Question / Autonomous Engineering Task)
       │
       ▼
-2. [Dynamic Planning] ───────── (Generates Task Items & State Tree)
+2. [Dynamic Planning] ───────── (Formulates Task Items & Live State Tree)
       │
       ▼
-3. [Context Assembly] ───────── (System Prompts + Memory + Tools + Files)
+3. [Context Assembly] ───────── (System Prompts + Session Memory + Tools + File Context)
       │
       ▼
-4. [LLM Brain Generation] ───── (Streams response & parses tool calls)
+4. [LLM Brain Streaming] ────── (Streams tokens live & parses tool calls incrementally)
       │
       ▼
-5. [Approval Gate Check] ────── (Validates permissions: suggest / auto-edit / full-auto)
+5. [Approval Gate Check] ────── (suggest / auto-edit / full-auto permission audit)
       │
       ▼
 6. [Tool Execution] ─────────── (write_file, edit_file, run_terminal_command, etc.)
       │
       ▼
-7. [Verification Manager] ───── (Syntax check, test verification, git diff audit)
+7. [Verification Manager] ───── (Syntax validation, test suites, git diff checks)
       │
       ▼
-8. [Task Completion & Memory] ─ (Persists turn to .kratos/sessions/ & displays card)
+8. [Task Completion & Memory] ─ (Persists to local SQLite / Cloudflare D1 & presents result)
 ```
 
 ---
 
-## 📦 Installation & Quickstart
+## 📦 Installation & Environment Setup
 
 ### Prerequisites
 - **Python 3.10+** (Python 3.14 recommended)
 - **uv** package manager ([astral.sh/uv](https://github.com/astral-sh/uv))
+- **Node.js 18+** (for frontend builds & Cloudflare deployment)
 
-### 1. Clone & Sync Dependencies
+### 1. Clone & Install Dependencies
 ```bash
 # Clone the repository
 git clone https://github.com/Thirumalai-Tech-Developer/Kratos_Agent.git
 cd Kratos_Agent
 
-# Sync all dependencies with uv
+# Sync all Python dependencies with uv
 uv sync
+
+# Install frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
-### 2. Configure Environment
-Create or edit your `.env` file in the project root:
-```env
-CHAT_ENDPOINT="http://127.0.0.1:20128/v1/chat/completions"
-MODEL_ENDPOINT="http://127.0.0.1:20128/v1/models"
-OMNI_KEY=""
-BRAIN_BASE_URL="http://127.0.0.1:20128/v1"
-BRAIN_MODEL="antigravity/gemini-3.7-flash-high"
-```
-
-### 3. Launch Kratos CLI
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env` and set your credentials:
 ```bash
-# Start the interactive terminal shell
-uv run kratos-agent
-
-# Or execute a direct one-shot query
-uv run kratos-agent "Build a Flask web application with a responsive dashboard and pytest suite"
+cp .env.example .env
 ```
+Edit `.env`:
+```env
+CHAT_ENDPOINT="http://138.252.100.105:20128/v1/chat/completions"
+MODEL_ENDPOINT="http://138.252.100.105:20128/v1/models"
+OMNI_KEY="sk-83463e3b38939d25-b68891-a1693fd2"
+BRAIN_BASE_URL="http://138.252.100.105:20128/v1"
+BRAIN_MODEL="ds-web/DeepSeek-V3.2"
+NORMAL_MODE_MODEL="ds-web/DeepSeek-V3.2"
+AGENT_PASSWORD="kratos"
+```
+
+### 3. Launch Kratos
+```bash
+# Start the Web Console:
+uv run kratos
+
+# Start the Interactive Terminal CLI:
+uv run kratos --cli
+```
+
+---
+
+## 🔑 Configuration & Environment Variables (.env)
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `CHAT_ENDPOINT` | `http://138.252.100.105:20128/v1/chat/completions` | Direct chat completions URL for LLM requests |
+| `MODEL_ENDPOINT` | `http://138.252.100.105:20128/v1/models` | Endpoint URL to query available model IDs dynamically |
+| `OMNI_KEY` / `BRAIN_KEY` | `""` | API key / Bearer token for model gateway authentication |
+| `BRAIN_BASE_URL` | `http://138.252.100.105:20128/v1` | Base URL for OpenAI-compatible gateway |
+| `BRAIN_MODEL` | `ds-web/DeepSeek-V3.2` | Active default LLM model for Agent Mode |
+| `NORMAL_MODE_MODEL` | `ds-web/DeepSeek-V3.2` | Active LLM model for Normal Chat Mode |
+| `AGENT_PASSWORD` | `kratos` | Security clearance passcode to unlock Agent Mode in the Web UI |
+| `BRAIN_TIMEOUT` | `60.0` | Request timeout in seconds |
+| `BRAIN_MAX_RETRIES` | `2` | Maximum retry attempts on transient network errors |
+| `KRATOS_APPROVAL_MODE` | `full-auto` | Default approval mode (`suggest`, `auto-edit`, `full-auto`) |
 
 ---
 
 ## 🖥️ Standalone Windows Executable (.exe)
 
-You can package Kratos Agent into a single standalone Windows `.exe` binary that runs anywhere without requiring Python or uv installed:
+You can compile Kratos Agent into a standalone Windows `.exe` binary that runs anywhere without Python installed:
 
 ```powershell
 # Option A: Build using uv and python
@@ -219,39 +366,16 @@ The compiled standalone executable is saved to:
 dist/kratos-agent.exe
 ```
 
-Run it directly from PowerShell or Command Prompt:
-```powershell
-.\dist\kratos-agent.exe
-```
-
----
-
-## 🔑 Configuration & Environment Variables
-
-Kratos Agent supports flexible configuration options via environment variables or `.env`:
-
-| Variable | Default Value | Description |
-| :--- | :--- | :--- |
-| `CHAT_ENDPOINT` | `http://127.0.0.1:20128/v1/chat/completions` | Direct chat completions URL for LLM requests |
-| `MODEL_ENDPOINT` | `http://127.0.0.1:20128/v1/models` | Endpoint URL to query available model IDs dynamically |
-| `OMNI_KEY` / `BRAIN_KEY` | `""` | API key / Bearer token for Brain gateway authentication |
-| `BRAIN_BASE_URL` | `http://127.0.0.1:20128/v1` | Base URL for OpenAI-compatible gateway |
-| `BRAIN_MODEL` | `antigravity/gemini-3.7-flash-high` | Active default LLM model name |
-| `BRAIN_TIMEOUT` | `60.0` | Request timeout in seconds |
-| `BRAIN_MAX_RETRIES` | `2` | Maximum retry attempts on transient network errors |
-| `KRATOS_APPROVAL_MODE` | `full-auto` | Default approval mode (`suggest`, `auto-edit`, `full-auto`) |
-| `KRATOS_IMAGE_BANNER` | `0` | Enable high-res raster ASCII banner (`1` to enable) |
-
 ---
 
 ## 📜 Complete CLI Slash Commands Reference
 
-Inside the interactive Kratos shell (`uv run kratos-agent`), the following slash commands are available:
+Inside the interactive Kratos shell (`uv run kratos --cli`), the following slash commands are available:
 
 ### 🔧 Diagnostics & Model Configuration
 - `/doctor` (alias: `/health`): Runs a full diagnostic check on Brain connection, model responsiveness, and tool registry health.
 - `/gateway` (alias: `/accounts`): Displays active Brain gateway URLs, timeout settings, proxy bypass status, and loaded models.
-- `/model [name]`: Interactively switch active LLM using arrow keys or by specifying a model name (e.g. `/model claude-3-7-sonnet`).
+- `/model [name]`: Interactively switch active LLM using arrow keys or by specifying a model name (e.g. `/model ds-web/DeepSeek-V3.2`).
 
 ### 📁 Memory & Session Management
 - `/session`: Lists all active and saved sessions in `.kratos/sessions/`.
@@ -321,25 +445,25 @@ If a task requires an unsupported capability (e.g. image resizing, database migr
 kratos ❯ /create-tool "create a tool to convert webp images to png using pillow"
 ```
 
-1. Kratos writes a validated Python function to [`src/kratos_agent/utils/tools.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/utils/tools.py).
-2. It registers the JSON schema in [`src/kratos_agent/utils/tools_list.json`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/utils/tools_list.json).
-3. The [`CodeReloader`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/core/reloader.py) instantly hot-reloads the tool into the active session without restarting the agent.
+1. Kratos writes a validated Python function to [`src/kratos_agent/utils/tools.py`](src/kratos_agent/utils/tools.py).
+2. It registers the JSON schema in [`src/kratos_agent/utils/tools_list.json`](src/kratos_agent/utils/tools_list.json).
+3. The [`CodeReloader`](src/kratos_agent/core/reloader.py) instantly hot-reloads the tool into the active session without restarting the agent.
 
 ---
 
 ## 🧪 Testing & Quality Assurance
 
-Kratos Agent includes a complete automated unit test suite covering configuration, transport, tool parsing, planners, and latency tracking:
+Kratos Agent includes a complete automated test suite covering configuration, transport, tool parsing, planners, and latency tracking:
 
-```powershell
-# Run the entire test suite with Python unittest
-.venv\Scripts\python.exe -m unittest discover tests
+```bash
+# Run unit tests
+uv run python -m unittest discover tests
 
-# Or run specific test modules
-.venv\Scripts\python.exe -m unittest tests/test_brain_config.py
-.venv\Scripts\python.exe -m unittest tests/test_brain_transport.py
-.venv\Scripts\python.exe -m unittest tests/test_planner.py
-.venv\Scripts\python.exe -m unittest tests/test_runtime.py
+# Or run specific test modules:
+uv run python -m unittest tests/test_brain_config.py
+uv run python -m unittest tests/test_brain_transport.py
+uv run python -m unittest tests/test_planner.py
+uv run python -m unittest tests/test_runtime.py
 ```
 
 ---
@@ -349,79 +473,39 @@ Kratos Agent includes a complete automated unit test suite covering configuratio
 ```
 Kratos_Agent/
 ├── .env                        # Brain Gateway & Model Environment Config
-├── .kratos/
-│   ├── claude_code_prompts/    # 695+ Indexed Claude Code Prompts & Subagents
-│   ├── sessions/               # Isolated Multi-Session Memory Stores
-│   ├── mcp.json                # Model Context Protocol Configuration
-│   └── skills/                 # Packaged Skills Ecosystem
-├── build_exe.py                # Standalone Windows .exe PyInstaller Builder
-├── build.bat                   # Windows CMD Build Script
-├── build_exe.ps1               # Windows PowerShell Build Script
-├── kratos_agent.spec           # PyInstaller Specification File
-├── pyproject.toml              # Project Manifest & Dependency Definitions
-├── requirements.txt            # Frozen Dependency Snapshot
+├── .env.example                # Example environment template
+├── kratos_banner.png           # Vice City Cyberpunk Master Banner Image
 ├── README.md                   # Project Documentation
+├── pyproject.toml              # Project Manifest & CLI Entry Points (`kratos`, `kratos-agent`)
+├── package.json                # Root package for Cloudflare CI/CD & Vite build scripts
+├── worker.js                   # Cloudflare Edge Worker Runtime (TCP Sockets + Streaming + D1)
+├── wrangler.json               # Cloudflare Workers & D1 Deployment Configuration
+├── frontend/                   # Modern React 19 + Vite 8 Vice City Cyberpunk Web App
+│   ├── src/
+│   │   ├── App.jsx             # Main Application Arena & Real-Time Chat Engine
+│   │   ├── components/         # Navbar, AgentHud, SqlPlayground, TraceReplay, etc.
+│   │   └── index.css           # Vice Cyberpunk design system & custom Pixl font
+│   ├── dist/                   # Production Web Bundle (served by local server & Cloudflare)
+│   └── vite.config.js          # Vite build configuration
 ├── src/
 │   └── kratos_agent/
-│       ├── __init__.py         # Package Root Exports
-│       ├── __main__.py         # Module Entry Point
-│       ├── cli.py              # Interactive prompt_toolkit Shell & Slash Commands
-│       ├── main.py             # KratosRuntime Orchestrator
+│       ├── cli.py              # Interactive prompt_toolkit CLI & Web Launcher
+│       ├── main.py             # KratosRuntime Engine
 │       ├── brain/              # Universal LLM Brain Subsystem
-│       │   ├── __init__.py     # Brain Exports & Aliases
-│       │   ├── brain.py        # Agent response functions & ChatOpenAI factory
-│       │   ├── chat_model.py   # LangChain BaseChatModel & Multi-Format Tool Parser
 │       │   ├── client.py       # Proxy-Free BrainClient with SSE Streaming
-│       │   ├── config.py       # Gateway Config, Environment Resolution & Errors
-│       │   └── fetch_model.py  # Model Discovery & Authentication Helper
+│       │   ├── chat_model.py   # Multi-Format Tool Calling Extractor
+│       │   └── config.py       # Gateway Config & Environment Resolution
 │       ├── core/               # Autonomous Engine Core
 │       │   ├── agent_loop.py   # Multi-Step Autonomous Execution Loop
-│       │   ├── approval_mode.py# Suggest, Auto-Edit, and Full-Auto Gates
-│       │   ├── background_runner.py # Async Background Tasks Runner
-│       │   ├── compactor.py    # History & Token Context Compressor
-│       │   ├── context_pipeline.py  # ContextBuilder & Token Budgeting
-│       │   ├── event_bus.py    # Central Event Pub/Sub
-│       │   ├── event_store.py  # Event Persistence
-│       │   ├── git_tools.py    # Git Status & Diff Inspection Tools
-│       │   ├── hooks.py        # Lifecycle Hooks Runtime
-│       │   ├── instruction_engine.py # Layered Modular Instructions
-│       │   ├── latency_tracker.py # Telemetry, TTFT, and Execution Timing
-│       │   ├── mcp_runtime.py  # Model Context Protocol Runtime
 │       │   ├── memory.py       # Multi-Session Agent Memory Engine
 │       │   ├── planner.py      # Strategic Planning & Intent Classifier
-│       │   ├── project_memory.py # Workspace Context & KRATOS.md Memory
-│       │   ├── prompt_library.py # Claude Code Prompts Search Engine
-│       │   ├── provider_runtime.py # ModelAdapter Contract & BrainAdapter
-│       │   ├── reloader.py     # Live Code, Tool, and Skill Reloader
-│       │   ├── runtime_contracts.py # Event and Message Data Contracts
-│       │   ├── skills.py       # Skills Loader & URL Installer
-│       │   ├── subagents.py    # Specialized Sub-Agent Manager
-│       │   ├── task_manager.py # State Machine & Task Tree Manager
-│       │   ├── tool_runtime.py # Tool Registry & Execution Runtime
-│       │   ├── verification_manager.py # Automated Task Verification
-│       │   └── workspace_tracker.py  # File Mutation Tracker
-│       ├── tui/                # Terminal User Interface
-│       │   ├── debug_panel.py  # Step & Event Log Renderers
-│       │   ├── events.py       # EventRenderer & StepRecord
-│       │   ├── live_renderer.py# KratosLiveRenderer & In-Place Display
-│       │   ├── status_bar.py   # Animated Status Bar
-│       │   └── stream_printer.py # Pipe-Safe Output Streamer
+│       │   └── task_manager.py # State Machine & Task Tree Manager
+│       ├── web/
+│       │   └── server.py       # Python HTTP Web Console & API Server
 │       └── utils/              # Self-Healing Tool Registry
 │           ├── tool_creator.py # Autonomous Tool Forger & Synthesizer
-│           ├── tools.py        # Core Builtin & Forged Tools
-│           └── tools_list.json # Tools Manifest & JSON Schemas
-└── tests/                      # Automated Unit Test Suite
-    ├── test_agent_execution_ux.py
-    ├── test_brain_config.py
-    ├── test_brain_transport.py
-    ├── test_dynamic_agent_planning.py
-    ├── test_event_bus.py
-    ├── test_false_completion.py
-    ├── test_latency_and_verification_timing.py
-    ├── test_live_renderer_wiring.py
-    ├── test_planner.py
-    ├── test_runtime.py
-    └── test_task_manager.py
+│           └── tools.py        # Core Builtin & Forged Tools
+└── tests/                      # Automated Test Suite
 ```
 
 ---

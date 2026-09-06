@@ -589,14 +589,9 @@ async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, e
       label: "Synthesizing response on Cloudflare Edge..."
     });
 
-    const reply = await generateAgentResponse(prompt, env, false);
-
-    // Stream tokens
-    const words = reply.split(" ");
-    for (let i = 0; i < words.length; i += 3) {
-      const chunk = words.slice(i, i + 3).join(" ") + " ";
-      send({ type: "token", token: chunk });
-    }
+    const reply = await streamAgentResponse(prompt, env, false, (token) => {
+      send({ type: "token", token });
+    });
 
     send({
       type: "step",
@@ -781,14 +776,15 @@ async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, e
     contextualPrompt += `\n\n[AGENT EXECUTION FINDINGS // TOOLS COMPLETED]:\n${toolResults.join("\n\n")}\n\nSynthesize the complete, authoritative final solution for the commander.`;
   }
 
-  const finalReply = await generateAgentResponse(contextualPrompt, env, true);
+  send({
+    type: "step",
+    step: "synthesizing",
+    label: "Synthesizing authoritative solution..."
+  });
 
-  // Stream synthesized tokens to the UI chat bubble
-  const words = finalReply.split(" ");
-  for (let i = 0; i < words.length; i += 3) {
-    const chunk = words.slice(i, i + 3).join(" ") + " ";
-    send({ type: "token", token: chunk });
-  }
+  const finalReply = await streamAgentResponse(contextualPrompt, env, true, (token) => {
+    send({ type: "token", token });
+  });
 
   // 8. Turn Completed Event
   send({
@@ -1083,6 +1079,290 @@ async function fetchOverSocket(urlStr, options) {
     text: async () => bodyText,
     json: async () => JSON.parse(bodyText)
   };
+}
+
+// Incremental TCP socket streaming for non-standard ports (e.g. OmniRoute port 20128)
+async function streamOverSocket(urlStr, options, onToken) {
+  let connect;
+  try {
+    const mod = await import("cloudflare:sockets");
+    connect = mod.connect;
+  } catch (e) {
+    throw new Error("cloudflare:sockets unavailable: " + (e.message || e));
+  }
+
+  const url = new URL(urlStr);
+  const hostname = url.hostname;
+  const port = parseInt(url.port || (url.protocol === "https:" ? "443" : "80"), 10);
+  const isSecure = url.protocol === "https:";
+
+  const socket = connect({ hostname, port }, { secureTransport: isSecure ? "on" : "off" });
+  const writer = socket.writable.getWriter();
+  const reader = socket.readable.getReader();
+
+  const method = (options.method || "POST").toUpperCase();
+  const path = url.pathname + (url.search || "");
+  const headers = Object.assign({}, options.headers);
+  headers["Host"] = url.host;
+  headers["Connection"] = "keep-alive";
+  headers["Accept"] = "text/event-stream";
+
+  const body = options.body || "";
+  const encoder = new TextEncoder();
+  let head = `${method} ${path} HTTP/1.1\r\n`;
+  for (const [k, v] of Object.entries(headers)) {
+    head += `${k}: ${v}\r\n`;
+  }
+
+  const bodyBuf = encoder.encode(body);
+  head += `Content-Length: ${bodyBuf.byteLength}\r\n\r\n`;
+  await writer.write(encoder.encode(head));
+  if (bodyBuf.byteLength > 0) {
+    await writer.write(bodyBuf);
+  }
+
+  const decoder = new TextDecoder("utf-8");
+  let headerParsed = false;
+  let isChunked = false;
+  let rawBuffer = "";
+  let sseBuffer = "";
+  let accumulatedText = "";
+
+  function parseSseLines(chunkText) {
+    sseBuffer += chunkText;
+    const lines = sseBuffer.split("\n");
+    sseBuffer = lines.pop(); // Retain remainder
+
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed || trimmed.startsWith(":")) continue;
+
+      if (trimmed.startsWith("data:")) {
+        const payload = trimmed.slice(5).trim();
+        if (payload === "[DONE]") {
+          return true;
+        }
+        try {
+          const data = JSON.parse(payload);
+          const delta = data.choices?.[0]?.delta?.content;
+          if (delta) {
+            accumulatedText += delta;
+            if (onToken) onToken(delta);
+          }
+        } catch (_) {}
+      }
+    }
+    return false;
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      rawBuffer += decoder.decode(value, { stream: true });
+
+      if (!headerParsed) {
+        const splitIdx = rawBuffer.indexOf("\r\n\r\n");
+        if (splitIdx === -1) continue;
+
+        const headerText = rawBuffer.slice(0, splitIdx);
+        rawBuffer = rawBuffer.slice(splitIdx + 4);
+        headerParsed = true;
+
+        const statusMatch = headerText.match(/HTTP\/1\.[01]\s+(\d+)/);
+        const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 200;
+        if (statusCode < 200 || statusCode >= 300) {
+          throw new Error(`Upstream error HTTP ${statusCode}: ${rawBuffer.slice(0, 200)}`);
+        }
+
+        isChunked = /transfer-encoding:\s*chunked/i.test(headerText);
+      }
+
+      if (isChunked) {
+        let isDone = false;
+        while (rawBuffer.length > 0) {
+          const lineEnd = rawBuffer.indexOf("\r\n");
+          if (lineEnd === -1) break;
+
+          const sizeHex = rawBuffer.slice(0, lineEnd).trim().split(";")[0];
+          const chunkSize = parseInt(sizeHex, 16);
+          if (isNaN(chunkSize)) break;
+
+          if (chunkSize === 0) {
+            isDone = true;
+            break;
+          }
+
+          if (rawBuffer.length < lineEnd + 2 + chunkSize + 2) {
+            break; // Wait for full chunk
+          }
+
+          const chunkData = rawBuffer.slice(lineEnd + 2, lineEnd + 2 + chunkSize);
+          rawBuffer = rawBuffer.slice(lineEnd + 2 + chunkSize + 2);
+
+          if (parseSseLines(chunkData)) {
+            isDone = true;
+            break;
+          }
+        }
+        if (isDone) break;
+      } else {
+        if (parseSseLines(rawBuffer)) break;
+        rawBuffer = "";
+      }
+    }
+  } finally {
+    try {
+      reader.cancel();
+      socket.close();
+    } catch (_) {}
+  }
+
+  if (sseBuffer) {
+    parseSseLines("\n");
+  }
+
+  return accumulatedText;
+}
+
+// Streaming fetch over standard HTTP/HTTPS ports (80/443)
+async function streamOverFetch(endpoint, options, onToken) {
+  const headers = Object.assign({}, options.headers, {
+    "Accept": "text/event-stream"
+  });
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: options.body
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Upstream error HTTP ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  if (!res.body) {
+    throw new Error("No response body received from upstream");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let sseBuffer = "";
+  let accumulatedText = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split("\n");
+      sseBuffer = lines.pop();
+
+      for (const rawLine of lines) {
+        const trimmed = rawLine.trim();
+        if (!trimmed || trimmed.startsWith(":")) continue;
+
+        if (trimmed.startsWith("data:")) {
+          const payload = trimmed.slice(5).trim();
+          if (payload === "[DONE]") return accumulatedText;
+
+          try {
+            const data = JSON.parse(payload);
+            const delta = data.choices?.[0]?.delta?.content;
+            if (delta) {
+              accumulatedText += delta;
+              if (onToken) onToken(delta);
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  } finally {
+    try { reader.cancel(); } catch (_) {}
+  }
+
+  return accumulatedText;
+}
+
+// High-level streaming responder that dispatches to socket or fetch and falls back to generateAgentResponse
+async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = null) {
+  const systemInstruction = isAgentMode
+    ? "You are Kratos, an elite autonomous AI coding assistant running in Agent Mode. Analyze instructions methodically, plan step-by-step executions, provide precise production-grade code solutions, and report actions with Spartan discipline. Directly output code without unnecessary conversational fluff."
+    : "You are Kratos, an elite AI assistant operating in Normal Chat Mode. Answer questions directly, explain concepts clearly, write clean code snippets, and assist the commander with sharp technical expertise.";
+
+  let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();
+  const apiKey = (env.OMNI_KEY || env.API_KEY || env.OPENAI_API_KEY || "").trim();
+  let model = isAgentMode
+    ? (env.AGENT_MODEL || env.BRAIN_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
+    : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || env.MODEL || "ds-web/DeepSeek-V3.2").trim();
+
+  if (endpoint && !endpoint.endsWith("/chat/completions")) {
+    endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
+  }
+
+  if (!endpoint) {
+    const errorMsg = "⚠️ [Configuration Alert]: No CHAT_ENDPOINT configured in .env or Cloudflare secrets.";
+    if (onToken) onToken(errorMsg);
+    return errorMsg;
+  }
+
+  const requestBody = JSON.stringify({
+    model,
+    messages: [
+      { role: "system", content: systemInstruction },
+      { role: "user", content: prompt }
+    ],
+    temperature: 0.7,
+    max_tokens: 4096,
+    stream: true
+  });
+
+  const requestHeaders = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`
+  };
+
+  let isNonStandardPort = false;
+  try {
+    const parsedUrl = new URL(endpoint);
+    const port = parsedUrl.port;
+    if (port && port !== "80" && port !== "443" && port !== "8080" && port !== "8443") {
+      isNonStandardPort = true;
+    }
+  } catch (_) {}
+
+  try {
+    if (isNonStandardPort) {
+      const streamed = await streamOverSocket(endpoint, {
+        method: "POST",
+        headers: requestHeaders,
+        body: requestBody
+      }, onToken);
+
+      if (streamed && streamed.trim()) {
+        return streamed.trim();
+      }
+    } else {
+      const streamed = await streamOverFetch(endpoint, {
+        headers: requestHeaders,
+        body: requestBody
+      }, onToken);
+
+      if (streamed && streamed.trim()) {
+        return streamed.trim();
+      }
+    }
+  } catch (streamErr) {
+    console.warn("Live stream attempt encountered error, falling back to standard generation:", streamErr.message || streamErr);
+  }
+
+  // Fallback to non-streaming generateAgentResponse if streaming produced no content or failed
+  const fallback = await generateAgentResponse(prompt, env, isAgentMode);
+  if (onToken) onToken(fallback);
+  return fallback;
 }
 
 async function generateAgentResponse(prompt, env, isAgentMode = false) {

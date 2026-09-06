@@ -16,5 +16,17 @@
       "database_name": "kratos",
       "database_id": "0e785bd7-3efa-435a-bed6-d205d849d9d7"
     }
-  ]
+  ],
+  "vars": {
+    "CHAT_ENDPOINT": "http://138.252.100.105:20128/v1/chat/completions",
+    "MODEL_ENDPOINT": "http://138.252.100.105:20128/v1/models",
+    "OMNI_KEY": "sk-83463e3b38939d25-b68891-a1693fd2",
+    "BRAIN_BASE_URL": "http://138.252.100.105:20128/v1",
+    "BRAIN_MODEL": "ds-web/DeepSeek-V3.2",
+    "OMNIROUTE_BASE_URL": "http://138.252.100.105:20128/v1",
+    "OMNIROUTE_MODEL": "ds-web/DeepSeek-V3.2",
+    "NORMAL_MODE_MODEL": "ds-web/DeepSeek-V3.2",
+    "AGENT_MODEL": "ds-web/DeepSeek-V3.2",
+    "AGENT_PASSWORD": "kratos"
+  }
 }
