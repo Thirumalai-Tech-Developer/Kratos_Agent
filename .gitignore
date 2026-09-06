@@ -5,9 +5,9 @@ __pycache__/
 *.so
 .Python
 build/
-develop-eggs/
-dist/
-downloads/
+/dist/
+!frontend/dist/
+!frontend/dist/**
 eggs/
 .eggs/
 lib/
@@ -86,6 +86,3 @@ Thumbs.db
 desktop.ini
 ben10_app
 tests
-
-# Gitignore
-.gitignore
