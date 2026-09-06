@@ -19,9 +19,9 @@
   ],
   "vars": {
     "NORMAL_MODE_MODEL": "deepseek-web/deepseek-v4-pro",
+    "DEEPSEEK_MODEL": "deepseek-web/deepseek-v4-pro",
     "AGENT_MODEL": "antigravity/gemini-3.7-flash-high",
     "CHAT_ENDPOINT": "http://138.252.100.105:20128/v1/chat/completions",
-    "OMNI_KEY": "sk-83463e3b38939d25-b68891-a1693fd2",
-    "AGENT_PASSWORD": "kratos"
+    "DEEPSEEK_BASE_URL": "http://138.252.100.105:20128/v1"
   }
 }
