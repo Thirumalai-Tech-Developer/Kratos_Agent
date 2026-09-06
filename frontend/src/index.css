@@ -1,0 +1,446 @@
+@import "tailwindcss";
+@font-face {
+  font-family: 'Pixl';
+  src: url('/fonts/Pixl-D6OR.ttf') format('truetype'),
+       url('/fonts/Pixl-1awM.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --font-pixl: 'Pixl', monospace;
+    --font-orbitron: 'Orbitron', sans-serif;
+    --font-rajdhani: 'Rajdhani', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'Inter', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #07030e;
+    color: #e2e8f0;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Typography Utilities */
+.font-pixl {
+  font-family: 'Pixl', monospace;
+}
+.font-orbitron {
+  font-family: 'Orbitron', sans-serif;
+}
+.font-rajdhani {
+  font-family: 'Rajdhani', sans-serif;
+}
+.font-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Glassmorphism & Neon Shadows */
+.glass-panel {
+  background: rgba(13, 7, 26, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 0, 127, 0.22);
+}
+
+.glass-card {
+  background: rgba(20, 11, 38, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.glass-card-hover:hover {
+  background: rgba(28, 15, 52, 0.85);
+  border-color: rgba(255, 0, 127, 0.4);
+  box-shadow: 0 0 20px rgba(255, 0, 127, 0.2);
+}
+
+.neon-glow-pink {
+  box-shadow: 0 0 16px rgba(255, 0, 127, 0.45), 0 0 32px rgba(255, 0, 127, 0.2);
+}
+
+.neon-glow-cyan {
+  box-shadow: 0 0 16px rgba(0, 243, 255, 0.45), 0 0 32px rgba(0, 243, 255, 0.2);
+}
+
+.neon-glow-amber {
+  box-shadow: 0 0 16px rgba(255, 140, 0, 0.45), 0 0 32px rgba(255, 140, 0, 0.2);
+}
+
+.neon-glow-emerald {
+  box-shadow: 0 0 16px rgba(0, 255, 159, 0.45), 0 0 32px rgba(0, 255, 159, 0.2);
+}
+
+.neon-text-pink {
+  text-shadow: 0 0 10px rgba(255, 0, 127, 0.8), 0 0 20px rgba(255, 0, 127, 0.4);
+}
+
+.neon-text-cyan {
+  text-shadow: 0 0 10px rgba(0, 243, 255, 0.8), 0 0 20px rgba(0, 243, 255, 0.4);
+}
+
+.neon-text-amber {
+  text-shadow: 0 0 10px rgba(255, 140, 0, 0.8), 0 0 20px rgba(255, 140, 0, 0.4);
+}
+
+/* Cyberpunk Vice City Gradient Utilities */
+.bg-vice-gradient {
+  background: linear-gradient(135deg, #ff007f 0%, #ff8c00 50%, #00f3ff 100%);
+}
+
+.text-vice-gradient {
+  background: linear-gradient(135deg, #ff007f 0%, #ff8c00 60%, #00f3ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-cyber-cyan {
+  color: #00f3ff;
+}
+
+.text-vice-pink {
+  color: #ff007f;
+}
+
+.text-sunset-gold {
+  color: #ffaa00;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 5, 20, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 0, 127, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 0, 127, 0.6);
+  box-shadow: 0 0 8px rgba(255, 0, 127, 0.5);
+}
+
+/* Subtle Animated Cyber Grid Background */
+.cyber-grid-bg {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 0, 127, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 243, 255, 0.04) 1px, transparent 1px);
+}
+
+/* Animation Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideLeft {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.animate-slideLeft {
+  animation: slideLeft 0.3s ease-out both;
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* Scrollbar Utilities */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 0, 127, 0.25) transparent;
+}
+
+@media (min-width: 475px) {
+  .xs\:inline-block { display: inline-block; }
+  .xs\:flex { display: flex; }
+  .hidden.xs\:inline-block { display: none; }
+  .hidden.xs\:flex { display: none; }
+}
+
+/* ==========================================================================
+   ENHANCED OUTPUT DIALOG BOX & HIGHLIGHTER.JS THEME
+   (Styled using highlighter.json specifications & Pixl font)
+   ========================================================================== */
+.code-dialog-box {
+  background: #05070e;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7), 0 0 16px rgba(255, 19, 121, 0.18);
+  margin: 12px 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.code-dialog-header {
+  background: rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.code-lang-badge {
+  font-family: var(--font-pixl);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #00f0ff;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+}
+
+.code-lang-badge::before {
+  content: '⚡';
+  font-size: 11px;
+}
+
+.btn-copy-code {
+  font-family: var(--font-pixl);
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #8e9bb0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-copy-code:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: #00f0ff;
+  color: #00f0ff;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+}
+
+.code-dialog-box pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: #05070e;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.code-dialog-box code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: #f8fafc;
+}
+
+/* Syntax Highlighting Colors - Vice City Cyberpunk Palette */
+.hljs-keyword, .hljs-selector-tag, .hljs-subst, .hljs-doctag { 
+  color: #ff1379 !important; 
+  font-weight: 600; 
+}
+.hljs-string, .hljs-title.class_, .hljs-section, .hljs-addition { 
+  color: #00ff9d !important; 
+}
+.hljs-number, .hljs-literal, .hljs-symbol { 
+  color: #f59e0b !important; 
+}
+.hljs-function, .hljs-title.function_, .hljs-title, .hljs-title.class_inherited__ { 
+  color: #00f0ff !important; 
+  font-weight: 600; 
+  text-shadow: 0 0 6px rgba(0, 240, 255, 0.35);
+}
+.hljs-type, .hljs-class .hljs-title, .hljs-built_in { 
+  color: #38bdf8 !important; 
+  font-weight: 600; 
+}
+.hljs-params, .hljs-variable { 
+  color: #e2e8f0 !important; 
+}
+.hljs-comment, .hljs-quote, .hljs-deletion { 
+  color: #64748b !important; 
+  font-style: italic; 
+}
+.hljs-operator, .hljs-meta, .hljs-meta .hljs-keyword { 
+  color: #ff7300 !important; 
+}
+.hljs-attr, .hljs-property, .hljs-variable.language_ { 
+  color: #38bdf8 !important; 
+}
+.hljs-tag, .hljs-name { 
+  color: #ff1379 !important; 
+}
+.hljs-attribute { 
+  color: #ffaa00 !important; 
+}
+.hljs-punctuation { 
+  color: #94a3b8 !important; 
+}
+.hljs-template-variable { 
+  color: #e2e8f0 !important; 
+}
+.hljs-bullet, .hljs-link { 
+  color: #00f0ff !important; 
+}
+.hljs-emphasis { 
+  font-style: italic; 
+}
+.hljs-strong { 
+  font-weight: 700; 
+}
+
+/* Real-time Streaming Cursor */
+.streaming-cursor {
+  display: inline-block;
+  color: #ff1379;
+  font-weight: 900;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  margin-left: 2px;
+  animation: cursorBlink 0.65s infinite ease-in-out;
+  text-shadow: 0 0 8px rgba(255, 19, 121, 0.45);
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0; transform: scale(0.92); }
+}
+
+/* Markdown Rendering Utilities */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.markdown-table th {
+  background: rgba(255, 0, 127, 0.12);
+  color: #00f3ff;
+  font-family: var(--font-rajdhani);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.25);
+}
+
+.markdown-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+}
+
+.markdown-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.md-blockquote {
+  border-left: 3px solid #ff007f;
+  background: rgba(255, 0, 127, 0.06);
+  padding: 8px 14px;
+  margin: 8px 0;
+  border-radius: 0 6px 6px 0;
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.md-heading {
+  font-family: var(--font-orbitron);
+  font-weight: 800;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.md-h1 { font-size: 1.25rem; color: #ffffff; text-shadow: 0 0 10px rgba(255, 0, 127, 0.4); }
+.md-h2 { font-size: 1.1rem; color: #ff007f; }
+.md-h3 { font-size: 0.95rem; color: #00f3ff; }
+.md-h4 { font-size: 0.85rem; color: #ffaa00; }
+
+.md-list {
+  margin: 6px 0;
+  padding-left: 20px;
+  list-style-type: disc;
+  color: #cbd5e1;
+}
+.md-list-ordered {
+  list-style-type: decimal;
+}
+.md-list li {
+  margin-bottom: 4px;
+}
+
+.markdown-hr {
+  border: none;
+  border-top: 1px solid rgba(255, 0, 127, 0.25);
+  margin: 14px 0;
+}
+
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: rgba(255, 0, 127, 0.15);
+  border: 1px solid rgba(255, 0, 127, 0.3);
+  color: #ff66b2;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.md-paragraph {
+  margin: 6px 0;
+  line-height: 1.6;
+  color: #e2e8f0;
+}
+
+.md-spacer {
+  height: 8px;
+}
+
+

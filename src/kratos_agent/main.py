@@ -34,6 +34,7 @@ class KratosRuntime:
         self.model_name = model_name
         self.skill_manager = skill_manager
         self.memory = memory
+        self.d1_db = getattr(self.memory, "d1_db", None) or getattr(self.memory, "db", None)
         self.instructions = InstructionEngine()
         self._register_instruction_modules()
         self.context = ContextBuilder(ContextBudget())

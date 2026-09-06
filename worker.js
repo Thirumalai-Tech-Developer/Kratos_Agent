@@ -207,7 +207,7 @@ async function handleApi(request, env, url) {
       events_count: eventsCount,
       mode: "cloudflare_d1",
       is_remote: true,
-      database_id: "0e785bd7-3efa-435a-bed6-d205d849d9d7",
+      database_id: env.CLOUDFLARE_D1_DATABASE_ID || env.DB_ID || (env.DB ? "bound" : "none"),
       latency_ms: Date.now() - start
     });
   }
@@ -215,12 +215,12 @@ async function handleApi(request, env, url) {
   // 2. GET /api/telemetry
   if (path === "/api/telemetry" && method === "GET") {
     return jsonResponse({
-      model: env.AGENT_MODEL || "antigravity/gemini-3.7-flash-high",
-      normal_mode_model: env.NORMAL_MODE_MODEL || "deepseek-web/deepseek-v4-pro",
+      model: env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2",
+      normal_mode_model: env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2",
       workspace: "Cloudflare Edge Workers",
       tools_count: TOOLS_LIST.length,
       active_session: null,
-      d1_database_id: "0e785bd7-3efa-435a-bed6-d205d849d9d7",
+      d1_database_id: env.CLOUDFLARE_D1_DATABASE_ID || env.DB_ID || (env.DB ? "bound" : "none"),
       d1_mode: "cloudflare_d1",
       is_remote_d1: true,
       latency_ms: 12
@@ -358,8 +358,8 @@ async function handleApi(request, env, url) {
   if (path === "/api/auth/agent-mode" && method === "POST") {
     const body = await request.json().catch(() => ({}));
     const password = (body.password || "").trim();
-    const expected = (env.AGENT_PASSWORD || "kratos").trim();
-    if (password === expected) {
+    const expected = (env.AGENT_PASSWORD || "").trim();
+    if (!expected || password === expected) {
       return jsonResponse({ success: true, message: "Security clearance granted" });
     }
     return jsonResponse({ success: false, error: "ACCESS DENIED // Invalid Passcode" }, 401);
@@ -368,10 +368,12 @@ async function handleApi(request, env, url) {
   // 11. POST /api/chat (Server-Sent Events streaming chat)
   if (path === "/api/chat" && method === "POST") {
     const body = await request.json().catch(() => ({}));
-    const prompt = (body.prompt || "").trim();
+    const prompt = (body.prompt || body.message || body.query || "").trim();
     if (!prompt) return jsonResponse({ error: "Empty prompt" }, 400);
 
-    const isAgentMode = Boolean(body.agent_mode);
+    const isAgentMode = body.agent_mode !== undefined
+      ? Boolean(body.agent_mode)
+      : (body.is_agent_mode !== undefined ? Boolean(body.is_agent_mode) : body.mode === "agent");
     let sessionId = body.session_id;
     const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
@@ -381,8 +383,8 @@ async function handleApi(request, env, url) {
 
     const defaultTitle = prompt.length > 40 ? prompt.slice(0, 40) + "..." : prompt;
     const activeModel = isAgentMode
-      ? (env.AGENT_MODEL || "antigravity/gemini-3.7-flash-high")
-      : (env.NORMAL_MODE_MODEL || "deepseek-web/deepseek-v4-pro");
+      ? (env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
+      : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2");
 
     // Ensure session row exists in D1
     if (env.DB) {
@@ -466,58 +468,93 @@ async function handleApi(request, env, url) {
     return jsonResponse({
       response: reply,
       session_id: sessionId,
-      model: isAgentMode ? (env.AGENT_MODEL || "antigravity/gemini-3.7-flash-high") : (env.NORMAL_MODE_MODEL || "deepseek-web/deepseek-v4-pro")
+      model: isAgentMode ? (env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2") : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
     });
   }
 
   // 13. GET /api/diag (Live Edge Diagnostics & LLM Health Probe)
   if (path === "/api/diag" && method === "GET") {
-    const endpoint = (env.CHAT_ENDPOINT || env.DEEPSEEK_BASE_URL || env.OPENAI_BASE_URL || "http://138.252.100.105:20128/v1/chat/completions").trim();
-    const apiKey = (env.DEEPSEEK_API_KEY || env.OMNI_KEY || env.OPENAI_API_KEY || "sk-83463e3b38939d25-b68891-a1693fd2").trim();
-    const model = (env.NORMAL_MODE_MODEL || env.DEEPSEEK_MODEL || "deepseek-web/deepseek-v4-pro").trim();
+    let endpoint = (env.CHAT_ENDPOINT || env.DEEPSEEK_BASE_URL || env.OPENAI_BASE_URL || env.MODEL_ENDPOINT || "").trim();
+    const apiKey = (env.DEEPSEEK_API_KEY || env.OMNI_KEY || env.OPENAI_API_KEY || env.API_KEY || "").trim();
+    let model = (env.NORMAL_MODE_MODEL || env.DEEPSEEK_MODEL || "deepseek-chat").trim();
+
+    if (env.DEEPSEEK_API_KEY && !endpoint) {
+      endpoint = "https://api.deepseek.com/chat/completions";
+      model = "deepseek-chat";
+    }
+
+    if (endpoint && !endpoint.endsWith("/chat/completions")) {
+      endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
+    }
 
     let testResult = "pending";
     let latencyMs = 0;
     const start = Date.now();
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
+    if (!endpoint) {
+      testResult = "No CHAT_ENDPOINT or DEEPSEEK_API_KEY configured in .env / Cloudflare secrets";
+    } else {
+      try {
+        let isNonStandardPort = false;
+        try {
+          const parsedUrl = new URL(endpoint);
+          const port = parsedUrl.port;
+          if (port && port !== "80" && port !== "443" && port !== "8080" && port !== "8443") {
+            isNonStandardPort = true;
+          }
+        } catch (_) {}
+
+        let res;
+        const requestBody = JSON.stringify({
           model,
           messages: [{ role: "user", content: "ping" }],
           max_tokens: 5
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      latencyMs = Date.now() - start;
-      if (res.ok) {
-        testResult = `OK (${res.status}) - Latency: ${latencyMs}ms`;
-      } else {
-        testResult = `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 120)}`;
+        });
+        const requestHeaders = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        };
+
+        if (isNonStandardPort) {
+          res = await fetchOverSocket(endpoint, {
+            method: "POST",
+            headers: requestHeaders,
+            body: requestBody
+          });
+        } else {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 8000);
+          res = await fetch(endpoint, {
+            method: "POST",
+            headers: requestHeaders,
+            body: requestBody,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+        }
+
+        latencyMs = Date.now() - start;
+        if (res.ok) {
+          testResult = `OK (${res.status}) - Latency: ${latencyMs}ms`;
+        } else {
+          testResult = `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 120)}`;
+        }
+      } catch (e) {
+        latencyMs = Date.now() - start;
+        testResult = `Fetch Error (${latencyMs}ms): ${e.message || String(e)}`;
       }
-    } catch (e) {
-      latencyMs = Date.now() - start;
-      testResult = `Fetch Error (${latencyMs}ms): ${e.message || String(e)}`;
     }
 
     return jsonResponse({
-      status: "online",
+      status: endpoint ? "online" : "pending_configuration",
       edge_runtime: "Cloudflare Workers",
       resolved_config: {
-        endpoint,
+        endpoint: endpoint || "(none - configure in .env / Cloudflare Dashboard)",
         model,
         api_key_masked: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "none",
         has_gemini_key: Boolean(env.GEMINI_API_KEY),
         has_workers_ai: Boolean(env.AI),
-        has_deepseek_key: Boolean(env.DEEPSEEK_API_KEY),
+        has_deepseek_key: Boolean(env.DEEPSEEK_API_KEY || env.OMNI_KEY),
         has_d1_db: Boolean(env.DB),
         runner_url: env.RUNNER_URL || env.AGENT_ENDPOINT || "none (standalone edge)"
       },
@@ -1055,75 +1092,50 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
     ? "You are Kratos, an elite autonomous AI coding assistant running in Agent Mode. Analyze instructions methodically, plan step-by-step executions, provide precise production-grade code solutions, and report actions with Spartan discipline. Directly output code without unnecessary conversational fluff."
     : "You are Kratos, an elite AI assistant operating in Normal Chat Mode. Answer questions directly, explain concepts clearly, write clean code snippets, and assist the commander with sharp technical expertise.";
 
-  // 1. Resolve Credentials & Variables
-  let endpoint = (env.CHAT_ENDPOINT || env.DEEPSEEK_BASE_URL || env.OPENAI_BASE_URL || env.BRAIN_BASE_URL || "").trim();
-  const apiKey = (env.DEEPSEEK_API_KEY || env.OMNI_KEY || env.OPENAI_API_KEY || env.API_KEY || "sk-83463e3b38939d25-b68891-a1693fd2").trim();
+  // 1. Resolve OmniRoute credentials strictly from .env / Cloudflare secrets
+  let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();
+  const apiKey = (env.OMNI_KEY || env.API_KEY || env.OPENAI_API_KEY || "").trim();
   let model = isAgentMode
-    ? (env.AGENT_MODEL || "antigravity/gemini-3.7-flash-high")
-    : (env.NORMAL_MODE_MODEL || env.DEEPSEEK_MODEL || env.MODEL || "deepseek-web/deepseek-v4-pro").trim();
-
-  // If user provided DEEPSEEK_API_KEY without custom endpoint, use official DeepSeek API
-  if (env.DEEPSEEK_API_KEY && !endpoint) {
-    endpoint = "https://api.deepseek.com/chat/completions";
-    if (model.includes("deepseek-web") || model === "auto") {
-      model = "deepseek-chat";
-    }
-  }
+    ? (env.AGENT_MODEL || env.BRAIN_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
+    : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || env.MODEL || "ds-web/DeepSeek-V3.2").trim();
 
   // If endpoint is a base URL without /chat/completions, append it
   if (endpoint && !endpoint.endsWith("/chat/completions")) {
     endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
   }
 
-  // Default endpoint if not set
   if (!endpoint) {
-    endpoint = "http://138.252.100.105:20128/v1/chat/completions";
+    errors.push("No CHAT_ENDPOINT configured in .env or Cloudflare secrets. Set CHAT_ENDPOINT to your OmniRoute endpoint.");
   }
 
-  const requestBody = JSON.stringify({
-    model,
-    messages: [
-      { role: "system", content: systemInstruction },
-      { role: "user", content: prompt }
-    ],
-    temperature: 0.7,
-    max_tokens: 4096
-  });
-
-  const requestHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey}`
-  };
-
-  // 2. Primary Attempt: Standard HTTPS/HTTP fetch with 12s timeout
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: requestHeaders,
-      body: requestBody,
-      signal: controller.signal
+  if (endpoint) {
+    const requestBody = JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemInstruction },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 4096
     });
-    clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const data = await res.json();
-      const content = data?.choices?.[0]?.message?.content;
-      if (content && content.trim()) {
-        return content.trim();
+    const requestHeaders = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`
+    };
+
+    // Detect non-standard port (Cloudflare fetch() proxy blocks ports like 20128 with 403)
+    let isNonStandardPort = false;
+    try {
+      const parsedUrl = new URL(endpoint);
+      const port = parsedUrl.port;
+      if (port && port !== "80" && port !== "443" && port !== "8080" && port !== "8443") {
+        isNonStandardPort = true;
       }
-      errors.push(`Endpoint returned empty message content: ${JSON.stringify(data).slice(0, 120)}`);
-    } else {
-      const errText = await res.text().catch(() => "");
-      errors.push(`Endpoint HTTP ${res.status}: ${errText.slice(0, 150)}`);
-    }
-  } catch (err) {
-    errors.push(`Direct fetch: ${err.message || String(err)}`);
+    } catch (_) {}
 
-    // 3. Fallback: If direct fetch failed and URL has a custom non-standard port, try raw TCP socket
-    const parsedUrl = new URL(endpoint);
-    if (parsedUrl.port && parsedUrl.port !== "80" && parsedUrl.port !== "443") {
+    // 2A. For non-standard ports: go DIRECTLY to raw TCP socket (bypasses Cloudflare HTTP proxy)
+    if (isNonStandardPort) {
       try {
         const sockRes = await fetchOverSocket(endpoint, {
           method: "POST",
@@ -1136,57 +1148,47 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
           if (content && content.trim()) {
             return content.trim();
           }
+          errors.push(`OmniRoute (socket) returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
         } else {
           const sockText = await sockRes.text().catch(() => "");
-          errors.push(`Socket HTTP ${sockRes.status}: ${sockText.slice(0, 150)}`);
+          errors.push(`OmniRoute (socket) HTTP ${sockRes.status}: ${sockText.slice(0, 150)}`);
         }
       } catch (sockErr) {
-        errors.push(`Socket connect: ${sockErr.message || String(sockErr)}`);
+        errors.push(`OmniRoute socket connect: ${sockErr.message || String(sockErr)}`);
+      }
+    } else {
+      // 2B. For standard ports (80/443): use normal fetch()
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: requestHeaders,
+          body: requestBody,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          const content = data?.choices?.[0]?.message?.content;
+          if (content && content.trim()) {
+            return content.trim();
+          }
+          errors.push(`OmniRoute returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
+        } else {
+          const errText = await res.text().catch(() => "");
+          errors.push(`OmniRoute HTTP ${res.status}: ${errText.slice(0, 150)}`);
+        }
+      } catch (err) {
+        errors.push(`OmniRoute fetch: ${err.message || String(err)}`);
       }
     }
   }
 
-  // 4. Fallback: Cloudflare Workers AI (Native DeepSeek on Cloudflare GPUs)
-  if (env.AI) {
-    try {
-      const aiRes = await env.AI.run("@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", {
-        messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: prompt }
-        ]
-      });
-      if (aiRes?.response && aiRes.response.trim()) {
-        return aiRes.response.trim();
-      }
-    } catch (aiErr) {
-      errors.push(`Workers AI DeepSeek: ${aiErr.message || String(aiErr)}`);
-    }
-  }
-
-  // 5. Fallback: Gemini API Key if configured in Cloudflare secrets
-  if (env.GEMINI_API_KEY) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: systemInstruction }] }
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim()) return text.trim();
-      }
-    } catch (gemErr) {
-      errors.push(`Gemini API: ${gemErr.message || String(gemErr)}`);
-    }
-  }
-
-  // 6. Actionable Diagnostic Report (never hide failures behind misleading greetings)
+  // 3. Actionable Diagnostic Report
   const errorBullets = errors.map(e => `• ${e}`).join("\n");
   const maskedKey = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "(none)";
 
-  return `⚠️ **[Kratos Edge // Autonomous Engine Alert]**\n\nCould not receive a completion from the LLM provider on Cloudflare Edge.\n\n**Current Configuration:**\n• **Endpoint:** \`${endpoint}\`\n• **Model:** \`${model}\`\n• **API Key:** \`${maskedKey}\`\n• **Mode:** ${isAgentMode ? "Autonomous Agent" : "Normal Chat"}\n\n**Diagnostics:**\n${errorBullets}\n\n**How to Configure in Cloudflare:**\n1. In Cloudflare Dashboard (Settings → Variables & Secrets), set:\n   - \`DEEPSEEK_API_KEY\`: your DeepSeek API key\n   - \`CHAT_ENDPOINT\`: \`https://api.deepseek.com/chat/completions\`\n   - \`NORMAL_MODE_MODEL\`: \`deepseek-chat\`\n2. If using a remote Python runner, set \`RUNNER_URL\` to your tunnel or server.\n3. Test connectivity at any time by opening \`/api/diag\` in your browser.`;
+  return `⚠️ **[Kratos Edge // OmniRoute Connection Alert]**\n\nCould not receive a completion from OmniRoute on Cloudflare Edge.\n\n**Current Configuration:**\n• **Endpoint:** \`${endpoint || "(not configured)"}\`\n• **Model:** \`${model}\`\n• **API Key:** \`${maskedKey}\`\n• **Mode:** ${isAgentMode ? "Autonomous Agent" : "Normal Chat"}\n\n**Diagnostics:**\n${errorBullets}\n\n**How to Fix:**\n1. In your \`.env\` file (local) or Cloudflare Dashboard (Settings → Variables & Secrets), ensure:\n   - \`CHAT_ENDPOINT\` = your OmniRoute endpoint URL\n   - \`OMNI_KEY\` = your OmniRoute API key\n   - \`NORMAL_MODE_MODEL\` = your preferred model name\n2. For non-standard ports (e.g. 20128), this worker uses raw TCP sockets (\`cloudflare:sockets\`) to bypass Cloudflare's HTTP proxy restriction.\n3. Test connectivity at \`/api/diag\` in your browser.`;
 }

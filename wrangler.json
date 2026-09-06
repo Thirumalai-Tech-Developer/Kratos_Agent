@@ -7,7 +7,7 @@
     "nodejs_compat"
   ],
   "assets": {
-    "directory": "./src/kratos_agent/web",
+    "directory": "./frontend/dist",
     "binding": "ASSETS"
   },
   "d1_databases": [

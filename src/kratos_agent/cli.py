@@ -1470,56 +1470,87 @@ def main():
         if arg in ("--version", "-v", "version"):
             console.print("[bold red]Kratos Agent[/bold red] [bold gold1]v0.1.0[/bold gold1] - [dim]The Ghost of Sparta Codes[/dim]")
             return
+        if arg in ("--cli", "-c", "cli", "/cli"):
+            code_reloader.auto_reload_if_changed()
+            start_interactive_cli()
+            return
+
+    # If invoked with no arguments or explicitly requesting web server:
+    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1].strip() in ("--web", "web", "/web", "serve", "server")):
+        port = 7860
+        if len(sys.argv) > 2 and sys.argv[2].strip().isdigit():
+            port = int(sys.argv[2].strip())
+        from kratos_agent.web.server import start_server
+        console.print()
+        console.print("[bold red]" + "═" * 72 + "[/bold red]")
+        console.print(get_kratos_banner())
+        console.print("[bold red]" + "═" * 72 + "[/bold red]\n")
+        console.print(
+            Panel(
+                f"[bold green]✓ Kratos Agent Connected to Frontend![/bold green]\n\n"
+                f"[bold cyan]🌐 Console URL: http://127.0.0.1:{port}[/bold cyan]\n"
+                f"[dim]• Autonomous Agent Mode & Normal Chat Mode: ONLINE\n"
+                f"• Active Model: {runtime.model_name}\n"
+                f"• Cloudflare D1 Backend: Connected\n"
+                f"• Interactive Terminal CLI: run 'uv run kratos --cli'\n"
+                f"• Direct CLI prompt: run 'uv run kratos <prompt>'[/dim]\n\n"
+                f"[bold gold1]Press Ctrl+C to shutdown server.[/bold gold1]",
+                title="[bold red]⚔️ KRATOS AGENT // WEB RUNNER & API SERVER[/bold red]",
+                border_style="red",
+                padding=(1, 2)
+            )
+        )
+        console.print()
+        d1_client = getattr(runtime, "d1_db", None)
+        start_server(port=port, open_browser=True, d1_db=d1_client, memory=memory, runtime=runtime, daemon=False)
+        return
 
     code_reloader.auto_reload_if_changed()
-    if len(sys.argv) > 1:
-        raw_query = " ".join(sys.argv[1:])
-        processed_query, attached_files = parse_file_mentions(raw_query)
+    raw_query = " ".join(sys.argv[1:])
+    processed_query, attached_files = parse_file_mentions(raw_query)
+    
+    if attached_files:
+        for att in attached_files:
+            console.print(f"[dim green]📎 Attached:[/dim green] [bold white]{att}[/bold white]")
+    
+    messages = [{"role": "user", "content": processed_query}]
+    
+    try:
+        reply = _tui.invoke_with_live(messages)
+    except KeyboardInterrupt:
+        _tui.cancel()
+        console.print("\n[bold yellow]⊘ Cancelled.[/bold yellow]\n")
+        return
         
-        if attached_files:
-            for att in attached_files:
-                console.print(f"[dim green]📎 Attached:[/dim green] [bold white]{att}[/bold white]")
-        
-        messages = [{"role": "user", "content": processed_query}]
-        
-        try:
-            reply = _tui.invoke_with_live(messages)
-        except KeyboardInterrupt:
-            _tui.cancel()
-            console.print("\n[bold yellow]⊘ Cancelled.[/bold yellow]\n")
-            return
-            
-        if not reply.strip():
-            reply = "Task executed successfully."
+    if not reply.strip():
+        reply = "Task executed successfully."
 
-        last_plan = _tui.get_last_plan()
-        if last_plan and last_plan.tasks and not _tui.is_chat_mode():
-            plan_dict = last_plan.to_dict()
-            files_summary = runtime.loop.workspace_tracker.summary() if hasattr(runtime.loop, "workspace_tracker") else None
-            verif_dict = runtime.loop.last_verification.__dict__ if getattr(runtime.loop, "last_verification", None) else None
-            console.print()
-            console.print(
-                render_completion_card(
-                    summary_text=reply,
-                    plan_dict=plan_dict,
-                    files_summary=files_summary,
-                    verification=verif_dict,
-                    model_name=runtime.model_name
-                )
+    last_plan = _tui.get_last_plan()
+    if last_plan and last_plan.tasks and not _tui.is_chat_mode():
+        plan_dict = last_plan.to_dict()
+        files_summary = runtime.loop.workspace_tracker.summary() if hasattr(runtime.loop, "workspace_tracker") else None
+        verif_dict = runtime.loop.last_verification.__dict__ if getattr(runtime.loop, "last_verification", None) else None
+        console.print()
+        console.print(
+            render_completion_card(
+                summary_text=reply,
+                plan_dict=plan_dict,
+                files_summary=files_summary,
+                verification=verif_dict,
+                model_name=runtime.model_name
             )
-            console.print()
-        else:
-            console.print(
-                Panel(
-                    Markdown(reply),
-                    title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
-                    title_align="left",
-                    border_style="red",
-                    padding=(1, 2)
-                )
-            )
+        )
+        console.print()
     else:
-        start_interactive_cli()
+        console.print(
+            Panel(
+                Markdown(reply),
+                title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
+                title_align="left",
+                border_style="red",
+                padding=(1, 2)
+            )
+        )
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,58 @@
+{
+  "theme": "kratos-vice-cyberpunk",
+  "version": "2.0",
+  "font": "Pixl",
+  "colors": {
+    "keyword": "#ff1379",
+    "string": "#00ff9d",
+    "number": "#f59e0b",
+    "function": "#00f0ff",
+    "comment": "#505c70",
+    "operator": "#ff7300",
+    "boolean": "#00ff9d",
+    "property": "#38bdf8",
+    "tag": "#ff1379",
+    "attribute": "#ffaa00",
+    "punctuation": "#8e9bb0",
+    "background": "#05070e",
+    "border": "rgba(0, 240, 255, 0.35)",
+    "glow": "0 0 15px rgba(0, 240, 255, 0.25)"
+  },
+  "rules": {
+    "json": {
+      "key": "\"([^\"]+)\"\\s*:",
+      "string": ":\\s*\"([^\"]*)\"",
+      "number": "\\b(-?\\d+(\\.\\d+)?)\\b",
+      "boolean": "\\b(true|false|null)\\b"
+    },
+    "python": {
+      "keywords": "\\b(def|class|return|import|from|if|elif|else|for|while|try|except|finally|with|as|lambda|yield|async|await|None|True|False|self)\\b",
+      "functions": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "strings": "(\"[^\"]*\"|'[^']*')",
+      "numbers": "\\b\\d+(\\.\\d+)?\\b",
+      "comments": "(#[^\\n]*)"
+    },
+    "javascript": {
+      "keywords": "\\b(const|let|var|function|return|import|export|from|if|else|for|while|try|catch|finally|async|await|new|this|null|true|false)\\b",
+      "functions": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "strings": "(\"[^\"]*\"|'[^']*'|`[^`]*`)",
+      "numbers": "\\b\\d+(\\.\\d+)?\\b",
+      "comments": "(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)"
+    },
+    "shell": {
+      "commands": "\\b(git|npm|python|cat|ls|grep|rm|mkdir|cd|curl|docker|pip|wrangler|echo|ssh)\\b",
+      "flags": "(-{1,2}[a-zA-Z0-9_-]+)",
+      "strings": "(\"[^\"]*\"|'[^']*')",
+      "comments": "(#[^\\n]*)"
+    }
+  },
+  "dialog_box": {
+    "header_font": "Pixl",
+    "border_style": "1px solid rgba(0, 240, 255, 0.35)",
+    "border_radius": "8px",
+    "box_shadow": "0 6px 24px rgba(0, 0, 0, 0.7), 0 0 16px rgba(255, 19, 121, 0.18)",
+    "code_badge_font": "Pixl",
+    "copy_btn_font": "Pixl",
+    "streaming_cursor": true
+  }
+}

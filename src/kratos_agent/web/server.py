@@ -29,7 +29,15 @@ from ..core.runtime_contracts import EventKind, RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
-WEB_DIR = Path(__file__).resolve().parent
+def get_web_dir() -> Path:
+    """Resolve the directory containing static frontend build assets."""
+    repo_root = Path(__file__).resolve().parents[3]
+    frontend_dist = repo_root / "frontend" / "dist"
+    if frontend_dist.is_dir() and (frontend_dist / "index.html").is_file():
+        return frontend_dist
+    return Path(__file__).resolve().parent
+
+WEB_DIR = get_web_dir()
 
 
 class KratosWebHandler(BaseHTTPRequestHandler):
@@ -52,26 +60,6 @@ class KratosWebHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-
-        # Static assets
-        if path in ("/", "/index.html"):
-            self._serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
-            return
-        elif path == "/app.css":
-            self._serve_file(WEB_DIR / "app.css", "text/css; charset=utf-8")
-            return
-        elif path == "/app.js":
-            self._serve_file(WEB_DIR / "app.js", "application/javascript; charset=utf-8")
-            return
-        elif path == "/highlighter.js":
-            self._serve_file(WEB_DIR / "highlighter.js", "application/javascript; charset=utf-8")
-            return
-        elif path.startswith("/fonts/"):
-            font_filename = Path(path).name
-            font_path = WEB_DIR / "fonts" / font_filename
-            content_type = "font/ttf" if font_path.suffix.lower() == ".ttf" else "font/otf"
-            self._serve_file(font_path, content_type)
-            return
 
         # REST API Routes
         if path == "/api/stats":
@@ -96,6 +84,42 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             return
         elif path == "/api/events":
             self._handle_get_events()
+            return
+
+        # Static assets (Vite assets, images, fonts, HTML)
+        current_web_dir = get_web_dir()
+        rel_path = path.lstrip("/")
+        if not rel_path or rel_path == "index.html":
+            target_file = current_web_dir / "index.html"
+            self._serve_file(target_file, "text/html; charset=utf-8")
+            return
+
+        target_file = (current_web_dir / rel_path).resolve()
+        # Security check: ensure target is within current_web_dir
+        try:
+            target_file.relative_to(current_web_dir)
+        except ValueError:
+            self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
+            return
+
+        if target_file.is_file():
+            content_type, _ = mimetypes.guess_type(str(target_file))
+            if not content_type:
+                if target_file.suffix.lower() == ".js":
+                    content_type = "application/javascript; charset=utf-8"
+                elif target_file.suffix.lower() == ".css":
+                    content_type = "text/css; charset=utf-8"
+                else:
+                    content_type = "application/octet-stream"
+            elif "text" in content_type or "javascript" in content_type:
+                content_type += "; charset=utf-8"
+            self._serve_file(target_file, content_type)
+            return
+
+        # Fallback to index.html for SPA client-side routing
+        index_file = current_web_dir / "index.html"
+        if index_file.is_file():
+            self._serve_file(index_file, "text/html; charset=utf-8")
             return
 
         # 404 Not Found
@@ -163,12 +187,25 @@ class KratosWebHandler(BaseHTTPRequestHandler):
 
     def _handle_chat_sse(self, payload: Dict[str, Any]) -> None:
         """Streams real-time agent execution tokens, steps, and tool calls using SSE."""
-        prompt = str(payload.get("prompt", "")).strip()
+        prompt = str(
+            payload.get("prompt")
+            or payload.get("message")
+            or payload.get("query")
+            or ""
+        ).strip()
         if not prompt:
             self._send_json({"error": "Empty prompt"}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        agent_mode = bool(payload.get("agent_mode", True))
+        if "agent_mode" in payload:
+            agent_mode = bool(payload["agent_mode"])
+        elif "is_agent_mode" in payload:
+            agent_mode = bool(payload["is_agent_mode"])
+        elif "mode" in payload:
+            agent_mode = (payload["mode"] == "agent")
+        else:
+            agent_mode = True
+
         runtime = self.server.runtime
         requested_session_id = payload.get("session_id")
         if requested_session_id and runtime.memory:
@@ -205,8 +242,11 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         })
         send_event({
             "type": "step",
-            "step": "reasoning",
-            "label": "Analyzing intent & reasoning..." if agent_mode else "Highly Restricted Agent Mode / Normal Chat Mode (Static Web Hosting)"
+            "step": {
+                "tag": "INTENT ANALYSIS" if agent_mode else "NORMAL CHAT",
+                "label": "Analyzing intent & reasoning..." if agent_mode else "Synthesizing response (Normal Chat Mode)..."
+            },
+            "label": "Analyzing intent & reasoning..." if agent_mode else "Synthesizing response (Normal Chat Mode)..."
         })
 
         # Event queue to bridge runtime event bus to HTTP client
@@ -217,13 +257,34 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             p = ev.payload or {}
 
             if kind in ("understanding.started", "turn.started"):
-                ev_queue.put({"type": "step", "step": "reasoning", "label": "Classifying intent & inspecting context"})
+                ev_queue.put({
+                    "type": "step",
+                    "step": {
+                        "tag": "INSPECTING",
+                        "label": "Classifying intent & inspecting context"
+                    },
+                    "label": "Classifying intent & inspecting context"
+                })
             elif kind in ("planning.started", "plan.created"):
                 title = p.get("goal") or "Formulating autonomous plan"
-                ev_queue.put({"type": "step", "step": "planning", "label": title})
+                ev_queue.put({
+                    "type": "step",
+                    "step": {
+                        "tag": "PLANNING",
+                        "label": title
+                    },
+                    "label": title
+                })
             elif kind == "task.started":
                 t_title = p.get("title") or "Executing planned task"
-                ev_queue.put({"type": "step", "step": "planning", "label": f"Task: {t_title}"})
+                ev_queue.put({
+                    "type": "step",
+                    "step": {
+                        "tag": "TASK",
+                        "label": f"Task: {t_title}"
+                    },
+                    "label": f"Task: {t_title}"
+                })
             elif kind == "tool.started":
                 tool_name = p.get("name") or "tool"
                 tool_args = p.get("arguments") or {}
@@ -232,9 +293,21 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                     "type": "tool_call",
                     "name": tool_name,
                     "label": f"[tool call] {action_lbl}",
+                    "tool_call": {
+                        "name": tool_name,
+                        "label": action_lbl,
+                        "args": tool_args
+                    },
                     "args": tool_args
                 })
-                ev_queue.put({"type": "step", "step": "tool_call", "label": f"Calling: {action_lbl}"})
+                ev_queue.put({
+                    "type": "step",
+                    "step": {
+                        "tag": "TOOL CALL",
+                        "label": f"Calling: {action_lbl}"
+                    },
+                    "label": f"Calling: {action_lbl}"
+                })
             elif kind == "tool.completed":
                 tool_name = p.get("name") or "tool"
                 content = p.get("content") or ""
@@ -248,7 +321,14 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 if token:
                     ev_queue.put({"type": "token", "token": token})
             elif kind == "verification.started":
-                ev_queue.put({"type": "step", "step": "verifying", "label": "Running verification tests & validation"})
+                ev_queue.put({
+                    "type": "step",
+                    "step": {
+                        "tag": "VERIFICATION",
+                        "label": "Running verification tests & validation"
+                    },
+                    "label": "Running verification tests & validation"
+                })
 
         event_bus.subscribe(on_runtime_event)
 
@@ -288,21 +368,52 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         # Final response event
         if exec_result["error"]:
             send_event({"type": "error", "message": exec_result["error"]})
+            send_event({
+                "type": "done",
+                "result": f"Execution error: {exec_result['error']}",
+                "reply": f"Execution error: {exec_result['error']}",
+                "response": f"Execution error: {exec_result['error']}",
+                "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
+            })
         else:
+            send_event({
+                "type": "step",
+                "step": {
+                    "tag": "COMPLETE",
+                    "label": "Turn completed successfully."
+                },
+                "label": "Turn completed successfully."
+            })
             send_event({
                 "type": "done",
                 "result": exec_result["text"],
+                "reply": exec_result["text"],
+                "response": exec_result["text"],
+                "content": exec_result["text"],
                 "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
             })
 
     def _handle_chat_sync(self, payload: Dict[str, Any]) -> None:
         """Synchronous chat execution endpoint."""
-        prompt = str(payload.get("prompt", "")).strip()
+        prompt = str(
+            payload.get("prompt")
+            or payload.get("message")
+            or payload.get("query")
+            or ""
+        ).strip()
         if not prompt:
             self._send_json({"error": "Empty prompt"}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        agent_mode = bool(payload.get("agent_mode", True))
+        if "agent_mode" in payload:
+            agent_mode = bool(payload["agent_mode"])
+        elif "is_agent_mode" in payload:
+            agent_mode = bool(payload["is_agent_mode"])
+        elif "mode" in payload:
+            agent_mode = (payload["mode"] == "agent")
+        else:
+            agent_mode = True
+
         runtime = self.server.runtime
         from ..brain.config import get_normal_mode_model
         normal_model = get_normal_mode_model()
@@ -311,6 +422,8 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             result = runtime.run_agent(prompt, agent_mode=agent_mode)
             self._send_json({
                 "result": result,
+                "reply": result,
+                "response": result,
                 "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default",
                 "model": active_model,
                 "agent_mode": agent_mode
