@@ -154,6 +154,29 @@ export default function App() {
     }
   };
 
+function parseThinkTags(rawContent, currentReasoning = '') {
+  let reasoning = currentReasoning || '';
+  let content = rawContent || '';
+
+  if (content.includes('<think>')) {
+    const startIdx = content.indexOf('<think>') + 7;
+    const endIdx = content.indexOf('</think>');
+    if (endIdx !== -1) {
+      const extracted = content.substring(startIdx, endIdx).trim();
+      reasoning = (reasoning ? reasoning + '\n' : '') + extracted;
+      content = (content.substring(0, startIdx - 7) + content.substring(endIdx + 8)).trim();
+      return { reasoning, content, isThinking: false };
+    } else {
+      const extracted = content.substring(startIdx);
+      reasoning = (reasoning ? reasoning + '\n' : '') + extracted;
+      content = content.substring(0, startIdx - 7);
+      return { reasoning, content, isThinking: true };
+    }
+  }
+
+  return { reasoning, content, isThinking: false };
+}
+
   // Dispatch Chat Prompt
   const handleSendPrompt = async (customPrompt = null) => {
     const text = (customPrompt || inputPrompt).trim();
@@ -161,8 +184,7 @@ export default function App() {
 
     setInputPrompt('');
     setIsExecuting(true);
-    setCurrentStep({ tag: 'INITIALIZING', label: 'Connecting to Cloudflare Edge...', kind: 'reasoning' });
-    setActiveTool(null);
+    setCurrentStep({ tag: 'INITIALIZING', label: 'Connecting to Kratos Edge Worker...' });
 
     // Append user message
     const userMsg = {
@@ -177,11 +199,18 @@ export default function App() {
     const initialAgentMsg = {
       role: 'agent',
       content: '',
+      reasoning: '',
+      isThinking: false,
+      thinkingDuration: 0,
       timestamp: new Date().toLocaleTimeString()
     };
     setMessages((prev) => [...prev, initialAgentMsg]);
 
-    let accumulatedContent = '';
+    let rawContent = '';
+    let accumulatedReasoning = '';
+    let isActivelyThinking = false;
+    let thinkStartTime = Date.now();
+    let thinkingDuration = 0;
 
     try {
       const payload = {
@@ -203,10 +232,10 @@ export default function App() {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
-        accumulatedContent = `⚠️ **Error HTTP ${res.status}**: ${errText || 'Edge server error'}`;
+        rawContent = `⚠️ **Error HTTP ${res.status}**: ${errText || 'Edge server error'}`;
         setMessages((prev) => {
           const updated = [...prev];
-          updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: accumulatedContent };
+          updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: rawContent };
           return updated;
         });
         setIsExecuting(false);
@@ -241,23 +270,65 @@ export default function App() {
                   setActiveSessionId(data.session_id);
                 }
 
+                // Handle reasoning stream events
+                if (data.type === 'reasoning' || data.reasoning_token || (data.step === 'reasoning' && data.reasoning)) {
+                  const rChunk = data.reasoning_token || data.token || data.reasoning || '';
+                  if (rChunk) {
+                    accumulatedReasoning += rChunk;
+                    isActivelyThinking = true;
+                    thinkingDuration = Math.max(1, Math.round((Date.now() - thinkStartTime) / 1000));
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      updated[agentMsgIndex] = {
+                        ...updated[agentMsgIndex],
+                        reasoning: accumulatedReasoning,
+                        isThinking: true,
+                        thinkingDuration
+                      };
+                      return updated;
+                    });
+                  }
+                }
+
                 if (data.token) {
-                  accumulatedContent += data.token;
+                  rawContent += data.token;
+                  const parsed = parseThinkTags(rawContent, accumulatedReasoning);
+                  if (parsed.isThinking) {
+                    isActivelyThinking = true;
+                    thinkingDuration = Math.max(1, Math.round((Date.now() - thinkStartTime) / 1000));
+                  } else if (isActivelyThinking && parsed.content) {
+                    isActivelyThinking = false;
+                    thinkingDuration = Math.max(1, Math.round((Date.now() - thinkStartTime) / 1000));
+                  }
+
                   setMessages((prev) => {
                     const updated = [...prev];
-                    updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: accumulatedContent };
+                    updated[agentMsgIndex] = {
+                      ...updated[agentMsgIndex],
+                      content: parsed.content,
+                      reasoning: parsed.reasoning || accumulatedReasoning,
+                      isThinking: isActivelyThinking,
+                      thinkingDuration
+                    };
                     return updated;
                   });
                 } else if (data.result || data.reply || data.response || data.content) {
                   const finalTxt = data.result || data.reply || data.response || data.content;
-                  if (finalTxt && (!accumulatedContent || finalTxt.length > accumulatedContent.length)) {
-                    accumulatedContent = finalTxt;
-                    setMessages((prev) => {
-                      const updated = [...prev];
-                      updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: accumulatedContent };
-                      return updated;
-                    });
+                  if (finalTxt && (!rawContent || finalTxt.length > rawContent.length)) {
+                    rawContent = finalTxt;
                   }
+                  const parsed = parseThinkTags(rawContent, accumulatedReasoning);
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[agentMsgIndex] = {
+                      ...updated[agentMsgIndex],
+                      content: parsed.content,
+                      reasoning: parsed.reasoning || accumulatedReasoning,
+                      isThinking: false,
+                      thinkingDuration: thinkingDuration || (accumulatedReasoning ? Math.max(1, Math.round((Date.now() - thinkStartTime) / 1000)) : 0)
+                    };
+                    return updated;
+                  });
                 }
 
                 if (data.step) {
@@ -278,22 +349,45 @@ export default function App() {
             }
           }
         }
+
+        // Stream completed cleanly: finalize parse and lock duration
+        const parsedFinal = parseThinkTags(rawContent, accumulatedReasoning);
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated[agentMsgIndex]) {
+            updated[agentMsgIndex] = {
+              ...updated[agentMsgIndex],
+              content: parsedFinal.content || rawContent,
+              reasoning: parsedFinal.reasoning || accumulatedReasoning,
+              isThinking: false,
+              thinkingDuration: thinkingDuration || (accumulatedReasoning ? Math.max(1, Math.round((Date.now() - thinkStartTime) / 1000)) : 0)
+            };
+          }
+          return updated;
+        });
       } else {
         // Standard JSON response
         const data = await res.json().catch(() => ({}));
-        accumulatedContent = data.result || data.reply || data.response || data.content || JSON.stringify(data);
+        rawContent = data.result || data.reply || data.response || data.content || JSON.stringify(data);
         if (data.session_id) setActiveSessionId(data.session_id);
+        const parsed = parseThinkTags(rawContent, accumulatedReasoning);
         setMessages((prev) => {
           const updated = [...prev];
-          updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: accumulatedContent };
+          updated[agentMsgIndex] = {
+            ...updated[agentMsgIndex],
+            content: parsed.content,
+            reasoning: parsed.reasoning || accumulatedReasoning,
+            isThinking: false,
+            thinkingDuration: 0
+          };
           return updated;
         });
       }
     } catch (err) {
-      accumulatedContent = `⚠️ **Connection Error**: ${err.message || String(err)}`;
+      rawContent = `⚠️ **Connection Error**: ${err.message || String(err)}`;
       setMessages((prev) => {
         const updated = [...prev];
-        updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: accumulatedContent };
+        updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: rawContent };
         return updated;
       });
     } finally {
@@ -313,19 +407,41 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setActiveSessionData(data);
-        if (data.turns && data.turns.length > 0) {
+        const turnsList = data.turns || [];
+        if (turnsList.length > 0) {
           const restoredMessages = [];
-          data.turns.forEach((t) => {
-            restoredMessages.push({
-              role: 'user',
-              content: t.user_query,
-              timestamp: t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : ''
-            });
-            restoredMessages.push({
-              role: 'agent',
-              content: t.agent_reply,
-              timestamp: t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : ''
-            });
+          turnsList.forEach((t) => {
+            const userContent = t.user_query || t.user || t.prompt || t.query || '';
+            const rawAgentContent = t.agent_reply || t.agent || t.reply || t.response || t.content || '';
+            const parsed = parseThinkTags(rawAgentContent);
+
+            let timeStr = '';
+            if (t.timestamp) {
+              try {
+                timeStr = new Date(t.timestamp).toLocaleTimeString();
+              } catch (_) {
+                timeStr = String(t.timestamp);
+              }
+            }
+
+            if (userContent) {
+              restoredMessages.push({
+                role: 'user',
+                content: userContent,
+                timestamp: timeStr
+              });
+            }
+
+            if (rawAgentContent) {
+              restoredMessages.push({
+                role: 'agent',
+                content: parsed.content || rawAgentContent,
+                reasoning: parsed.reasoning || '',
+                isThinking: false,
+                thinkingDuration: 0,
+                timestamp: timeStr
+              });
+            }
           });
           setMessages(restoredMessages);
         }

@@ -1,6 +1,63 @@
-import React, { useRef, useEffect } from 'react';
-import { Send, Trash2, Shield, Zap, Sparkles, Terminal, CornerDownLeft, Bot, User } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Send, Trash2, Shield, Zap, Sparkles, Terminal, CornerDownLeft, Bot, User, ChevronDown } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
+
+function ReasoningAccordion({ reasoning, isThinking, duration }) {
+  const [isOpen, setIsOpen] = useState(isThinking || false);
+
+  useEffect(() => {
+    if (isThinking) {
+      setIsOpen(true);
+    }
+  }, [isThinking]);
+
+  if (!reasoning && !isThinking) return null;
+
+  return (
+    <div className="reasoning-box mb-3 rounded-xl border border-cyan-500/25 bg-[#0a1120]/70 overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.3)] transition-all">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full flex items-center justify-between px-3.5 py-2 text-left bg-black/40 hover:bg-cyan-950/40 transition-colors cursor-pointer select-none group"
+      >
+        <div className="flex items-center gap-2 text-xs font-rajdhani font-semibold text-cyan-300">
+          <span className={`inline-block text-sm transition-transform ${isThinking ? 'animate-pulse text-pink-400' : 'text-cyan-400'}`}>
+            🧠
+          </span>
+          <span className="tracking-wider uppercase font-pixl text-[11px]">
+            {isThinking 
+              ? 'Thinking process...' 
+              : (duration ? `Thought for ${duration}s` : 'Reasoning Process')}
+          </span>
+          {isThinking && (
+            <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-code bg-pink-500/20 text-pink-300 animate-pulse border border-pink-500/40">
+              Live
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 text-slate-400 group-hover:text-cyan-300 transition-colors text-xs font-code">
+          <span className="text-[10px] text-slate-500 group-hover:text-slate-400">
+            {isOpen ? 'collapse' : 'expand'}
+          </span>
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180 text-cyan-400' : 'text-slate-400'}`}
+          />
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="px-3.5 py-3 border-t border-cyan-500/15 border-l-2 border-l-cyan-400 bg-black/25 text-xs text-slate-300 font-sans leading-relaxed max-h-80 overflow-y-auto scrollbar-thin select-text">
+          <div className="whitespace-pre-wrap font-sans text-slate-300/90 text-xs sm:text-[13px] leading-relaxed">
+            {reasoning || (isThinking ? 'Analyzing prompt and formulating solution...' : '')}
+            {isThinking && (
+              <span className="inline-block w-1.5 h-3.5 bg-cyan-400 ml-1 animate-pulse align-middle" />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AgentArena({
   messages,
@@ -170,11 +227,20 @@ export default function AgentArena({
                   )}
                 </div>
 
+                {/* Reasoning Accordion */}
+                {msg.role !== 'user' && (
+                  <ReasoningAccordion
+                    reasoning={msg.reasoning}
+                    isThinking={msg.isThinking}
+                    duration={msg.thinkingDuration}
+                  />
+                )}
+
                 {/* Content */}
                 <div className="prose prose-invert max-w-none text-sm leading-relaxed min-w-0 w-full overflow-x-auto break-words">
                   <MarkdownRenderer 
                     content={msg.content} 
-                    isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user'} 
+                    isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user' && !msg.isThinking} 
                   />
                 </div>
               </div>

@@ -270,9 +270,12 @@ async function handleApi(request, env, url) {
       }
       return {
         id: tr.id,
+        turn_index: tr.turn_index,
         timestamp: tr.timestamp,
         user: tr.user_query,
+        user_query: tr.user_query,
         agent: tr.agent_reply,
+        agent_reply: tr.agent_reply,
         tools_used: tools
       };
     });
@@ -285,6 +288,15 @@ async function handleApi(request, env, url) {
       created_at: session.created_at,
       updated_at: session.updated_at,
       last_status: session.last_status,
+      session: {
+        id: session.id,
+        session_id: session.id,
+        title: session.title,
+        model: session.model,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        last_status: session.last_status
+      },
       turns
     });
   }
@@ -581,6 +593,22 @@ async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, e
     agent_mode: isAgentMode
   });
 
+  // Load prior conversation history for this session from D1
+  let historyMessages = [];
+  if (env.DB && sessionId) {
+    try {
+      const { results: prevRows } = await env.DB.prepare(
+        "SELECT user_query, agent_reply FROM turns WHERE session_id = ? ORDER BY turn_index ASC LIMIT 10"
+      ).bind(sessionId).all();
+      if (prevRows && prevRows.length > 0) {
+        for (const pr of prevRows) {
+          if (pr.user_query) historyMessages.push({ role: "user", content: pr.user_query });
+          if (pr.agent_reply) historyMessages.push({ role: "assistant", content: pr.agent_reply });
+        }
+      }
+    } catch (_) {}
+  }
+
   // 2. Normal Chat Mode (No Tool Loop, Pure Streaming Conversation)
   if (!isAgentMode) {
     send({
@@ -589,9 +617,18 @@ async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, e
       label: "Synthesizing response on Cloudflare Edge..."
     });
 
-    const reply = await streamAgentResponse(prompt, env, false, (token) => {
-      send({ type: "token", token });
-    });
+    const reply = await streamAgentResponse(
+      prompt,
+      env,
+      false,
+      (token) => {
+        send({ type: "token", token });
+      },
+      (reasoningToken) => {
+        send({ type: "reasoning", token: reasoningToken });
+      },
+      historyMessages
+    );
 
     send({
       type: "step",
@@ -782,9 +819,18 @@ async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, e
     label: "Synthesizing authoritative solution..."
   });
 
-  const finalReply = await streamAgentResponse(contextualPrompt, env, true, (token) => {
-    send({ type: "token", token });
-  });
+  const finalReply = await streamAgentResponse(
+    contextualPrompt,
+    env,
+    true,
+    (token) => {
+      send({ type: "token", token });
+    },
+    (reasoningToken) => {
+      send({ type: "reasoning", token: reasoningToken });
+    },
+    historyMessages
+  );
 
   // 8. Turn Completed Event
   send({
@@ -1082,7 +1128,21 @@ async function fetchOverSocket(urlStr, options) {
 }
 
 // Incremental TCP socket streaming for non-standard ports (e.g. OmniRoute port 20128)
-async function streamOverSocket(urlStr, options, onToken) {
+function appendBytes(a, b) {
+  const c = new Uint8Array(a.length + b.length);
+  c.set(a, 0);
+  c.set(b, a.length);
+  return c;
+}
+
+function findCrLf(buf, start = 0) {
+  for (let i = start; i < buf.length - 1; i++) {
+    if (buf[i] === 13 && buf[i + 1] === 10) return i;
+  }
+  return -1;
+}
+
+async function streamOverSocket(urlStr, options, onToken, onReasoning) {
   let connect;
   try {
     const mod = await import("cloudflare:sockets");
@@ -1124,7 +1184,7 @@ async function streamOverSocket(urlStr, options, onToken) {
   const decoder = new TextDecoder("utf-8");
   let headerParsed = false;
   let isChunked = false;
-  let rawBuffer = "";
+  let byteBuf = new Uint8Array(0);
   let sseBuffer = "";
   let accumulatedText = "";
 
@@ -1144,10 +1204,18 @@ async function streamOverSocket(urlStr, options, onToken) {
         }
         try {
           const data = JSON.parse(payload);
-          const delta = data.choices?.[0]?.delta?.content;
+          const delta = data.choices?.[0]?.delta;
           if (delta) {
-            accumulatedText += delta;
-            if (onToken) onToken(delta);
+            // Check reasoning deltas (DeepSeek / Gemini / Claude / OpenRouter)
+            const reasoning = delta.reasoning_content || delta.reasoning || delta.thought || delta.thinking;
+            if (reasoning && onReasoning) {
+              onReasoning(reasoning);
+            }
+            // Check text content deltas
+            if (delta.content) {
+              accumulatedText += delta.content;
+              if (onToken) onToken(delta.content);
+            }
           }
         } catch (_) {}
       }
@@ -1160,20 +1228,26 @@ async function streamOverSocket(urlStr, options, onToken) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      rawBuffer += decoder.decode(value, { stream: true });
+      byteBuf = appendBytes(byteBuf, value instanceof Uint8Array ? value : new Uint8Array(value));
 
       if (!headerParsed) {
-        const splitIdx = rawBuffer.indexOf("\r\n\r\n");
+        let splitIdx = -1;
+        for (let i = 0; i < byteBuf.length - 3; i++) {
+          if (byteBuf[i] === 13 && byteBuf[i + 1] === 10 && byteBuf[i + 2] === 13 && byteBuf[i + 3] === 10) {
+            splitIdx = i;
+            break;
+          }
+        }
         if (splitIdx === -1) continue;
 
-        const headerText = rawBuffer.slice(0, splitIdx);
-        rawBuffer = rawBuffer.slice(splitIdx + 4);
+        const headerText = decoder.decode(byteBuf.subarray(0, splitIdx));
+        byteBuf = byteBuf.subarray(splitIdx + 4);
         headerParsed = true;
 
         const statusMatch = headerText.match(/HTTP\/1\.[01]\s+(\d+)/);
         const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 200;
         if (statusCode < 200 || statusCode >= 300) {
-          throw new Error(`Upstream error HTTP ${statusCode}: ${rawBuffer.slice(0, 200)}`);
+          throw new Error(`Upstream error HTTP ${statusCode}: ${decoder.decode(byteBuf.subarray(0, 200))}`);
         }
 
         isChunked = /transfer-encoding:\s*chunked/i.test(headerText);
@@ -1181,35 +1255,52 @@ async function streamOverSocket(urlStr, options, onToken) {
 
       if (isChunked) {
         let isDone = false;
-        while (rawBuffer.length > 0) {
-          const lineEnd = rawBuffer.indexOf("\r\n");
-          if (lineEnd === -1) break;
+        while (byteBuf.length > 0) {
+          // Strip leading CRLF between chunks if present
+          while (byteBuf.length >= 2 && byteBuf[0] === 13 && byteBuf[1] === 10) {
+            byteBuf = byteBuf.subarray(2);
+          }
+          if (byteBuf.length === 0) break;
 
-          const sizeHex = rawBuffer.slice(0, lineEnd).trim().split(";")[0];
-          const chunkSize = parseInt(sizeHex, 16);
-          if (isNaN(chunkSize)) break;
+          const lineEnd = findCrLf(byteBuf);
+          if (lineEnd === -1) break; // Need more bytes for chunk size line
+
+          const sizeLine = decoder.decode(byteBuf.subarray(0, lineEnd)).trim().split(";")[0];
+          const chunkSize = parseInt(sizeLine, 16);
+          if (isNaN(chunkSize)) {
+            // Discard corrupted line up to CRLF to recover synchronization
+            byteBuf = byteBuf.subarray(lineEnd + 2);
+            continue;
+          }
 
           if (chunkSize === 0) {
             isDone = true;
             break;
           }
 
-          if (rawBuffer.length < lineEnd + 2 + chunkSize + 2) {
-            break; // Wait for full chunk
+          if (byteBuf.length < lineEnd + 2 + chunkSize) {
+            break; // Wait for full chunk data
           }
 
-          const chunkData = rawBuffer.slice(lineEnd + 2, lineEnd + 2 + chunkSize);
-          rawBuffer = rawBuffer.slice(lineEnd + 2 + chunkSize + 2);
+          const chunkBytes = byteBuf.subarray(lineEnd + 2, lineEnd + 2 + chunkSize);
+          byteBuf = byteBuf.subarray(lineEnd + 2 + chunkSize);
 
-          if (parseSseLines(chunkData)) {
+          // Strip immediate trailing CRLF after chunk data
+          if (byteBuf.length >= 2 && byteBuf[0] === 13 && byteBuf[1] === 10) {
+            byteBuf = byteBuf.subarray(2);
+          }
+
+          const chunkText = decoder.decode(chunkBytes);
+          if (parseSseLines(chunkText)) {
             isDone = true;
             break;
           }
         }
         if (isDone) break;
       } else {
-        if (parseSseLines(rawBuffer)) break;
-        rawBuffer = "";
+        const chunkText = decoder.decode(byteBuf);
+        byteBuf = new Uint8Array(0);
+        if (parseSseLines(chunkText)) break;
       }
     }
   } finally {
@@ -1227,7 +1318,7 @@ async function streamOverSocket(urlStr, options, onToken) {
 }
 
 // Streaming fetch over standard HTTP/HTTPS ports (80/443)
-async function streamOverFetch(endpoint, options, onToken) {
+async function streamOverFetch(endpoint, options, onToken, onReasoning) {
   const headers = Object.assign({}, options.headers, {
     "Accept": "text/event-stream"
   });
@@ -1271,10 +1362,16 @@ async function streamOverFetch(endpoint, options, onToken) {
 
           try {
             const data = JSON.parse(payload);
-            const delta = data.choices?.[0]?.delta?.content;
+            const delta = data.choices?.[0]?.delta;
             if (delta) {
-              accumulatedText += delta;
-              if (onToken) onToken(delta);
+              const reasoning = delta.reasoning_content || delta.reasoning || delta.thought || delta.thinking;
+              if (reasoning && onReasoning) {
+                onReasoning(reasoning);
+              }
+              if (delta.content) {
+                accumulatedText += delta.content;
+                if (onToken) onToken(delta.content);
+              }
             }
           } catch (_) {}
         }
@@ -1288,7 +1385,7 @@ async function streamOverFetch(endpoint, options, onToken) {
 }
 
 // High-level streaming responder that dispatches to socket or fetch and falls back to generateAgentResponse
-async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = null) {
+async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = null, onReasoning = null, historyMessages = []) {
   const systemInstruction = isAgentMode
     ? "You are Kratos, an elite autonomous AI coding assistant running in Agent Mode. Analyze instructions methodically, plan step-by-step executions, provide precise production-grade code solutions, and report actions with Spartan discipline. Directly output code without unnecessary conversational fluff."
     : "You are Kratos, an elite AI assistant operating in Normal Chat Mode. Answer questions directly, explain concepts clearly, write clean code snippets, and assist the commander with sharp technical expertise.";
@@ -1309,12 +1406,15 @@ async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = n
     return errorMsg;
   }
 
+  const messagesList = [
+    { role: "system", content: systemInstruction },
+    ...(Array.isArray(historyMessages) ? historyMessages : []),
+    { role: "user", content: prompt }
+  ];
+
   const requestBody = JSON.stringify({
     model,
-    messages: [
-      { role: "system", content: systemInstruction },
-      { role: "user", content: prompt }
-    ],
+    messages: messagesList,
     temperature: 0.7,
     max_tokens: 4096,
     stream: true
@@ -1340,7 +1440,7 @@ async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = n
         method: "POST",
         headers: requestHeaders,
         body: requestBody
-      }, onToken);
+      }, onToken, onReasoning);
 
       if (streamed && streamed.trim()) {
         return streamed.trim();
@@ -1349,7 +1449,7 @@ async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = n
       const streamed = await streamOverFetch(endpoint, {
         headers: requestHeaders,
         body: requestBody
-      }, onToken);
+      }, onToken, onReasoning);
 
       if (streamed && streamed.trim()) {
         return streamed.trim();

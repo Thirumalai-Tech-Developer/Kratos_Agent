@@ -455,4 +455,19 @@
   height: 8px;
 }
 
+/* Modern Collapsible Reasoning Box */
+.reasoning-box {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
 
+.reasoning-box:hover {
+  border-color: rgba(0, 240, 255, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.08);
+}
+
+.reasoning-box pre,
+.reasoning-box code {
+  font-family: var(--font-mono);
+}

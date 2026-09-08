@@ -152,38 +152,46 @@ export default function SessionsExplorer({
               </p>
             </div>
           ) : (
-            activeSessionData.turns.map((turn, tIdx) => (
-              <div key={turn.id || tIdx} className="space-y-3">
-                {/* User Turn */}
-                <div className="flex justify-end gap-3">
-                  <div className="max-w-[85%] rounded-2xl p-4 bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 rounded-tr-sm text-sm text-slate-100">
-                    <div className="flex items-center gap-1.5 text-[11px] font-rajdhani font-bold text-pink-400 mb-1">
-                      <User className="w-3.5 h-3.5" />
-                      <span>COMMANDER (Turn {turn.turn_index ?? tIdx + 1})</span>
+            activeSessionData.turns.map((turn, tIdx) => {
+              const userText = turn.user_query || turn.user || turn.query || turn.prompt || '';
+              const agentText = turn.agent_reply || turn.agent || turn.reply || turn.content || '';
+              return (
+                <div key={turn.id || tIdx} className="space-y-3">
+                  {/* User Turn */}
+                  {userText && (
+                    <div className="flex justify-end gap-3">
+                      <div className="max-w-[85%] rounded-2xl p-4 bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 rounded-tr-sm text-sm text-slate-100">
+                        <div className="flex items-center gap-1.5 text-[11px] font-rajdhani font-bold text-pink-400 mb-1">
+                          <User className="w-3.5 h-3.5" />
+                          <span>COMMANDER (Turn {turn.turn_index ?? tIdx + 1})</span>
+                        </div>
+                        <p className="leading-relaxed whitespace-pre-wrap">{userText}</p>
+                      </div>
                     </div>
-                    <p className="leading-relaxed">{turn.user_query}</p>
-                  </div>
-                </div>
+                  )}
 
-                {/* Agent Turn */}
-                <div className="flex justify-start gap-3">
-                  <div className="flex-shrink-0 mt-1">
-                    <img 
-                      src="/kratos_badge.png" 
-                      alt="Kratos" 
-                      className="w-8 h-8 rounded-xl object-cover border border-pink-500/40 shadow-sm"
-                    />
-                  </div>
-                  <div className="max-w-[85%] rounded-2xl p-4 glass-card border border-slate-700/60 rounded-tl-sm text-sm text-slate-100">
-                    <div className="flex items-center gap-1.5 text-[11px] font-rajdhani font-bold text-cyan-400 mb-2">
-                      <span>⚔️</span>
-                      <span>KRATOS AGENT // STORED REPLY</span>
+                  {/* Agent Turn */}
+                  {agentText && (
+                    <div className="flex justify-start gap-3">
+                      <div className="flex-shrink-0 mt-1">
+                        <img 
+                          src="/kratos_badge.png" 
+                          alt="Kratos" 
+                          className="w-8 h-8 rounded-xl object-cover border border-pink-500/40 shadow-sm"
+                        />
+                      </div>
+                      <div className="max-w-[85%] rounded-2xl p-4 glass-card border border-slate-700/60 rounded-tl-sm text-sm text-slate-100">
+                        <div className="flex items-center gap-1.5 text-[11px] font-rajdhani font-bold text-cyan-400 mb-2">
+                          <span>⚔️</span>
+                          <span>KRATOS AGENT // STORED REPLY</span>
+                        </div>
+                        <MarkdownRenderer content={agentText} />
+                      </div>
                     </div>
-                    <MarkdownRenderer content={turn.agent_reply} />
-                  </div>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
