@@ -42,11 +42,6 @@ export default function App() {
   const [payloadModalOpen, setPayloadModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // Initial Load
-  useEffect(() => {
-    refreshAll();
-  }, []);
-
   const refreshAll = async () => {
     await Promise.all([
       fetchStats(),
@@ -56,6 +51,11 @@ export default function App() {
       fetchEvents()
     ]);
   };
+
+  // Initial Load
+  useEffect(() => {
+    refreshAll();
+  }, []);
 
   const fetchStats = async () => {
     try {

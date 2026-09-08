@@ -74,6 +74,7 @@ export default function AgentArena({
 }) {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     if (messagesContainerRef.current) {
