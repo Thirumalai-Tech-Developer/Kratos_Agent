@@ -21,10 +21,10 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
   const columns = results?.length > 0 ? Object.keys(results[0]) : [];
 
   return (
-    <div className="flex flex-col h-full glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6 space-y-4">
+    <div className="flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6 space-y-4">
       
       {/* Top Header & Presets */}
-      <div>
+      <div className="flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-xs font-rajdhani font-bold text-slate-300">
             <Database className="w-4 h-4 text-cyan-400" />
@@ -50,7 +50,7 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
       </div>
 
       {/* Query Editor Box */}
-      <div className="rounded-xl overflow-hidden border border-slate-700/80 bg-slate-950/90 shadow-lg">
+      <div className="flex-shrink-0 rounded-xl overflow-hidden border border-slate-700/80 bg-slate-950/90 shadow-lg">
         <textarea
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -77,7 +77,7 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
 
       {/* Error Banner */}
       {error && (
-        <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-300 flex items-center gap-2">
+        <div className="flex-shrink-0 p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-xs text-red-300 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
           <span>{error}</span>
         </div>
@@ -92,7 +92,7 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto scrollbar-thin">
+        <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
           {!results || results.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500">
               Execute a SQL query above to view live data from Cloudflare D1 tables.

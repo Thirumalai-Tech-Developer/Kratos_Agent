@@ -35,9 +35,9 @@ class D1DatabaseClient:
         api_token: Optional[str] = None,
         local_db_path: Optional[Path] = None,
     ) -> None:
-        self.account_id = account_id or os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
-        self.database_id = database_id or os.getenv("CLOUDFLARE_D1_DATABASE_ID", "").strip()
-        self.api_token = api_token or os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
+        self.account_id = account_id.strip() if account_id is not None else os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        self.database_id = database_id.strip() if database_id is not None else os.getenv("CLOUDFLARE_D1_DATABASE_ID", "").strip()
+        self.api_token = api_token.strip() if api_token is not None else os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
         self.local_db_path = local_db_path or DEFAULT_LOCAL_DB_PATH
         self.local_db_path.parent.mkdir(parents=True, exist_ok=True)
 

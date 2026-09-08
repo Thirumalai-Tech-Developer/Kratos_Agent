@@ -73,10 +73,15 @@ export default function AgentArena({
   sessionId
 }) {
   const messagesEndRef = useRef(null);
-  const textareaRef = useRef(null);
+  const messagesContainerRef = useRef(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   }, [messages, currentStep]);
 
   const handleKeyDown = (e) => {
@@ -89,10 +94,10 @@ export default function AgentArena({
   };
 
   return (
-    <div className="flex flex-col h-full w-full min-w-0 bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
+    <div className="flex flex-col h-full w-full min-w-0 min-h-0 bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
       
       {/* Arena Stream Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-[#0d071a] border-b border-pink-500/15">
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[#0d071a] border-b border-pink-500/15">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500/80"></span>
@@ -120,7 +125,10 @@ export default function AgentArena({
       </div>
 
       {/* Messages Stream */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0">
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0"
+      >
         {messages.length === 0 ? (
           /* Welcome Card with Generated Banner */
           <div className="relative rounded-2xl overflow-hidden border border-pink-500/30 glass-panel p-6 sm:p-8 max-w-3xl mx-auto my-auto shadow-2xl">
@@ -276,7 +284,7 @@ export default function AgentArena({
       </div>
 
       {/* Input Dock */}
-      <div className="p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
+      <div className="flex-shrink-0 p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
         <div className="relative flex items-end gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-700/80 focus-within:border-pink-500/60 focus-within:shadow-[0_0_20px_rgba(255,0,127,0.25)] transition duration-200">
           
           <div className="pb-2.5 pl-2 text-pink-400 font-code text-xs select-none flex items-center gap-1">

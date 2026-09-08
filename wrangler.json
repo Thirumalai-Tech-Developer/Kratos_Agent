@@ -24,7 +24,7 @@
     "BRAIN_MODEL": "antigravity/gemini-3.7-flash-high",
     "OMNIROUTE_BASE_URL": "http://138.252.100.105:20128/v1",
     "OMNIROUTE_MODEL": "antigravity/gemini-3.7-flash-high",
-    "NORMAL_MODE_MODEL": "ds-web/deepseek-v4-flash",
+    "NORMAL_MODE_MODEL": "ds-web/deepseek-v4-flash-think",
     "AGENT_MODEL": "antigravity/gemini-3.7-flash-high",
     "AGENT_PASSWORD": "kratos"
   }

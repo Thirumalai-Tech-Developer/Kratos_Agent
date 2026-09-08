@@ -25,7 +25,7 @@ export default function AgentHud({
   const isVerifying = stepKind.includes('verify') || stepKind.includes('test');
 
   const hudContent = (
-    <div className="flex flex-col h-full space-y-3 sm:space-y-4 overflow-y-auto overflow-x-hidden scrollbar-thin pr-1 w-full min-w-0">
+    <div className="flex flex-col h-full min-h-0 space-y-3 sm:space-y-4 overflow-y-auto overflow-x-hidden scrollbar-thin pr-1 w-full min-w-0">
       
       {/* Gauge 1: Current Step Meter */}
       <div className="p-4 rounded-xl glass-panel border border-pink-500/20">
@@ -199,7 +199,7 @@ export default function AgentHud({
   return (
     <>
       {/* Desktop Persistent / Docked Panel */}
-      <aside className="hidden lg:block w-72 xl:w-80 flex-shrink-0 h-full min-w-0 overflow-hidden">
+      <aside className="hidden lg:block w-72 xl:w-80 flex-shrink-0 h-full min-h-0 min-w-0 overflow-hidden">
         {hudContent}
       </aside>
 

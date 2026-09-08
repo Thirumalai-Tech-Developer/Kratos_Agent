@@ -19,10 +19,10 @@ export default function SessionsExplorer({
   );
 
   return (
-    <div className="flex flex-col md:flex-row h-full gap-4 rounded-2xl overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full w-full min-h-0 gap-4 rounded-2xl overflow-hidden">
       
       {/* Left Column: Search & Sessions List */}
-      <aside className="w-full md:w-80 xl:w-96 flex-shrink-0 flex flex-col glass-panel rounded-2xl border border-pink-500/20 p-4 shadow-xl">
+      <aside className="w-full md:w-80 xl:w-96 flex-shrink-0 flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 p-4 shadow-xl">
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
           <div className="flex items-center gap-2 text-xs font-rajdhani font-bold text-slate-300">
             <Database className="w-4 h-4 text-pink-400" />
@@ -43,7 +43,7 @@ export default function SessionsExplorer({
         </div>
 
         {/* Sessions List */}
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
           {isLoading ? (
             <div className="p-6 text-center text-xs text-slate-500">Loading sessions from D1...</div>
           ) : filteredSessions.length === 0 ? (
@@ -82,10 +82,10 @@ export default function SessionsExplorer({
       </aside>
 
       {/* Right Column: Session Detail & Turns Stream */}
-      <div className="flex-1 flex flex-col glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl">
+      <div className="flex-1 min-w-0 min-h-0 h-full flex flex-col glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl">
         
         {/* Active Session Hero Bar */}
-        <div className="p-4 sm:p-5 bg-[#0e071c] border-b border-pink-500/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex-shrink-0 p-4 sm:p-5 bg-[#0e071c] border-b border-pink-500/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-orbitron font-bold text-lg text-white">
@@ -134,7 +134,7 @@ export default function SessionsExplorer({
         </div>
 
         {/* Turns Conversation View */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin">
           {!activeSessionId ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-slate-500 py-12">
               <Database className="w-12 h-12 text-slate-600 mb-3" />

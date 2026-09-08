@@ -32,10 +32,10 @@ export default function TraceReplay({ events, onInspectPayload, isLoading }) {
   };
 
   return (
-    <div className="flex flex-col h-full glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6">
+    <div className="flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6">
       
       {/* Top Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-white/10">
+      <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-white/10">
         
         {/* Filter Chips */}
         <div className="flex flex-wrap items-center gap-2">
@@ -61,7 +61,7 @@ export default function TraceReplay({ events, onInspectPayload, isLoading }) {
       </div>
 
       {/* Events Timeline */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1 scrollbar-thin">
         {isLoading ? (
           <div className="p-12 text-center text-xs text-slate-500">Loading trace events from D1...</div>
         ) : filteredEvents.length === 0 ? (

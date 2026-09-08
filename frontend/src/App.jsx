@@ -489,30 +489,32 @@ function parseThinkTags(rawContent, currentReasoning = '') {
   };
 
   return (
-    <div className="min-h-screen bg-[#07030e] text-slate-100 flex flex-col selection:bg-pink-600 selection:text-white cyber-grid-bg">
+    <div className="h-screen w-screen bg-[#07030e] text-slate-100 flex flex-col selection:bg-pink-600 selection:text-white cyber-grid-bg overflow-hidden">
       
       {/* Top Navbar */}
-      <Navbar
-        stats={stats}
-        telemetry={telemetry}
-        isAgentMode={isAgentMode}
-        onToggleAgentMode={handleToggleAgentMode}
-        onRefresh={refreshAll}
-        onNewSession={() => {
-          setActiveSessionId(null);
-          setActiveSessionData(null);
-          setMessages([]);
-          setActiveTab('arena');
-        }}
-        onOpenTechSpecs={() => setTechSpecsOpen(true)}
-        isHudOpen={isHudOpen}
-        onToggleHud={() => setIsHudOpen(!isHudOpen)}
-        activeTab={activeTab}
-        onSelectTab={(tab) => setActiveTab(tab)}
-      />
+      <div className="flex-shrink-0 z-40">
+        <Navbar
+          stats={stats}
+          telemetry={telemetry}
+          isAgentMode={isAgentMode}
+          onToggleAgentMode={handleToggleAgentMode}
+          onRefresh={refreshAll}
+          onNewSession={() => {
+            setActiveSessionId(null);
+            setActiveSessionData(null);
+            setMessages([]);
+            setActiveTab('arena');
+          }}
+          onOpenTechSpecs={() => setTechSpecsOpen(true)}
+          isHudOpen={isHudOpen}
+          onToggleHud={() => setIsHudOpen(!isHudOpen)}
+          activeTab={activeTab}
+          onSelectTab={(tab) => setActiveTab(tab)}
+        />
+      </div>
 
       {/* Navigation Tabs Bar */}
-      <div className="w-full bg-[#0b0616] border-b border-pink-500/15 px-4 sm:px-6 lg:px-8">
+      <div className="w-full flex-shrink-0 bg-[#0b0616] border-b border-pink-500/15 px-4 sm:px-6 lg:px-8">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between overflow-x-auto scrollbar-none">
           <div className="flex items-center gap-1 sm:gap-2 py-2">
             <button
@@ -576,15 +578,17 @@ function parseThinkTags(rawContent, currentReasoning = '') {
       </div>
 
       {/* Recruiter 1-Click Demo Strip */}
-      <RecruiterStrip onSelectPrompt={(prompt) => {
-        setActiveTab('arena');
-        handleSendPrompt(prompt);
-      }} />
+      <div className="flex-shrink-0">
+        <RecruiterStrip onSelectPrompt={(prompt) => {
+          setActiveTab('arena');
+          handleSendPrompt(prompt);
+        }} />
+      </div>
 
       {/* Main Workspace Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-5 overflow-hidden flex flex-col min-w-0">
+      <main className="flex-1 min-h-0 w-full max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3.5 overflow-hidden flex flex-col min-w-0">
         {activeTab === 'arena' && (
-          <div className="flex-1 flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 min-h-0 h-[calc(100vh-200px)] w-full min-w-0 overflow-hidden">
+          <div className="flex-1 min-h-0 h-full flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 w-full min-w-0 overflow-hidden">
             {/* Arena Chat Panel */}
             <div className="flex-1 min-w-0 h-full min-h-0 overflow-hidden flex flex-col">
               <AgentArena
@@ -616,7 +620,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         )}
 
         {activeTab === 'sessions' && (
-          <div className="flex-1 h-[calc(100vh-210px)] min-h-[580px]">
+          <div className="flex-1 min-h-0 h-full overflow-hidden">
             <SessionsExplorer
               sessions={sessions}
               activeSessionId={activeSessionId}
@@ -633,7 +637,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         )}
 
         {activeTab === 'traces' && (
-          <div className="flex-1 h-[calc(100vh-210px)] min-h-[580px]">
+          <div className="flex-1 min-h-0 h-full overflow-hidden">
             <TraceReplay
               events={events}
               onInspectPayload={(evt) => {
@@ -646,7 +650,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         )}
 
         {activeTab === 'sql' && (
-          <div className="flex-1 h-[calc(100vh-210px)] min-h-[580px]">
+          <div className="flex-1 min-h-0 h-full overflow-hidden">
             <SqlPlayground
               onExecuteQuery={handleExecuteSql}
               results={sqlResults}

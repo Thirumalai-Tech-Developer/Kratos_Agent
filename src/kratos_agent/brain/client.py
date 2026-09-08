@@ -201,7 +201,7 @@ class BrainClient:
                                 for line in resp.iter_lines(decode_unicode=False):
                                     if not line:
                                         continue
-                                    line_str = line.decode('utf-8', errors='replace').strip()
+                                    line_str = line.decode('utf-8', errors='replace').strip() if isinstance(line, (bytes, bytearray)) else str(line).strip()
                                     if line_str.startswith("data:"):
                                         chunk_payload = line_str[5:].strip()
                                         if chunk_payload == "[DONE]":
