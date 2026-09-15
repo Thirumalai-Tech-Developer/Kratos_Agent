@@ -243,10 +243,18 @@ class KratosRuntime:
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.subagents = SubagentManager(self._run_isolated)
-        from kratos_agent.utils.tools import set_subagent_runner
+        from kratos_agent.utils.tools import set_subagent_runner, set_plan_mode_handler
         set_subagent_runner(self.subagents.run)
+        self.plan_mode: bool = False
+        set_plan_mode_handler(self._on_plan_mode_exit)
         self.harness = HarnessKernel(self)
         self._init_harness()
+
+    def _on_plan_mode_exit(self, plan: str) -> None:
+        """Handles exit from Plan Mode when agent submits its final architecture plan."""
+        self.plan_mode = False
+        if hasattr(self.loop, "_on_plan_mode_exit"):
+            self.loop._on_plan_mode_exit(plan)
 
     def _init_harness(self) -> None:
         """Initialize DeepSeek Harness kernel with built-in plugins."""
@@ -269,6 +277,12 @@ class KratosRuntime:
             "CRITICAL: Never output statements describing what you will do or intend to do (e.g. 'I will inspect the workspace', 'I am going to create the files') without immediately providing the corresponding tool call in the same response. "
             "Directly invoke tools to perform inspection, file creation, code edits, terminal commands, and verification."
         ), 10))
+        self.instructions.register(InstructionModule("plan-mode-directive", "system", lambda: (
+            "YOU ARE CURRENTLY IN PLAN MODE (DeepSeek Harness / Claude Code Exploration & Planning).\n"
+            "Thoroughly explore and inspect the workspace, analyze relevant files, and design your technical implementation.\n"
+            "Do NOT make file edits (`write_file`, `edit_file`) or run mutating terminal commands until the plan has been approved.\n"
+            "When your investigation is complete and the implementation plan is ready, invoke `exit_plan_mode(plan=...)` with a detailed markdown plan starting with a '# ' header."
+        ) if getattr(self, "plan_mode", False) else "", 11))
         self.instructions.register(InstructionModule("harness-directives", "system", lambda: (
             "\n".join(self.harness.get_system_directives()) if hasattr(self, "harness") and self.harness else ""
         ), 12))
@@ -364,6 +378,16 @@ class KratosRuntime:
             tools_plugin = self.harness.get_plugin("tools")
             if tools_plugin and not tools_plugin.is_tool_allowed(spec.name):
                 return False, f"tool '{spec.name}' is disabled under active harness preset '{self.harness.active_preset_name}'"
+        if spec.name in ("todo_write", "exit_plan_mode"):
+            return True, "plan management"
+        if getattr(self, "plan_mode", False):
+            if spec.permission == ToolPermission.WRITE:
+                return False, "Plan Mode active: file modifications are disabled until the plan is approved via exit_plan_mode."
+            if spec.name == "run_terminal_command":
+                cmd = str(arguments.get("command", "")).strip().lower()
+                mutating_words = ("npm ", "npx ", "pnpm ", "yarn ", "pip ", "uv ", "python ", "rm ", "del ", "mkdir ", "touch ", "git commit", "git push", "git checkout -b", "cargo run", "cargo build")
+                if any(kw in cmd for kw in mutating_words):
+                    return False, "Plan Mode active: mutating commands are disabled until the plan is approved via exit_plan_mode."
         if spec.permission == ToolPermission.READ:
             return True, "read-only"
         if spec.permission == ToolPermission.WRITE:

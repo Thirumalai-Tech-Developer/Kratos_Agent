@@ -794,3 +794,114 @@ def read_skill(skill_name: str) -> str:
         return f"Error reading skill '{skill_name}': {e}"
 
 
+# ──────────────────────────────────────────────────────────
+# Dynamic Todo & Plan Mode Tools (DeepSeek Harness / Claude Code)
+# ──────────────────────────────────────────────────────────
+
+_todo_handler = None
+_plan_mode_handler = None
+
+
+def set_todo_handler(handler) -> None:
+    """Sets callback for dynamic todo list updates."""
+    global _todo_handler
+    _todo_handler = handler
+
+
+def set_plan_mode_handler(handler) -> None:
+    """Sets callback for exiting plan mode."""
+    global _plan_mode_handler
+    _plan_mode_handler = handler
+
+
+def todo_write(todos) -> str:
+    """
+    Updates the agent's dynamic todo/task list with a whole-list replacement.
+    Accepts a list of dicts with 'content' and 'status' ('pending', 'in_progress', 'completed').
+    Also accepts JSON-encoded strings if passed by the LLM.
+    """
+    global _todo_handler
+    step_tracker.start("Updating todo list...")
+    try:
+        items = todos
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = [{"content": str(items).strip(), "status": "pending"}]
+
+        if isinstance(items, dict):
+            if "todos" in items:
+                items = items["todos"]
+            else:
+                items = [items]
+
+        if not isinstance(items, list):
+            items = [{"content": str(items).strip(), "status": "pending"}]
+
+        normalized = []
+        for it in items:
+            if isinstance(it, dict):
+                content = str(it.get("content") or it.get("title") or it.get("task") or "Untitled task").strip()
+                status = str(it.get("status") or "pending").strip().lower()
+            elif isinstance(it, str):
+                content = it.strip()
+                status = "pending"
+            else:
+                content = str(it)
+                status = "pending"
+
+            if status not in ("pending", "in_progress", "completed", "running"):
+                status = "pending"
+            if status == "running":
+                status = "in_progress"
+            normalized.append({"content": content, "status": status})
+
+        completed_count = sum(1 for t in normalized if t["status"] == "completed")
+        in_progress_count = sum(1 for t in normalized if t["status"] == "in_progress")
+        pending_count = sum(1 for t in normalized if t["status"] == "pending")
+
+        if _todo_handler:
+            try:
+                _todo_handler(normalized)
+            except Exception as handler_err:
+                step_tracker.fail("Todo handler failed", str(handler_err))
+
+        summary = f"Todo list updated: {len(normalized)} item(s) ({completed_count} completed, {in_progress_count} in_progress, {pending_count} pending)."
+        step_tracker.complete("[bold white]Todos Updated[/bold white]", f"{completed_count}/{len(normalized)} done", success=True)
+        return summary
+    except Exception as e:
+        step_tracker.fail("Failed to update todo list", str(e))
+        return f"Error updating todo list: {e}"
+
+
+def exit_plan_mode(plan: str) -> str:
+    """
+    Exits Plan Mode and presents the complete implementation plan for user review.
+    The plan must be formatted as markdown starting with '#'.
+    """
+    global _plan_mode_handler
+    step_tracker.start("Submitting plan & exiting Plan Mode...")
+    try:
+        plan_str = str(plan or "").strip()
+        if not plan_str:
+            step_tracker.fail("Plan submission empty")
+            return "Error: Plan content cannot be empty. Please provide a complete markdown plan starting with '#'."
+
+        if not plan_str.startswith("#"):
+            plan_str = f"# Implementation Plan\n\n{plan_str}"
+
+        if _plan_mode_handler:
+            try:
+                _plan_mode_handler(plan_str)
+            except Exception as handler_err:
+                step_tracker.fail("Plan mode handler failed", str(handler_err))
+
+        step_tracker.complete("[bold white]Plan Mode Exited[/bold white]", "Plan presented for review", success=True)
+        return "Plan submitted successfully. Plan Mode is now exited. Proceeding to execution upon user confirmation."
+    except Exception as e:
+        step_tracker.fail("Failed to exit Plan Mode", str(e))
+        return f"Error exiting Plan Mode: {e}"
+
+
+

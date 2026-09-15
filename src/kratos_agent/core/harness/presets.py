@@ -84,6 +84,8 @@ CodePreset = HarnessPreset(
         "git_commit",
         "save_memory",
         "read_memory",
+        "todo_write",
+        "exit_plan_mode",
     ],
     model_config={
         "temperature": 0.1,

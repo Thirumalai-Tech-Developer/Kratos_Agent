@@ -85,6 +85,7 @@ HELP_TEXT = """
   [bold cyan]/gateway[/bold cyan]                - View Brain Gateway status & configuration (alias: /accounts)
   [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
   [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto][/dim] - Set approval mode (Codex-style)
+  [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Plan Mode (DeepSeek Harness & Claude Code)
   [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - DeepSeek Harness presets & plugins manager
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
   [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse or search 500+ Claude Code system prompts
@@ -159,6 +160,9 @@ class KratosCompleter(Completer):
         ("/skill remove", "Uninstall an active skill (e.g. /skill remove <name>)"),
         ("/create-tool", "Autonomously forge and hot-reload a new tool"),
         ("/tools", "Inspect active and self-created tools (edit_file, grep, etc.)"),
+        ("/plan", "Toggle or enter Plan Mode for architectural exploration"),
+        ("/plan on", "Turn on Plan Mode (read-only architectural exploration)"),
+        ("/plan off", "Turn off Plan Mode (resume full execution capability)"),
         ("/compact", "Compress conversation history & optimize token context"),
         ("/harness", "DeepSeek Harness status, preset mode, plugins & trace"),
         ("/harness status", "Inspect active preset, loaded plugins and health"),
@@ -1437,6 +1441,30 @@ def start_interactive_cli():
                         console.print(f"  {badge}")
                     console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto[/dim]\n")
                 continue
+
+            # /plan [on|off|<query>] — Plan Mode (DeepSeek Harness & Claude Code)
+            if user_input.lower().startswith("/plan"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip() if len(parts) > 1 else ""
+                if arg.lower() in ("off", "exit", "disable", "stop"):
+                    runtime.plan_mode = False
+                    console.print("\n[bold gold1]📋 Plan Mode:[/bold gold1] [bold yellow]OFF[/bold yellow] (Full execution enabled)\n")
+                    continue
+                elif arg.lower() in ("on", "enable", "start"):
+                    runtime.plan_mode = True
+                    console.print("\n[bold gold1]📋 Plan Mode:[/bold gold1] [bold green]ON[/bold green]")
+                    console.print("[dim]Agent will explore, inspect, and draft an architecture plan without making file modifications.[/dim]\n")
+                    continue
+                elif not arg:
+                    runtime.plan_mode = not getattr(runtime, "plan_mode", False)
+                    state = "[bold green]ON[/bold green]" if runtime.plan_mode else "[bold yellow]OFF[/bold yellow]"
+                    console.print(f"\n[bold gold1]📋 Plan Mode:[/bold gold1] {state}")
+                    console.print("[dim]Usage: /plan on | /plan off | /plan <task>[/dim]\n")
+                    continue
+                else:
+                    runtime.plan_mode = True
+                    console.print(f"\n[bold gold1]📋 Plan Mode activated for:[/bold gold1] {arg}\n")
+                    user_input = arg
 
             # /harness [status|mode|plugins|trace] — DeepSeek Harness manager
             if user_input.lower().startswith("/harness"):

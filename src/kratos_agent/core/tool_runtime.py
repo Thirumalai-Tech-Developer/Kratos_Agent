@@ -85,15 +85,16 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
             continue
         name = item.get("name", function_name)
         permission = _permission_for(name)
+        params = item.get("parameters") or _signature_schema(handler)
         registry.register(
-            ToolSpec(name=name, description=item.get("description", ""), parameters=_signature_schema(handler), permission=permission),
+            ToolSpec(name=name, description=item.get("description", ""), parameters=params, permission=permission),
             handler,
         )
     return registry
 
 
 def _permission_for(name: str) -> ToolPermission:
-    if name in {"read_file", "list_directory", "grep_search", "git_status", "git_diff", "read_skill", "list_skills", "read_memory"}:
+    if name in {"read_file", "list_directory", "grep_search", "git_status", "git_diff", "read_skill", "list_skills", "read_memory", "todo_write", "exit_plan_mode"}:
         return ToolPermission.READ
     if name in {"write_file", "edit_file", "save_memory", "clear_memory"}:
         return ToolPermission.WRITE

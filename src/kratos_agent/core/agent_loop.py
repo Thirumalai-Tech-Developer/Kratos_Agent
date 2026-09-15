@@ -61,6 +61,12 @@ def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
         return f"committing git changes: {msg[:30]}" if msg else "committing git changes"
     if name == "git_push":
         return "pushing to remote"
+    if name == "todo_write":
+        todos = args.get("todos", [])
+        count = len(todos) if isinstance(todos, list) else 1
+        return f"updating task list ({count} items)"
+    if name == "exit_plan_mode":
+        return "submitting implementation plan & exiting plan mode"
     return f"executing {name}"
 
 
@@ -106,6 +112,10 @@ def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -
         return "[tool call] committed git changes"
     if name == "git_push":
         return "[tool call] pushed to remote"
+    if name == "todo_write":
+        return "[tool call] updated todo list"
+    if name == "exit_plan_mode":
+        return "[tool call] plan submitted"
     return f"[tool call] completed {name}"
 
 
@@ -132,6 +142,52 @@ class AgentLoop:
         self.verification_manager = VerificationManager(self.workspace, self.emit)
         self.current_plan: Optional[ExecutionPlan] = None
         self.last_verification: Optional[VerificationResult] = None
+        self._current_turn_id: str = ""
+
+        # Wire dynamic todo_write and exit_plan_mode tool handlers
+        try:
+            from kratos_agent.utils.tools import set_todo_handler, set_plan_mode_handler
+            set_todo_handler(self._on_todo_update)
+            set_plan_mode_handler(self._on_plan_mode_exit)
+        except Exception:
+            pass
+
+    def _on_todo_update(self, todos: list) -> None:
+        """Handles whole-list todo updates from todo_write tool call."""
+        from kratos_agent.core.task_manager import ExecutionPlan, TaskItem, TaskState, AgentState
+
+        task_items: List[TaskItem] = []
+        for i, item in enumerate(todos):
+            content = str(item.get("content", f"Task {i+1}")).strip()
+            status = str(item.get("status", "pending")).lower()
+            if status == "completed":
+                state = TaskState.COMPLETED
+            elif status in ("in_progress", "running"):
+                state = TaskState.RUNNING
+            else:
+                state = TaskState.PENDING
+            task_item = TaskItem(
+                id=f"todo_{i+1}",
+                title=content,
+                state=state,
+            )
+            if state == TaskState.COMPLETED:
+                task_item.complete("Completed by agent")
+            task_items.append(task_item)
+
+        if not self.current_plan:
+            self.current_plan = ExecutionPlan(goal="Agent Plan", tasks=task_items, title="TODO LIST")
+        else:
+            self.current_plan.tasks = task_items
+
+        self.current_plan.state = AgentState.EXECUTING
+        turn_id = getattr(self, "_current_turn_id", "") or "todo_sync"
+        self.emit(RuntimeEvent(EventKind.PLAN_CREATED, self.current_plan.to_dict(), turn_id))
+
+    def _on_plan_mode_exit(self, plan: str) -> None:
+        """Handles plan submission and exit from plan mode."""
+        turn_id = getattr(self, "_current_turn_id", "") or "plan_exit"
+        self.emit(RuntimeEvent(EventKind.PLAN_CREATED, {"plan_markdown": plan, "status": "submitted"}, turn_id))
 
     def emit(self, event: RuntimeEvent) -> None:
         """Emits event through both the direct callback and the global EventBus."""
@@ -181,6 +237,7 @@ class AgentLoop:
         resume_plan: Optional[ExecutionPlan] = None,
     ) -> tuple[str, List[ChatMessage]]:
         turn_id = uuid.uuid4().hex
+        self._current_turn_id = turn_id
         self.workspace_tracker.reset()
         self.last_verification = None
 

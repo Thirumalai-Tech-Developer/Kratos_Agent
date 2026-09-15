@@ -107,7 +107,7 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKi
     complex_indicators = (
         "create a webapp", "create a website", "create an app", "create a full", "build a webapp",
         "build a website", "build an app", "build a full", "scaffold", "three.js", "threejs",
-        "spiderman", "spider-man", "game", "dashboard", "full stack", "fullstack", "clone", "portfolio"
+        "game", "dashboard", "full stack", "fullstack", "clone", "portfolio"
     )
     if any(ind in q for ind in complex_indicators):
         return IntentKind.COMPLEX_AGENT_TASK
@@ -384,83 +384,35 @@ def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) ->
     file_matches = re.findall(r'([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)', q_clean)
     target_files = [f for f in file_matches if not f.endswith(".com") and not f.endswith(".org")]
 
-    # Extract technologies / frameworks mentioned
-    techs = []
-    for tech in ("streamlit", "react", "vite", "tailwind", "fastapi", "flask", "django", "nextjs", "vue", "docker", "three.js", "threejs", "sqlite", "postgres"):
-        if tech in q.lower():
-            techs.append(tech.capitalize())
-
-    tech_str = " + ".join(techs) if techs else ""
-    goal = f"Implement {q_clean[:60]}" if not q_clean.lower().startswith("implement") else q_clean[:60]
+    # Normalize naming for goal (supports Spider-Man, etc.)
+    goal_text = re.sub(r'\bspiderman\b', 'spider-man', q_clean, flags=re.IGNORECASE)
+    if not goal_text.lower().startswith(("create", "build", "implement", "add", "fix", "refactor", "develop")):
+        goal = f"Implement {goal_text[:60]}"
+    else:
+        goal = goal_text[:60]
+    goal = goal[0].upper() + goal[1:] if goal else "Execute requested tasks"
 
     tasks: List[TaskItem] = []
 
     # 1. Project & File Inspection
     if target_files:
         tasks.append(TaskItem(id="1", title=f"Inspect workspace and target file ({', '.join(target_files[:2])})", state=TaskState.PENDING))
-    elif techs:
-        tasks.append(TaskItem(id="1", title=f"Inspect existing project and {tech_str} environment", state=TaskState.PENDING))
     else:
-        tasks.append(TaskItem(id="1", title=f"Analyze requirements for '{q_clean[:45]}'", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="1", title=f"Inspect workspace and project environment for {goal_text[:40]}", state=TaskState.PENDING))
 
-    # 2. Design & Architecture
-    if "spiderman" in q.lower() or "spider-man" in q.lower():
-        tasks.append(TaskItem(id="2", title="Design Spider-Man suit gallery and theme architecture", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="3", title="Implement Spider-Man interactive webapp components", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title="Add hero section, suit controls, and responsive styling", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="5", title="Verify Spider-Man webapp and workspace integrity", state=TaskState.PENDING))
-        return ExecutionPlan(goal="Create a Spider-Man web application", tasks=tasks)
+    # 2. Architecture & Design
+    tasks.append(TaskItem(id="2", title=f"Design architecture and component layout for {goal_text[:45]}", state=TaskState.PENDING))
 
-    if any(ind in q.lower() for ind in ("website", "webapp", "web app", "ben 10", "portfolio", "dashboard", "game")):
-        loc_match = re.search(r'at\s+["\']?([a-zA-Z0-9_:\\\/\s\-\.]+?)["\']?(?:\s+this|\s+location|\s+and|\s*$)', q, re.IGNORECASE)
-        loc_str = loc_match.group(1).strip() if loc_match else ""
-        target_name = "Ben 10" if "ben 10" in q.lower() else (q_clean[:30])
-
-        tasks = [
-            TaskItem(id="1", title=f"Inspect target environment and ensure directory{f' ({loc_str})' if loc_str else ''}", state=TaskState.PENDING),
-            TaskItem(id="2", title=f"Scaffold {tech_str or 'React + Vite'} application and configure TailwindCSS", state=TaskState.PENDING, verification="build"),
-            TaskItem(id="3", title=f"Design {target_name} UI components and interactive theme layout", state=TaskState.PENDING),
-            TaskItem(id="4", title=f"Implement sound effects, transformations, and responsive assets", state=TaskState.PENDING),
-            TaskItem(id="5", title=f"Build and verify {target_name} web application", state=TaskState.PENDING, verification="build"),
-        ]
-        return ExecutionPlan(goal=f"Create {target_name} website with {tech_str or 'React + Vite'}", tasks=tasks)
-
-    if "streamlit" in q.lower():
-        tfile = target_files[0] if target_files else "interface.py"
-        tasks.append(TaskItem(id="2", title=f"Design Streamlit LLM interface layout and state handling", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="3", title=f"Implement {tfile} with chat interface and client integration", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title=f"Validate Streamlit execution and verify {tfile}", state=TaskState.PENDING))
-        return ExecutionPlan(goal=f"Create Streamlit LLM interface in {tfile}", tasks=tasks)
-
-    if "dark mode" in q.lower() or "dark theme" in q.lower():
-        tasks.append(TaskItem(id="2", title="Design dark theme color palette and CSS variables", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="3", title="Implement ThemeToggle component and state persistence", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title="Apply dark mode styles across application components", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="5", title="Verify theme switching and visual styling", state=TaskState.PENDING))
-        return ExecutionPlan(goal=f"Add dark mode support", tasks=tasks)
-
-    if "fix" in q.lower() or "bug" in q.lower() or "error" in q.lower():
-        tasks.append(TaskItem(id="2", title=f"Diagnose root cause of {q_clean[:45]}", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="3", title=f"Apply targeted bug fix and verify changes", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title="Run verification and regression checks", state=TaskState.PENDING))
-        return ExecutionPlan(goal=f"Fix issue: {q_clean[:50]}", tasks=tasks)
-
-    if "refactor" in q.lower() or "cleanup" in q.lower():
-        tasks.append(TaskItem(id="2", title=f"Analyze code structure and modularization opportunities", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="3", title=f"Refactor components and optimize code flow", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title="Verify no regressions and test workspace", state=TaskState.PENDING))
-        return ExecutionPlan(goal=f"Refactor: {q_clean[:50]}", tasks=tasks)
-
-    # General Dynamic Tasks for any request
-    main_action = q_clean
+    # 3. Core Implementation
     if target_files:
-        tasks.append(TaskItem(id="2", title=f"Implement requested changes in {target_files[0]}", state=TaskState.PENDING))
-    elif techs:
-        tasks.append(TaskItem(id="2", title=f"Implement {tech_str} components and logic", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="3", title=f"Implement core logic in {target_files[0]}", state=TaskState.PENDING))
     else:
-        tasks.append(TaskItem(id="2", title=f"Implement {main_action[:50]}", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="3", title=f"Implement core functionality for {goal_text[:45]}", state=TaskState.PENDING))
 
-    tasks.append(TaskItem(id="3", title="Configure integration, styling, and dependencies", state=TaskState.PENDING))
-    tasks.append(TaskItem(id="4", title=f"Verify implementation and confirm workspace integrity", state=TaskState.PENDING))
+    # 4. Integration, Styling & Dependencies
+    tasks.append(TaskItem(id="4", title=f"Configure integration, dependencies, and styling for {goal_text[:40]}", state=TaskState.PENDING))
+
+    # 5. Verification & Testing
+    tasks.append(TaskItem(id="5", title=f"Verify {goal_text[:40]} and confirm workspace integrity", state=TaskState.PENDING, verification="build"))
 
     return ExecutionPlan(goal=goal, tasks=tasks)

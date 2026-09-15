@@ -396,6 +396,55 @@
                     "skill_name"
                 ]
             }
+        },
+        {
+            "name": "todo_write",
+            "description": "Updates the dynamic todo list with whole-list replacement. Use this to track multi-step progress dynamically, update task statuses ('pending', 'in_progress', 'completed'), or adapt milestones as new information is discovered. Overwrites the full todo list.",
+            "func_name": "todo_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Complete list of todo items reflecting current progress.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "description": "Clear, actionable description of the task or milestone"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed"],
+                                    "description": "Current status of this task ('pending', 'in_progress', 'completed')"
+                                }
+                            },
+                            "required": ["content", "status"]
+                        }
+                    }
+                },
+                "required": [
+                    "todos"
+                ]
+            }
+        },
+        {
+            "name": "exit_plan_mode",
+            "description": "Exits Plan Mode and presents the complete implementation plan to the user for review and confirmation. Call this after thoroughly exploring the workspace and designing your implementation. The plan argument must be formatted as markdown starting with '#'.",
+            "func_name": "exit_plan_mode",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "type": "string",
+                        "description": "The complete markdown implementation plan starting with a '#' header"
+                    }
+                },
+                "required": [
+                    "plan"
+                ]
+            }
         }
     ]
 }
