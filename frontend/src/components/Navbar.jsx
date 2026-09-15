@@ -116,19 +116,19 @@ export default function Navbar({
                   ? 'bg-pink-600/25 border-pink-500 text-white shadow-[0_0_15px_rgba(255,0,127,0.4)]' 
                   : 'bg-slate-900/60 border-slate-700 text-slate-300 hover:border-slate-500'
               }`}
-              title={isAgentMode ? "Agent Mode Active (Autonomous execution enabled)" : "Click to unlock Agent Mode"}
+              title={isAgentMode ? "Autonomous Agent Mode Active (Zero Sandbox Restrictions)" : "Click to switch mode"}
             >
               <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${isAgentMode ? 'bg-pink-500 animate-pulse' : 'bg-slate-500'}`}></span>
               {isAgentMode ? (
                 <>
                   <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-pink-400 flex-shrink-0" />
-                  <span className="tracking-wider sm:inline hidden">AGENT: ON</span>
+                  <span className="tracking-wider sm:inline hidden">AGENT: UNRESTRICTED</span>
                   <span className="tracking-wider sm:hidden inline">AGENT</span>
                 </>
               ) : (
                 <>
-                  <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
-                  <span className="tracking-wider sm:inline hidden">NORMAL CHAT</span>
+                  <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                  <span className="tracking-wider sm:inline hidden">DIRECT CHAT</span>
                   <span className="tracking-wider sm:hidden inline">CHAT</span>
                 </>
               )}

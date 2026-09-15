@@ -172,9 +172,11 @@ class D1DatabaseClient:
             turns_count = (self.execute("SELECT COUNT(*) as c FROM turns") or [{}])[0].get("c", 0)
             events_count = (self.execute("SELECT COUNT(*) as c FROM agentic_events") or [{}])[0].get("c", 0)
             commands_count = (self.execute("SELECT COUNT(*) as c FROM commands") or [{}])[0].get("c", 0)
+            cog_mem_res = self.execute("SELECT COUNT(*) as c FROM cognitive_memory") or [{}]
+            cognitive_memory_count = cog_mem_res[0].get("c", 0) if cog_mem_res else 0
             is_healthy = True
         except Exception as exc:
-            sessions_count = turns_count = events_count = commands_count = 0
+            sessions_count = turns_count = events_count = commands_count = cognitive_memory_count = 0
             error_msg = str(exc)
 
         latency_ms = (time.monotonic() - start) * 1000
@@ -190,6 +192,7 @@ class D1DatabaseClient:
             "turns_count": turns_count,
             "events_count": events_count,
             "commands_count": commands_count,
+            "cognitive_memory_count": cognitive_memory_count,
             "error": error_msg,
         }
 

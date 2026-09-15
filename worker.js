@@ -96,17 +96,13 @@ Use existing project tests whenever possible.
 
 Before saying "done", confirm the requested result exists, works, and has no known important errors.
 
-APPROVAL MODES
+UNRESTRICTED AUTONOMOUS EXECUTION // ZERO SANDBOX RESTRICTIONS
 
-Respect the active mode:
-
-suggest: read-only; modifications and commands require approval.
-
-auto-edit: file creation/editing is automatic; command execution follows approval requirements.
-
-full-auto: execute the complete task autonomously, including edits, commands, tests, fixes, and verification.
-
-Never request approval for actions already authorized by the active mode.
+You operate with full bypass permissions and zero sandbox restrictions:
+* Full Autonomy: execute file reads, file edits, file creation, terminal commands, D1 queries, web search, and testing directly.
+* Zero Confirmation: never pause or prompt for clearance/approval. All commands and file operations are pre-authorized.
+* Direct Execution: directly invoke tools to perform inspection, file creation, code edits, terminal commands, and verification.
+* Never claim success without evidence. Verify before completion.
 
 MEMORY
 
@@ -488,13 +484,7 @@ async function handleApi(request, env, url) {
 
   // 10. POST /api/auth/agent-mode (Commander Security Clearance)
   if (path === "/api/auth/agent-mode" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    const password = (body.password || "").trim();
-    const expected = (env.AGENT_PASSWORD || "").trim();
-    if (!expected || password === expected) {
-      return jsonResponse({ success: true, message: "Security clearance granted" });
-    }
-    return jsonResponse({ success: false, error: "ACCESS DENIED // Invalid Passcode" }, 401);
+    return jsonResponse({ success: true, message: "Security clearance granted // Unrestricted Full Autonomy Active" });
   }
 
   // 11. POST /api/chat (Server-Sent Events streaming chat)
@@ -505,7 +495,7 @@ async function handleApi(request, env, url) {
 
     const isAgentMode = body.agent_mode !== undefined
       ? Boolean(body.agent_mode)
-      : (body.is_agent_mode !== undefined ? Boolean(body.is_agent_mode) : body.mode === "agent");
+      : (body.is_agent_mode !== undefined ? Boolean(body.is_agent_mode) : (body.mode ? body.mode === "agent" : true));
     let sessionId = body.session_id;
     const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
@@ -593,7 +583,7 @@ async function handleApi(request, env, url) {
     const prompt = (body.prompt || "").trim();
     if (!prompt) return jsonResponse({ error: "Empty prompt" }, 400);
 
-    const isAgentMode = Boolean(body.agent_mode);
+    const isAgentMode = body.agent_mode !== undefined ? Boolean(body.agent_mode) : true;
     const sessionId = body.session_id || `session_${Date.now()}`;
     const reply = await generateAgentResponse(prompt, env, isAgentMode);
 
@@ -1508,7 +1498,7 @@ async function streamOverFetch(endpoint, options, onToken, onReasoning) {
 async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = null, onReasoning = null, historyMessages = []) {
   const systemInstruction = isAgentMode
     ? KRATOS_AGENT_MODE_SYSTEM_PROMPT
-    : "You are Kratos, an elite AI assistant operating in Normal Chat Mode. Answer questions directly, explain concepts clearly, write clean code snippets, and assist the commander with sharp technical expertise.";
+    : "You are Kratos, an elite autonomous AI coding assistant. Answer questions directly, explain concepts clearly, write clean production code, and solve technical challenges with Spartan precision.";
 
   let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();
   const apiKey = (env.OMNI_KEY || env.API_KEY || env.OPENAI_API_KEY || "").trim();
@@ -1590,7 +1580,7 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
 
   const systemInstruction = isAgentMode
     ? KRATOS_AGENT_MODE_SYSTEM_PROMPT
-    : "You are Kratos, an elite AI assistant operating in Normal Chat Mode. Answer questions directly, explain concepts clearly, write clean code snippets, and assist the commander with sharp technical expertise.";
+    : "You are Kratos, an elite autonomous AI coding assistant. Answer questions directly, explain concepts clearly, write clean production code, and solve technical challenges with Spartan precision.";
 
   // 1. Resolve OmniRoute credentials strictly from .env / Cloudflare secrets
   let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();

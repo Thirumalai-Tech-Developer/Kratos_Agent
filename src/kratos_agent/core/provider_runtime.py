@@ -70,20 +70,25 @@ class BrainAdapter(ModelAdapter):
                 "\n\n## AVAILABLE TOOLS\n"
                 "You have access to the following tools defined by JSON schemas:\n"
                 + json.dumps(tools, ensure_ascii=False, indent=2)
-                + "\n\n## TOOL CALLING INSTRUCTIONS:\n"
-                "- Whenever you need to perform an action (read a file, write a file, edit code, run terminal commands, etc.), you MUST invoke the tool.\n"
-                "- Invoke a tool ONLY using the format: call:TOOL_NAME{\"param\": \"value\"}\n"
+                + "\n\n## STRICT STRUCTURAL OUTPUT PROTOCOL:\n"
+                "- Whenever you need to perform ANY action (inspect, read, write, edit, run terminal commands, verify, save/read memory), you MUST output a structured tool call.\n"
+                "- Permitted tool calling formats:\n"
+                "  1. call:TOOL_NAME{\"param\": \"value\"}\n"
+                "  2. <tool>{\"name\": \"TOOL_NAME\", \"arguments\": {\"param\": \"value\"}}</tool>\n"
                 "- Examples:\n"
                 "  call:write_file{\"file_path\": \"app.py\", \"content\": \"print('hello')\"}\n"
                 "  call:read_file{\"file_path\": \"package.json\"}\n"
                 "  call:run_terminal_command{\"command\": \"npm test\"}\n"
-                "- Do NOT write explanations or conversational text instead of calling a tool when action is required.\n"
-                "- Output the tool call directly.\n"
+                "  call:save_memory{\"memory_type\": \"semantic\", \"key\": \"tech_stack\", \"content\": \"Vite + React\"}\n"
+                "  call:read_memory{\"memory_type\": \"semantic\"}\n"
+                "- CRITICAL: NEVER output conversational intent or preambles ('Let me check...', 'I will now scaffold...') without immediate executable tool calls.\n"
+                "- NEVER output raw DSML closure tokens (e.g. </｜｜DSML｜｜ parameter>) as plain conversational text.\n"
+                "- When execution is required, output the tool calls directly without conversational monologue.\n"
             )
             system_content = (system_content or "") + tool_hint
 
         # Intelligent tool-call detection for streaming:
-        # Buffer early tokens to detect if output starts with a tool call (call:, <tool_call>, {"name":)
+        # Buffer early tokens to detect if output starts with a tool call (call:, <tool, <｜tool, {"name":)
         buffered_chunks: List[str] = []
         is_tool_stream = False
         streaming_active = False
@@ -95,7 +100,7 @@ class BrainAdapter(ModelAdapter):
                 return
 
             recent_text += chunk
-            if "call:" in recent_text or "<tool_call>" in recent_text or '{"name":' in recent_text:
+            if any(k in recent_text for k in ("call:", "<tool", "<｜tool", "<｜｜DSML", "<||DSML", "DSML｜｜", "DSML||", '{"name":')):
                 is_tool_stream = True
                 buffered_chunks.clear()
                 return
@@ -106,14 +111,14 @@ class BrainAdapter(ModelAdapter):
                 stripped = buf_str.lstrip()
 
                 # Check if this looks like a tool call starting
-                if any(stripped.startswith(p) for p in ("call:", "<tool_call", "{\"name\"", "{\n  \"name\"")):
+                if any(stripped.startswith(p) for p in ("call:", "<tool", "<｜tool", "<｜｜DSML", "<||DSML", "<｜｜", "<||", "{\"name\"", "{\n  \"name\"")):
                     is_tool_stream = True
                     buffered_chunks.clear()
                     return
 
                 # If buffer has enough characters or newline and not matching tool call start, flush it
                 has_enough = len(stripped) >= 12 or "\n" in stripped
-                might_be_tool = any(p.startswith(stripped[:min(len(stripped), 5)]) for p in ("call:", "<tool_call>"))
+                might_be_tool = any(p.startswith(stripped[:min(len(stripped), 5)]) for p in ("call:", "<tool", "<｜", "<||"))
                 if has_enough or not might_be_tool:
                     streaming_active = True
                     for c in buffered_chunks:

@@ -139,16 +139,114 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         "execute_python_code", "run_diagnostics", "open_browser_preview",
         "inspect_page_dom", "interact_with_element", "capture_page_screenshot",
         "save_memory", "read_memory", "clear_memory",
+        "fetch_url", "google_search", "self_tool_creator", "calculate_expression",
+        "git_status", "git_diff", "git_commit", "git_push", "git_create_pr",
     }
 
-    # 1. Harmony / OpenAI OSS / ChatML channel commentary format:
-    # <|channel|>commentary to=call:TOOL_NAME\n<|constrain|>json<|message|>ARGS<|call|>
+    RESERVED_TOOL_NAMES = {"tool", "tools", "function", "call", "commentary", "channel", "constrain", "message"}
+
+    # 1. DeepSeek V3 / R1 <｜tool call begin｜> format:
+    ds_tool_pattern = re.compile(
+        r'<[｜|]tool call begin[｜|]>\s*(?:function)?\s*<[｜|]tool sep[｜|]>\s*([a-zA-Z0-9_]+)\s*(?:```(?:json)?\s*)?(\{[\s\S]*?\})\s*(?:```)?\s*<[｜|]tool call end[｜|]>',
+        re.IGNORECASE
+    )
+    for m in ds_tool_pattern.finditer(text):
+        if any(start <= m.start() < end for start, end in removed_spans):
+            continue
+        name = m.group(1)
+        if name in RESERVED_TOOL_NAMES:
+            continue
+        try:
+            args = json.loads(m.group(2))
+            if name in VALID_TOOLS or name.isidentifier():
+                tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
+                removed_spans.append((m.start(), m.end()))
+        except Exception:
+            pass
+
+    # 1b. DeepSeek DSML <｜｜DSML｜｜ invoke name="...">...<｜｜DSML｜｜ parameter name="...">...</｜｜DSML｜｜ parameter> format:
+    dsml_invoke_pattern = re.compile(
+        r'<[｜|]{1,2}DSML[｜|]{1,2}\s*invoke\s+name=["\']?([a-zA-Z0-9_]+)["\']?\s*>([\s\S]*?)(?:</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>|(?=<[｜|]{1,2}DSML[｜|]{1,2}\s*invoke)|$)',
+        re.IGNORECASE
+    )
+    dsml_param_pattern = re.compile(
+        r'<[｜|]{1,2}DSML[｜|]{1,2}\s*parameter\s+name=["\']?([a-zA-Z0-9_]+)["\']?[^>]*>([\s\S]*?)(?:</[｜|]{1,2}DSML[｜|]{1,2}\s*parameter>|(?=<[｜|]{1,2}DSML[｜|]{1,2}\s*parameter)|(?=</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>)|$)',
+        re.IGNORECASE
+    )
+    for m in dsml_invoke_pattern.finditer(text):
+        if any(start <= m.start() < end for start, end in removed_spans):
+            continue
+        tool_name = m.group(1)
+        if tool_name in RESERVED_TOOL_NAMES:
+            continue
+        body = m.group(2)
+        args = {}
+        for p in dsml_param_pattern.finditer(body):
+            p_name = p.group(1)
+            p_val = p.group(2).strip()
+            try:
+                parsed_val = json.loads(p_val)
+                args[p_name] = parsed_val
+            except Exception:
+                args[p_name] = p_val
+        if tool_name in VALID_TOOLS or tool_name.isidentifier():
+            tool_calls.append({"name": tool_name, "args": args})
+            start_span = m.start()
+            end_span = m.end()
+            pre_m = re.search(r'<[｜|]{1,2}DSML[｜|]{1,2}\s*calls>\s*$', text[:start_span], re.IGNORECASE)
+            if pre_m:
+                start_span = pre_m.start()
+            post_m = re.match(r'\s*</[｜|]{1,2}DSML[｜|]{1,2}\s*calls>', text[end_span:], re.IGNORECASE)
+            if post_m:
+                end_span += post_m.end()
+            removed_spans.append((start_span, end_span))
+
+    # 2. DeepSeek DSML / Standard <tool> format:
+    # <tool>{"name": "...", "arguments": {...}}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>
+    # or <tool>{"name": "...", "arguments": {...}}</tool>
+    tool_tag_pattern = re.compile(r'<tool>\s*(\{)', re.IGNORECASE)
+    pos = 0
+    while pos < len(text):
+        m = tool_tag_pattern.search(text, pos)
+        if not m:
+            break
+        start_idx = m.start()
+        brace_idx = m.start(1)
+        parsed_obj, json_start, json_end = _extract_json_object(text, brace_idx)
+        if parsed_obj and isinstance(parsed_obj, dict):
+            name = parsed_obj.get("name") or parsed_obj.get("function")
+            args = parsed_obj.get("arguments") or parsed_obj.get("parameters") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    pass
+            if name and (name in VALID_TOOLS or name.isidentifier()) and name not in RESERVED_TOOL_NAMES:
+                tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
+                end_span = json_end
+                trailing_m = re.match(
+                    r'(?:\s*</tool>|\s*</[｜|]{1,2}[^>]*[｜|]{1,2}\s*[^>]*>|\s*<[｜|]{1,2}[^>]*[｜|]{1,2}>)*',
+                    text[json_end:],
+                    re.IGNORECASE
+                )
+                if trailing_m:
+                    end_span += trailing_m.end()
+                removed_spans.append((start_idx, end_span))
+                pos = end_span
+                continue
+        pos = m.end()
+
+    # 3. Harmony / OpenAI OSS / ChatML channel commentary format:
     harmony_pattern = re.compile(
-        r'(?:<\|[^|]*\|>)*\s*(?:to=call:|call:)?([a-zA-Z0-9_]+)[\s\S]*?(?:<\|message\|>|```(?:json)?|\s*)\s*(\{[\s\S]*?\})\s*(?:<\|call\|>|```)?'
+        r'(?:<[|｜][^>|｜]*[|｜]>)*\s*(?:to=call:|call:)?([a-zA-Z0-9_]+)[\s\S]*?(?:<[|｜]message[|｜]>|```(?:json)?|\s*)\s*(\{[\s\S]*?\})\s*(?:<[|｜]call[|｜]>|```)?'
     )
     for m in harmony_pattern.finditer(text):
+        if any(start <= m.start() < end for start, end in removed_spans):
+            continue
         name = m.group(1)
-        if name in VALID_TOOLS:
+        if name in RESERVED_TOOL_NAMES:
+            continue
+        if name in VALID_TOOLS or name.isidentifier():
             try:
                 raw_json = m.group(2)
                 args = json.loads(raw_json)
@@ -157,9 +255,11 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             except Exception:
                 pass
 
-    # 2. XML <tool_call> format (Hermes, Qwen, Claude):
+    # 4. XML <tool_call> format (Hermes, Qwen, Claude):
     xml_pattern = re.compile(r'<tool_call>\s*([\s\S]*?)\s*</tool_call>')
     for m in xml_pattern.finditer(text):
+        if any(start <= m.start() < end for start, end in removed_spans):
+            continue
         inner = m.group(1).strip()
         try:
             if inner.startswith("{"):
@@ -171,7 +271,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                         args = json.loads(args)
                     except Exception:
                         pass
-                if name in VALID_TOOLS:
+                if name in VALID_TOOLS or (name and name.isidentifier()):
                     tool_calls.append({"name": name, "args": args})
                     removed_spans.append((m.start(), m.end()))
                     continue
@@ -180,7 +280,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
 
         # Fallback to call:NAME{...} inside <tool_call>
         call_m = re.search(r'(?:call:)?([a-zA-Z0-9_]+)\s*(\{[\s\S]*\})', inner)
-        if call_m and call_m.group(1) in VALID_TOOLS:
+        if call_m and (call_m.group(1) in VALID_TOOLS or call_m.group(1).isidentifier()):
             try:
                 args = json.loads(call_m.group(2))
                 tool_calls.append({"name": call_m.group(1), "args": args})
@@ -188,7 +288,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             except Exception:
                 pass
 
-    # 3. Standard Kratos format: call:NAME{...} or NAME{...}
+    # 5. Standard Kratos format: call:NAME{...} or NAME{...}
     pattern = re.compile(r'(?:call:)?([a-zA-Z0-9_]+)\s*\{')
     pos = 0
     while pos < len(text):
@@ -202,7 +302,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             continue
 
         fn_name = m.group(1)
-        if fn_name in VALID_TOOLS:
+        if fn_name in VALID_TOOLS or fn_name.isidentifier():
             call_start = m.start()
             brace_start = m.end() - 1
             parsed_args, json_start, json_end = _extract_json_object(text, brace_start)
@@ -234,9 +334,21 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         clean_text = "".join(clean_parts).strip()
         # Clean any remaining special tokens or commentary headers
         clean_text = re.sub(r'<\|[^|]*\|>', '', clean_text)
+        clean_text = re.sub(r'<[｜|]{1,2}[^>]*[｜|]{1,2}>', '', clean_text)
+        clean_text = re.sub(r'</[｜|]{1,2}[^>]*[｜|]{1,2}>', '', clean_text)
+        clean_text = re.sub(r'</?(?:tool|tools)>', '', clean_text, flags=re.IGNORECASE)
         clean_text = re.sub(r'^(?:assistant\s*)?(?:commentary)?\s*', '', clean_text).strip()
 
-    return clean_text, tool_calls
+    # Deduplicate identical tool calls
+    unique_tool_calls = []
+    seen = set()
+    for tc in tool_calls:
+        key = (tc.get("name"), json.dumps(tc.get("args", {}), sort_keys=True))
+        if key not in seen:
+            seen.add(key)
+            unique_tool_calls.append(tc)
+
+    return clean_text, unique_tool_calls
 
 
 class BrainChatModel(BaseChatModel):

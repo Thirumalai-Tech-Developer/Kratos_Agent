@@ -85,6 +85,7 @@ HELP_TEXT = """
   [bold cyan]/gateway[/bold cyan]                - View Brain Gateway status & configuration (alias: /accounts)
   [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
   [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto][/dim] - Set approval mode (Codex-style)
+  [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - DeepSeek Harness presets & plugins manager
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
   [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse or search 500+ Claude Code system prompts
   [bold cyan]/review[/bold cyan] [dim][target][/dim]         - Run multi-angle senior code review (alias: /code-review)
@@ -159,6 +160,11 @@ class KratosCompleter(Completer):
         ("/create-tool", "Autonomously forge and hot-reload a new tool"),
         ("/tools", "Inspect active and self-created tools (edit_file, grep, etc.)"),
         ("/compact", "Compress conversation history & optimize token context"),
+        ("/harness", "DeepSeek Harness status, preset mode, plugins & trace"),
+        ("/harness status", "Inspect active preset, loaded plugins and health"),
+        ("/harness mode", "Switch harness preset (standard, code, minimal, creator)"),
+        ("/harness plugins", "List all registered and active harness plugins"),
+        ("/harness trace", "View recent execution trace and audit replay"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
         ("/web", "Launch interactive Cloudflare D1 Web Console & Trace viewer"),
@@ -506,6 +512,126 @@ def handle_d1_command(arg: str = ""):
     if not stats.get("configured"):
         console.print("[dim]To connect to remote Cloudflare D1, set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID & CLOUDFLARE_API_TOKEN in .env.[/dim]")
     console.print()
+
+
+def handle_harness_command(arg: str = ""):
+    """Handles /harness commands: status, mode, plugins, and audit trace."""
+    parts = arg.strip().split(maxsplit=1)
+    subcmd = parts[0].lower() if parts else "status"
+    target = parts[1].strip() if len(parts) > 1 else ""
+
+    if subcmd in ("mode", "preset"):
+        if not target:
+            console.print("[yellow]Usage: /harness mode <standard | code | minimal | creator>[/yellow]\n")
+            return
+        try:
+            preset_data = runtime.set_harness_mode(target)
+            console.print()
+            plugins_list = ", ".join(preset_data.get("enabled_plugins") or ["all"])
+            tools_list = ", ".join(preset_data.get("allowed_tools") or ["all"])
+            directives_list = "\n".join(f"• {d}" for d in preset_data.get("directives", []))
+            console.print(
+                Panel(
+                    f"[bold green]✓ Harness Preset Switched to:[/bold green] [bold cyan]{target.upper()}[/bold cyan]\n\n"
+                    f"[bold]Description:[/bold] {preset_data.get('description', '')}\n"
+                    f"[bold]Enabled Plugins:[/bold] {plugins_list}\n"
+                    f"[bold]Allowed Tools:[/bold] {tools_list}\n\n"
+                    f"[bold gold1]Active Directives:[/bold gold1]\n{directives_list}",
+                    title="[bold gold1]⚡ DEEPSEEK HARNESS PRESET ACTIVE[/bold gold1]",
+                    border_style="gold1",
+                    padding=(1, 2)
+                )
+            )
+            console.print()
+        except Exception as e:
+            console.print(f"[bold red]Failed to apply preset '{target}':[/bold red] {e}\n")
+        return
+
+    elif subcmd == "plugins":
+        status = runtime.get_harness_status()
+        plugins = status.get("plugins", [])
+        if not plugins:
+            console.print("[dim]No plugins loaded in harness kernel.[/dim]\n")
+            return
+
+        table = Table(title="🔌 DeepSeek Harness Plugins (Everything is a Plugin)", border_style="gold1")
+        table.add_column("Plugin Name", style="bold gold1")
+        table.add_column("Version", style="dim white")
+        table.add_column("Category", style="cyan")
+        table.add_column("State", style="bold")
+        table.add_column("Description", style="white")
+
+        for p in plugins:
+            state_str = "[bold green]ENABLED[/bold green]" if p.get("state") == "enabled" else f"[yellow]{p.get('state', '').upper()}[/yellow]"
+            table.add_row(
+                p.get("name", ""),
+                p.get("version", "1.0.0"),
+                p.get("category", "general"),
+                state_str,
+                p.get("description", "")
+            )
+        console.print()
+        console.print(table)
+        console.print()
+        return
+
+    elif subcmd == "trace":
+        audit_plugin = runtime.harness.get_plugin("audit")
+        if not audit_plugin:
+            console.print("[yellow]Audit plugin is not currently loaded.[/yellow]\n")
+            return
+
+        limit = 20
+        if target.isdigit():
+            limit = int(target)
+
+        events = audit_plugin.get_trace(limit=limit)
+        if not events:
+            console.print("[dim]No trace events recorded yet in harness.[/dim]\n")
+            return
+
+        table = Table(title=f"📜 DeepSeek Harness Audit Trace (Last {len(events)} Events)", border_style="gold1")
+        table.add_column("Seq", style="dim", justify="right", width=5)
+        table.add_column("Timestamp", style="dim white", width=20)
+        table.add_column("Event Type", style="bold cyan", width=20)
+        table.add_column("Payload Summary", style="white")
+
+        for evt in events:
+            payload = evt.get("payload", {})
+            details_str = json.dumps(payload, default=str)
+            if len(details_str) > 75:
+                details_str = details_str[:72] + "..."
+            table.add_row(
+                str(evt.get("seq", "")),
+                evt.get("timestamp", "")[:19].replace("T", " "),
+                evt.get("event_type", ""),
+                details_str
+            )
+        console.print()
+        console.print(table)
+        console.print()
+        return
+
+    # Default: /harness status
+    status = runtime.get_harness_status()
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold gold1")
+    table.add_column(style="white")
+    table.add_row("Active Preset:", f"[bold cyan]{status.get('active_preset', 'standard').upper()}[/bold cyan]")
+    table.add_row("Loaded Plugins:", f"{len(status.get('plugins', []))} ({', '.join(status.get('enabled_plugins', []))})")
+    table.add_row("Registered Services:", ", ".join(status.get("services", [])))
+    table.add_row("Tool Restrictions:", f"{status.get('allowed_tools_count')} allowed")
+
+    console.print()
+    console.print(
+        Panel(
+            table,
+            title="[bold gold1]⚡ DEEPSEEK HARNESS RUNTIME KERNEL[/bold gold1]",
+            border_style="gold1",
+            padding=(1, 2)
+        )
+    )
+    console.print("[dim]Subcommands: /harness mode <standard|code|minimal|creator> | /harness plugins | /harness trace [limit][/dim]\n")
 
 
 def handle_accounts_command():
@@ -1310,6 +1436,13 @@ def start_interactive_cli():
                     for badge in mode_badges.values():
                         console.print(f"  {badge}")
                     console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto[/dim]\n")
+                continue
+
+            # /harness [status|mode|plugins|trace] — DeepSeek Harness manager
+            if user_input.lower().startswith("/harness"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_harness_command(arg)
                 continue
 
             # /bg-run <prompt> — Background agent loop (Kimi swarm / Claude Code)

@@ -11,17 +11,26 @@ from kratos_agent.brain import BrainChatModel, get_default_model
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
 from kratos_agent.core.context_pipeline import ContextBuilder, ContextBudget
+from kratos_agent.core.event_bus import event_bus
 from kratos_agent.core.event_store import EventStore
 from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
 from kratos_agent.core.memory import memory
 from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.provider_runtime import BrainAdapter
-from kratos_agent.core.runtime_contracts import ChatMessage, RuntimeEvent, ToolPermission
+from kratos_agent.core.runtime_contracts import ChatMessage, EventKind, RuntimeEvent, ToolPermission
 from kratos_agent.core.skills import skill_manager
 from kratos_agent.core.tool_runtime import legacy_tool_registry
 from kratos_agent.core.subagents import SubagentManager
 from kratos_agent.core.project_memory import project_memory
 from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.core.harness import HarnessKernel
+from kratos_agent.core.harness.plugins import (
+    ToolsPlugin,
+    MemoryPlugin,
+    DeepSeekModelPlugin,
+    AuditPlugin,
+    CreatorPlugin,
+)
 
 load_dotenv()
 DEFAULT_MODEL = get_default_model()
@@ -68,6 +77,25 @@ Inspect → Modify → Run → Observe → Verify
 Do not ask the user to perform actions you can safely perform yourself.
 
 If a required capability is missing, create/forge a suitable tool when possible, register it, reload it, and use it.
+
+SUBAGENTS & DELEGATION
+
+When a task benefits from deep review, security audit, architecture design, or specialized debugging:
+* Delegate to specialized subagents using `spawn_subagent(role, task)`.
+* Roles: `code_reviewer`, `security_auditor`, `researcher`, `debugger`, `architect`, `tester`.
+* Subagents run in isolated context and return structured findings directly to you.
+
+SKILLS & DOMAIN PLAYBOOKS
+
+Over 150 expert domain skills are installed in Kratos (e.g. `frontend-design`, `theme-factory`, `api-sec`, `sound-audio-fx`):
+* Call `list_skills(filter_tag)` to discover available playbooks.
+* Call `read_skill(skill_name)` to load comprehensive expert guidelines into context.
+
+CAPABILITY & CONVERSATIONAL INQUIRIES
+
+For capability questions ("what can you do?", "help", "who are you"):
+* Respond directly with a concise, well-formatted markdown summary of your autonomous engineering capabilities.
+* Do not attempt to run an execution plan or issue mock tool calls for casual capability queries.
 
 FILES & CODE
 
@@ -147,6 +175,50 @@ Do not stop at analysis or planning.
 Act when the goal is clear. Adapt when reality differs from the plan. Verify before completion."""
 
 
+KRATOS_STRUCTURAL_OUTPUT_PROMPT = """STRUCTURAL OUTPUT & TOOL INVOCATION PROTOCOL
+
+1. ZERO CONVERSATIONAL DELAY:
+   When an engineering task requires action (inspecting files, running commands, scaffolding, editing code, testing, verifying), you MUST emit structural tool calls immediately.
+   NEVER emit conversational preambles or statements of future intent (e.g. "Let me check...", "I will now create...", "First let's see...") without the actual executable tool call.
+
+2. RIGID TOOL INVOCATION FORMAT:
+   Always format tool calls using one of the following exact structures:
+   - Preferred: call:TOOL_NAME{"arg_name": "arg_value"}
+   - Standard: <tool>{"name": "TOOL_NAME", "arguments": {"arg_name": "arg_value"}}</tool>
+   Do NOT place markdown code fences or conversational text around tool calls that prevent machine execution.
+
+3. PROHIBITION OF RAW MARKUP & DSML TAGS:
+   NEVER output raw DSML tokens (such as `</｜｜DSML｜｜ parameter>`, `</｜｜DSML｜｜ invoke>`, `</｜｜DSML｜｜ calls>`) as plain chat text.
+   Do not pretend to call tools with markdown blocks that are not structured tool calls.
+
+4. AUTONOMOUS PROGRESSION & VERIFICATION:
+   Execute all planned steps consecutively. When tools return outputs, immediately decide the next action and invoke the next tool until all deliverables exist and are verified."""
+
+KRATOS_COGNITIVE_MEMORY_PROMPT = """4-TIER COGNITIVE MEMORY ARCHITECTURE
+
+You possess an explicit cognitive memory system with 4 distinct memory tiers:
+1. WORKING MEMORY (Short-Term / Active Scratchpad):
+   - Current active goals, subtasks, in-progress reasoning steps, and workspace file tracker.
+   - Automatically updated per turn and session.
+   - Use `save_memory(memory_type="working", key=..., content=...)` to maintain active scratchpad notes.
+
+2. EPISODIC MEMORY (Experiences & Event Logs):
+   - Specific autobiographical history of past executions, commands run, tool outcomes, and bug retrospectives.
+   - Stores "what happened when X was attempted" to avoid repeating failures.
+   - Use `save_memory(memory_type="episodic", key=..., content=...)` to record lessons learned and bug fixes.
+
+3. SEMANTIC MEMORY (Factual & Knowledge Base):
+   - Persistent facts, tech stack constraints, user preferences, architectural truths, and coding standards.
+   - Survives across sessions and builds a project-wide encyclopedia.
+   - Use `save_memory(memory_type="semantic", key=..., content=...)` to store enduring project facts.
+
+4. PROCEDURAL MEMORY (Playbooks & Workflows & Skills):
+   - "How-to" knowledge: exact sequences of commands to build, test, lint, deploy, or verify this project.
+   - Use `save_memory(memory_type="procedural", key=..., content=...)` to record reusable development recipes.
+
+Use `read_memory(memory_type=...)` to recall relevant past experiences, facts, and playbooks whenever starting a task."""
+
+
 class KratosRuntime:
     """Composes replaceable instructions, context, tools, provider, loop and session trace."""
     def __init__(self, model_name: str = DEFAULT_MODEL, workspace: Path | None = None) -> None:
@@ -171,17 +243,41 @@ class KratosRuntime:
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.subagents = SubagentManager(self._run_isolated)
+        from kratos_agent.utils.tools import set_subagent_runner
+        set_subagent_runner(self.subagents.run)
+        self.harness = HarnessKernel(self)
+        self._init_harness()
+
+    def _init_harness(self) -> None:
+        """Initialize DeepSeek Harness kernel with built-in plugins."""
+        tools_plugin = ToolsPlugin()
+        memory_plugin = MemoryPlugin()
+        deepseek_model_plugin = DeepSeekModelPlugin()
+        audit_plugin = AuditPlugin({"log_dir": str(self.workspace / ".kratos" / "trace")})
+        creator_plugin = CreatorPlugin()
+
+        for plugin in [tools_plugin, memory_plugin, deepseek_model_plugin, audit_plugin, creator_plugin]:
+            self.harness.register_plugin(plugin, enable_immediately=True)
+
+        self.harness.apply_preset("standard")
 
     def _register_instruction_modules(self) -> None:
         self.instructions.register(InstructionModule("kratos-agent-core", "system", lambda: KRATOS_AGENT_MODE_SYSTEM_PROMPT, 5))
+        self.instructions.register(InstructionModule("structural-output-enforcement", "system", lambda: KRATOS_STRUCTURAL_OUTPUT_PROMPT, 8))
         self.instructions.register(InstructionModule("core-safety", "system", lambda: (
             "You are Kratos, an autonomous terminal coding agent. You directly execute actions using tools. "
             "CRITICAL: Never output statements describing what you will do or intend to do (e.g. 'I will inspect the workspace', 'I am going to create the files') without immediately providing the corresponding tool call in the same response. "
             "Directly invoke tools to perform inspection, file creation, code edits, terminal commands, and verification."
         ), 10))
+        self.instructions.register(InstructionModule("harness-directives", "system", lambda: (
+            "\n".join(self.harness.get_system_directives()) if hasattr(self, "harness") and self.harness else ""
+        ), 12))
+        self.instructions.register(InstructionModule("cognitive-memory-framework", "system", lambda: (
+            KRATOS_COGNITIVE_MEMORY_PROMPT + "\n\n" + (self.memory.get_cognitive_context() if hasattr(self.memory, "get_cognitive_context") else "")
+        ), 15))
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
             "AUTONOMOUS EXECUTION PROTOCOL:\n"
-            "1. When a user requests code, scaffolding, or a project, immediately start invoking tools (`write_file`, `run_terminal_command`, `read_file`, `edit_file`).\n"
+            "1. When a user requests code, scaffolding, or a project, immediately start invoking tools (`write_file`, `run_terminal_command`, `read_file`, `edit_file`, `save_memory`).\n"
             "2. Never provide conversational filler or mere intent statements. Always execute actions with actual tool calls (`call:TOOL_NAME{...}`).\n"
             "3. Progress through the plan by executing the required tools for each task until all tasks and verification are complete."
         ), 20))
@@ -216,13 +312,28 @@ class KratosRuntime:
 
     def _run_isolated(self, role: str, history: List[ChatMessage]) -> str:
         """Run a child task with a fresh history and role-scoped instructions."""
-        child_instructions = InstructionEngine()
-        for section in self.instructions.build():
-            child_instructions.register(InstructionModule(section["name"], section["layer"], lambda content=section["content"]: content))
-        child_instructions.register(InstructionModule(f"subagent-{role}", "persona", lambda: f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context.", 5))
-        child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, self._emit, self.workspace)
-        result, _ = child_loop.run(history, self._allow_tool)
-        return result
+        self._is_subagent_running = True
+        try:
+            child_instructions = InstructionEngine()
+            for section in self.instructions.build():
+                child_instructions.register(InstructionModule(section["name"], section["layer"], lambda content=section["content"]: content))
+            
+            subagent_prompt = None
+            try:
+                p_text = prompt_library.get_subagent_prompt(role)
+                if p_text:
+                    subagent_prompt = p_text
+            except Exception:
+                pass
+            if not subagent_prompt:
+                subagent_prompt = f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context."
+
+            child_instructions.register(InstructionModule(f"subagent-{role}", "persona", lambda p=subagent_prompt: p, 5))
+            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, self._emit, self.workspace)
+            result, _ = child_loop.run(history, self._allow_tool)
+            return result
+        finally:
+            self._is_subagent_running = False
 
     def cancel(self) -> None:
         """Signal the active agent turn to stop at the next tool boundary."""
@@ -247,6 +358,12 @@ class KratosRuntime:
             self.memory.save()
 
     def _allow_tool(self, spec: Any, arguments: Dict[str, Any]) -> tuple[bool, str]:
+        if spec.name == "spawn_subagent" and getattr(self, "_is_subagent_running", False):
+            return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
+        if hasattr(self, "harness") and self.harness:
+            tools_plugin = self.harness.get_plugin("tools")
+            if tools_plugin and not tools_plugin.is_tool_allowed(spec.name):
+                return False, f"tool '{spec.name}' is disabled under active harness preset '{self.harness.active_preset_name}'"
         if spec.permission == ToolPermission.READ:
             return True, "read-only"
         if spec.permission == ToolPermission.WRITE:
@@ -301,14 +418,11 @@ class KratosRuntime:
         self._history.append(ChatMessage("user", query))
 
         system_instruction = (
-            "You are Kratos, an elite AI assistant, operating in HIGHLY RESTRICTED AGENT MODE / NORMAL CHAT MODE.\n"
-            "Autonomous terminal execution and file-system modification tools are DISABLED because this session is hosted as a public web showcase without a VPS sandbox.\n"
-            "You can answer questions, discuss architecture, analyze code, write snippets, and chat helpfully in Kratos's signature sharp persona.\n"
-            "If the user asks you to inspect files, edit files, or execute shell commands, politely inform them:\n"
-            "\"Notice: Terminal and file-system agent tool execution is restricted in this hosted web preview (no VPS backend sandbox connected). I am operating in Normal Chat Mode. You can discuss code, architecture, and chat freely!\""
+            "You are Kratos, an elite autonomous AI assistant operating with full capabilities.\n"
+            "You answer questions directly, discuss architecture, analyze code, write snippets, and assist the user in Kratos's signature sharp persona.\n"
         )
 
-        start_evt = RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": True, "model": normal_model})
+        start_evt = RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": False, "model": normal_model})
         event_bus.publish(start_evt)
         self._emit(start_evt)
 
@@ -331,7 +445,7 @@ class KratosRuntime:
             )
             result = full_text or "".join(response_chunks)
         except Exception as ex:
-            result = f"I am running in static Normal Chat Mode without a connected VPS backend sandbox. (Error: {ex})"
+            result = f"Execution error: {ex}"
             event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": result}))
 
         self._history.append(ChatMessage("assistant", result))
@@ -377,6 +491,14 @@ class KratosRuntime:
         self._emit(done_evt)
         return result
 
+    def set_harness_mode(self, mode: str) -> Dict[str, Any]:
+        """Switch active harness runtime preset (standard, code, minimal, creator)."""
+        return self.harness.apply_preset(mode)
+
+    def get_harness_status(self) -> Dict[str, Any]:
+        """Get harness status, active preset, and loaded plugins."""
+        return self.harness.get_status()
+
     def debug_context(self) -> Dict[str, Any]:
         """A redacted, developer-facing snapshot of exactly what Kratos sends."""
         return {"session_id": self.memory.active_session.session_id if self.memory.active_session else None, "model": self.model_name, "instructions": self.instructions.build(), "history": [item.to_dict() for item in self._history], "tools": self.tools_registry.schemas(), "last_request": self.last_request, "events": self._event_store.read()[-100:]}
@@ -392,6 +514,9 @@ def run_agent(query: str) -> str:
 
 def set_model(model_name: str) -> None:
     runtime.set_model(model_name)
+
+def set_harness_mode(mode: str) -> Dict[str, Any]:
+    return runtime.set_harness_mode(mode)
 
 def reload_tools() -> None:
     runtime.reload_tools()

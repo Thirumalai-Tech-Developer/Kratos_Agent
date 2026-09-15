@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .d1_client import D1DatabaseClient, d1_db
+from .cognitive_memory import CognitiveMemoryStore, cognitive_memory, MemoryType
 
 KRATOS_DIR = Path.cwd() / ".kratos"
 SESSIONS_DIR = KRATOS_DIR / "sessions"
@@ -119,6 +120,7 @@ class AgenticMemory:
         except Exception:
             pass
 
+        self.cognitive = CognitiveMemoryStore(db=self.db, storage_dir=self.sessions_dir.parent / "memory")
         self.active_session: Optional[AgenticSession] = None
         self._init_or_load_latest()
 
@@ -505,6 +507,31 @@ class AgenticMemory:
         except Exception:
             pass
 
+        # Record to Cognitive Memory (Episodic Experience & Working Task state)
+        try:
+            sid = self.active_session.session_id
+            tool_names = [tc.get("name") for tc in (tool_calls or []) if isinstance(tc, dict) and tc.get("name")]
+            tool_summary = f", tools: {', '.join(tool_names)}" if tool_names else ""
+            ep_content = f"Query: {user_query[:120]} -> Status: {status}{tool_summary}"
+            self.cognitive.store(
+                memory_type=MemoryType.EPISODIC,
+                key=f"turn_{turn_id}",
+                content=ep_content,
+                session_id=sid,
+                metadata={"status": status, "tools_count": len(tool_calls or [])}
+            )
+
+            if plan is not None:
+                plan_title = plan.get("goal") if isinstance(plan, dict) else getattr(plan, "goal", "")
+                self.cognitive.store(
+                    memory_type=MemoryType.WORKING,
+                    key="active_plan",
+                    content=f"Goal: {plan_title}\nStatus: {status}\nSummary: {self.active_session.get_unfinished_tasks_summary()}",
+                    session_id=sid
+                )
+        except Exception:
+            pass
+
         self.save()
         return turn
 
@@ -556,6 +583,22 @@ class AgenticMemory:
             lines.append(f"Kratos: {t.get('agent')}")
         return "\n".join(lines)
 
+    def save_cognitive_memory(self, memory_type: str, key: str, content: str, session_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        sid = session_id or (self.active_session.session_id if self.active_session else None)
+        return self.cognitive.store(memory_type, key, content, session_id=sid, metadata=metadata)
+
+    def recall_cognitive_memory(self, memory_type: Optional[str] = None, key: Optional[str] = None, query: Optional[str] = None, session_id: Optional[str] = None, limit: int = 15) -> List[Dict[str, Any]]:
+        sid = session_id or (self.active_session.session_id if self.active_session else None)
+        return self.cognitive.recall(memory_type, key, query, session_id=sid, limit=limit)
+
+    def clear_cognitive_memory(self, memory_type: Optional[str] = None, session_id: Optional[str] = None) -> int:
+        sid = session_id or (self.active_session.session_id if self.active_session else None)
+        return self.cognitive.clear(memory_type, session_id=sid)
+
+    def get_cognitive_context(self, session_id: Optional[str] = None) -> str:
+        sid = session_id or (self.active_session.session_id if self.active_session else None)
+        return self.cognitive.get_prompt_context(session_id=sid)
+
     def clear(self) -> None:
         """Clears the active session's turns and history or starts a new session."""
         if self.active_session:
@@ -563,6 +606,7 @@ class AgenticMemory:
                 self.db.execute("DELETE FROM turns WHERE session_id = ?", [self.active_session.session_id])
                 self.db.execute("DELETE FROM commands WHERE session_id = ?", [self.active_session.session_id])
                 self.db.execute("DELETE FROM agentic_events WHERE session_id = ?", [self.active_session.session_id])
+                self.cognitive.clear(memory_type=MemoryType.WORKING, session_id=self.active_session.session_id)
             except Exception:
                 pass
             self.active_session.turns = []
@@ -570,6 +614,7 @@ class AgenticMemory:
             self.active_session.created_artifacts = []
             self.active_session.notes = {}
             self.save()
+
 
 
 # Global memory singleton instance

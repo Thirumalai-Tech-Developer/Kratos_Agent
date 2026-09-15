@@ -31,29 +31,79 @@ class IntentKind(str, Enum):
 def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKind:
     """Accurately classifies user intent to keep simple conversation clean while planning coding tasks."""
     q = query.strip().lower()
+    q_norm = re.sub(r"[?!.,;:]", " ", q).strip()
+    words = q_norm.split()
 
-    # 1. Casual Chat / Greetings
-    greetings = {"hi", "hello", "hey", "hola", "sup", "greetings", "good morning", "good evening", "how are you", "who are you"}
-    if q in greetings or any(q.startswith(g + " ") or q.startswith(g + "!") or q.startswith(g + ",") for g in ("hi", "hello", "hey", "hola")):
-        if len(q.split()) <= 4 and not any(k in q for k in ("create", "build", "make", "fix", "code", "write", "refactor", "add", "implement")):
+    # 1. Casual Chat / Greetings / Courtesy / Identity
+    greetings = {"hi", "hello", "hey", "hola", "sup", "greetings", "good morning", "good evening", "good afternoon", "how are you", "how are u", "who are you", "who are u", "howdy", "yo", "help", "help me", "thanks", "thank you", "thx", "cool", "awesome", "nice", "ok", "okay", "bye", "goodbye"}
+    if q_norm in greetings or any(q.startswith(g + " ") or q.startswith(g + "!") or q.startswith(g + ",") for g in ("hi", "hello", "hey", "hola", "who are you")):
+        if len(words) <= 4 and not any(k in q for k in ("create", "build", "make", "fix", "code", "write", "refactor", "add", "implement")):
             return IntentKind.CHAT
 
-    # 2. Conceptual Questions & Knowledge Queries
-    question_starters = ("what is", "what are", "who is", "who are", "why is", "why are", "how does", "how do", "can you explain", "explain what", "tell me about", "define ")
+    # 2. Capability, Help, and Skill Inquiries (Never plan casual capabilities questions)
+    capability_phrases = (
+        "what you can do",
+        "what can you do",
+        "what do you do",
+        "what can kratos do",
+        "what does kratos do",
+        "what are you capable of",
+        "what are your capabilities",
+        "what are your features",
+        "what are your skills",
+        "what are your tools",
+        "what tools do you have",
+        "what skills do you have",
+        "what can you help me with",
+        "what can you help with",
+        "what can you build",
+        "tell me what you can do",
+        "tell me about yourself",
+        "show me what you can do",
+        "how can you help",
+        "how can you assist",
+        "who made you",
+        "who created you",
+        "what is kratos",
+        "list your capabilities",
+        "list your tools",
+        "list your skills",
+        "show your tools",
+        "show your skills",
+        "list tools",
+        "list skills",
+    )
+    if any(phrase in q_norm for phrase in capability_phrases):
+        return IntentKind.QUESTION
+
+    # 3. Conceptual Questions & Knowledge Queries
+    question_starters = (
+        "what is", "what are", "what does", "what do", "who is", "who are",
+        "why is", "why are", "why does", "why do", "how does", "how do",
+        "how is", "how can i", "how to", "can you explain", "could you explain",
+        "explain what", "explain how", "tell me about", "define ", "is there",
+        "are there", "difference between", "pros and cons"
+    )
     if any(q.startswith(qs) for qs in question_starters):
         if not any(k in q for k in ("create", "build", "make", "write a", "implement", "fix", "refactor", "scaffold", "webapp", "website", "app")):
             return IntentKind.QUESTION
 
-    # 3. Simple Code Explanation / Workspace Inspection
-    if q.startswith("explain") or q.startswith("describe") or q.startswith("summarize") or q.startswith("where is") or q.startswith("find where"):
+    # 4. Simple Code Explanation / Workspace Inspection
+    if q.startswith("explain") or q.startswith("describe") or q.startswith("summarize") or q.startswith("where is") or q.startswith("find where") or q.startswith("show me where") or q.startswith("walk me through"):
         if not any(k in q for k in ("and create", "and fix", "and refactor", "and build", "and modify", "and write")):
             return IntentKind.QUESTION
 
-    # 3b. Basic calculation questions
+    # 5. Basic calculation questions
     if q.startswith("add ") and any(num in q for num in ("two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "numbers")):
         return IntentKind.QUESTION
 
-    # 4. Complex Multi-Step / Scaffolding / Autonomous Coding Tasks
+    # 6. Informational Questions ending with '?' (No imperative mutation verbs)
+    if q.endswith("?"):
+        imperative_verbs = ("create", "build", "scaffold", "implement", "refactor", "fix", "write a", "make a", "develop a", "deploy")
+        if not any(verb in q for verb in imperative_verbs):
+            return IntentKind.QUESTION
+
+    # 7. Complex Multi-Step / Scaffolding / Autonomous Coding Tasks
     complex_indicators = (
         "create a webapp", "create a website", "create an app", "create a full", "build a webapp",
         "build a website", "build an app", "build a full", "scaffold", "three.js", "threejs",
@@ -62,7 +112,7 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKi
     if any(ind in q for ind in complex_indicators):
         return IntentKind.COMPLEX_AGENT_TASK
 
-    # 5. Standard Coding / Refactoring / Modification Tasks
+    # 8. Standard Coding / Refactoring / Modification Tasks
     coding_keywords = (
         "create", "build", "make", "implement", "develop", "refactor", "fix", "debug",
         "rewrite", "generate", "add a", "update", "patch", "setup", "configure", "install",
@@ -71,15 +121,16 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKi
     if any(k in q for k in coding_keywords):
         return IntentKind.CODING_TASK
 
-    # 6. File-specific Tasks
+    # 9. File-specific Tasks
     if any(k in q for k in ("write file", "edit file", "delete file", "run test", "run build", "check file", ".py", ".ts", ".tsx", ".js", ".html", ".css", ".json")):
         return IntentKind.FILE_TASK
 
-    # 7. Short queries or single-word inputs
-    if len(q.split()) <= 3 and not any(k in q for k in ("build", "create", "make", "fix", "run")):
+    # 10. Short queries or single-word inputs without coding actions
+    if len(words) <= 3 and not any(k in q for k in ("build", "create", "make", "fix", "run")):
         return IntentKind.CHAT
 
-    return IntentKind.CODING_TASK
+    # 11. Default fallback for general non-coding statements
+    return IntentKind.CHAT
 
 
 def should_create_plan(query: str) -> bool:
@@ -131,31 +182,114 @@ def extract_json_plan(text: str) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
 
-    cleaned = text.strip()
+    # Strip thinking blocks to prevent false brace detection inside chain-of-thought
+    cleaned = re.sub(r"<think>.*?(?:</think>|$)", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    cleaned = re.sub(r"<[｜|]{1,2}[^>]*[｜|]{1,2}>", "", cleaned).strip()
 
-    # 1. Try markdown fenced code block
-    fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
-    if fenced_match:
-        try:
-            return json.loads(fenced_match.group(1))
-        except Exception:
-            pass
+    sources = [cleaned] if cleaned else []
+    if text not in sources:
+        sources.append(text)
 
-    # 2. Try raw JSON object search
-    first_brace = cleaned.find("{")
-    last_brace = cleaned.rfind("}")
-    if first_brace != -1 and last_brace > first_brace:
-        json_str = cleaned[first_brace : last_brace + 1]
-        try:
-            return json.loads(json_str)
-        except Exception:
-            # Try fixing common trailing comma issues
-            fixed = re.sub(r",\s*([\]}])", r"\1", json_str)
+    for src in sources:
+        # 1. Try markdown fenced code block
+        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*(?:```|$)", src, re.DOTALL)
+        if fenced_match:
             try:
-                return json.loads(fixed)
+                data = json.loads(fenced_match.group(1))
+                if isinstance(data, dict) and "tasks" in data:
+                    return data
             except Exception:
-                pass
+                fixed = re.sub(r",\s*([\]}])", r"\1", fenced_match.group(1))
+                try:
+                    data = json.loads(fixed)
+                    if isinstance(data, dict) and "tasks" in data:
+                        return data
+                except Exception:
+                    pass
 
+        # 2. Try targeting {"goal" or {"tasks" directly
+        plan_start = re.search(r'\{\s*"(?:goal|tasks)"', src)
+        if plan_start:
+            brace_pos = plan_start.start()
+            last_brace = src.rfind("}")
+            if last_brace > brace_pos:
+                candidate = src[brace_pos : last_brace + 1]
+                try:
+                    data = json.loads(candidate)
+                    if isinstance(data, dict) and "tasks" in data:
+                        return data
+                except Exception:
+                    fixed = re.sub(r",\s*([\]}])", r"\1", candidate)
+                    try:
+                        data = json.loads(fixed)
+                        if isinstance(data, dict) and "tasks" in data:
+                            return data
+                    except Exception:
+                        pass
+
+        # 3. Try raw first and last brace search
+        first_brace = src.find("{")
+        last_brace = src.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            json_str = src[first_brace : last_brace + 1]
+            try:
+                data = json.loads(json_str)
+                if isinstance(data, dict) and "tasks" in data:
+                    return data
+            except Exception:
+                fixed = re.sub(r",\s*([\]}])", r"\1", json_str)
+                try:
+                    data = json.loads(fixed)
+                    if isinstance(data, dict) and "tasks" in data:
+                        return data
+                except Exception:
+                    pass
+
+    return None
+
+
+def extract_numbered_steps(text: str) -> Optional[List[Dict[str, Any]]]:
+    """Extracts numbered or bulleted plan steps from conversational or markdown model output."""
+    if not text or not text.strip():
+        return None
+
+    # Strip thinking tags if possible, but keep text inside if that's all there is
+    cleaned = re.sub(r"<think>.*?(?:</think>|$)", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    candidate_text = cleaned if len(cleaned.splitlines()) >= 2 else text
+
+    lines = candidate_text.splitlines()
+    tasks = []
+    # Pattern matching "1. ...", "1) ...", "Step 1: ...", "### 1. ..."
+    pattern = re.compile(r"^\s*(?:###?\s*)?(?:Step\s*)?(\d+)[\.\):\-]\s*(.+)$", re.IGNORECASE)
+
+    for line in lines:
+        stripped = line.strip()
+        m = pattern.match(stripped)
+        if m:
+            raw_title = m.group(2).strip()
+            # Clean markdown bold/italics e.g. **Scaffold Project**: description
+            clean_title = re.sub(r"^\*\*([^*]+)\*\*[:\s-]*(.*)$", r"\1: \2", raw_title).strip()
+            clean_title = clean_title.strip("*_` ").rstrip(":")
+            # If title is a very long paragraph, take the first sentence or 80 chars
+            if len(clean_title) > 90:
+                parts = re.split(r"[.!?]\s+", clean_title)
+                clean_title = parts[0] if len(parts[0]) >= 10 else clean_title[:85] + "..."
+
+            if clean_title and len(clean_title) >= 4:
+                title_lower = clean_title.lower()
+                v_type = "build" if any(w in title_lower for w in ("build", "compile", "tsc", "bundle")) else (
+                    "tests" if any(w in title_lower for w in ("test", "pytest", "spec")) else (
+                        "browser" if any(w in title_lower for w in ("browser", "ui verify", "visual", "layout check")) else "none"
+                    )
+                )
+                tasks.append({
+                    "id": str(len(tasks) + 1),
+                    "title": clean_title,
+                    "verification": v_type,
+                })
+
+    if len(tasks) >= 2:
+        return tasks
     return None
 
 
@@ -194,8 +328,9 @@ def formulate_agent_plan(
     try:
         response = model.complete(plan_request)
         raw_text = getattr(response, "text", "") or ""
-        parsed = extract_json_plan(raw_text)
 
+        # 1. Try structured JSON extraction
+        parsed = extract_json_plan(raw_text)
         if parsed and isinstance(parsed, dict) and "tasks" in parsed and parsed["tasks"]:
             goal = str(parsed.get("goal", user_query)).strip()
             tasks_data = parsed["tasks"]
@@ -218,6 +353,21 @@ def formulate_agent_plan(
 
             if task_items:
                 return ExecutionPlan(goal=goal, tasks=task_items)
+
+        # 2. Try numbered step extraction from model output
+        numbered_steps = extract_numbered_steps(raw_text)
+        if numbered_steps:
+            goal = user_query.strip()
+            task_items = [
+                TaskItem(
+                    id=step["id"],
+                    title=step["title"],
+                    state=TaskState.PENDING,
+                    verification=step.get("verification", "none"),
+                )
+                for step in numbered_steps
+            ]
+            return ExecutionPlan(goal=goal, tasks=task_items)
     except Exception:
         pass
 
@@ -260,6 +410,20 @@ def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) ->
         tasks.append(TaskItem(id="4", title="Add hero section, suit controls, and responsive styling", state=TaskState.PENDING))
         tasks.append(TaskItem(id="5", title="Verify Spider-Man webapp and workspace integrity", state=TaskState.PENDING))
         return ExecutionPlan(goal="Create a Spider-Man web application", tasks=tasks)
+
+    if any(ind in q.lower() for ind in ("website", "webapp", "web app", "ben 10", "portfolio", "dashboard", "game")):
+        loc_match = re.search(r'at\s+["\']?([a-zA-Z0-9_:\\\/\s\-\.]+?)["\']?(?:\s+this|\s+location|\s+and|\s*$)', q, re.IGNORECASE)
+        loc_str = loc_match.group(1).strip() if loc_match else ""
+        target_name = "Ben 10" if "ben 10" in q.lower() else (q_clean[:30])
+
+        tasks = [
+            TaskItem(id="1", title=f"Inspect target environment and ensure directory{f' ({loc_str})' if loc_str else ''}", state=TaskState.PENDING),
+            TaskItem(id="2", title=f"Scaffold {tech_str or 'React + Vite'} application and configure TailwindCSS", state=TaskState.PENDING, verification="build"),
+            TaskItem(id="3", title=f"Design {target_name} UI components and interactive theme layout", state=TaskState.PENDING),
+            TaskItem(id="4", title=f"Implement sound effects, transformations, and responsive assets", state=TaskState.PENDING),
+            TaskItem(id="5", title=f"Build and verify {target_name} web application", state=TaskState.PENDING, verification="build"),
+        ]
+        return ExecutionPlan(goal=f"Create {target_name} website with {tech_str or 'React + Vite'}", tasks=tasks)
 
     if "streamlit" in q.lower():
         tfile = target_files[0] if target_files else "interface.py"

@@ -49,9 +49,25 @@ CREATE TABLE IF NOT EXISTS commands (
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- 5. Cognitive Memory Table: 4-tier cognitive memory architecture (working, episodic, semantic, procedural)
+CREATE TABLE IF NOT EXISTS cognitive_memory (
+    id TEXT PRIMARY KEY,
+    session_id TEXT,
+    memory_type TEXT NOT NULL,
+    key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Performance Indices
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_turns_session_id ON turns(session_id, turn_index ASC);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON agentic_events(session_id, timestamp ASC);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON agentic_events(kind);
 CREATE INDEX IF NOT EXISTS idx_commands_session_id ON commands(session_id, timestamp ASC);
+CREATE INDEX IF NOT EXISTS idx_cog_mem_type ON cognitive_memory(memory_type);
+CREATE INDEX IF NOT EXISTS idx_cog_mem_session ON cognitive_memory(session_id);
+CREATE INDEX IF NOT EXISTS idx_cog_mem_key ON cognitive_memory(key);
+

@@ -32,8 +32,8 @@ export default function App() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentStep, setCurrentStep] = useState(null);
   const [activeTool, setActiveTool] = useState(null);
-  const [isAgentMode, setIsAgentMode] = useState(false);
-  const [agentPassword, setAgentPassword] = useState('');
+  const [isAgentMode, setIsAgentMode] = useState(true);
+  const [agentPassword, setAgentPassword] = useState('kratos');
 
   // Modals
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -110,48 +110,16 @@ export default function App() {
     } catch (_) {}
   };
 
-  // Agent Mode Toggle
+  // Agent Mode Toggle (Unrestricted, No Passcode Required)
   const handleToggleAgentMode = () => {
-    if (isAgentMode) {
-      setIsAgentMode(false);
-      setAgentPassword('');
-    } else {
-      setAuthModalOpen(true);
-      setAuthError(null);
-    }
+    setIsAgentMode(prev => !prev);
   };
 
   const handleAuthenticate = async (pwd) => {
-    try {
-      const res = await fetch('/api/auth/agent-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pwd })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        setIsAgentMode(true);
-        setAgentPassword(pwd);
-        setAuthModalOpen(false);
-        setAuthError(null);
-      } else if (pwd.toLowerCase() === 'kratos') {
-        // Local fallback
-        setIsAgentMode(true);
-        setAgentPassword(pwd);
-        setAuthModalOpen(false);
-        setAuthError(null);
-      } else {
-        setAuthError(data.error || 'ACCESS DENIED // Invalid Passcode');
-      }
-    } catch (err) {
-      if (pwd.toLowerCase() === 'kratos') {
-        setIsAgentMode(true);
-        setAgentPassword(pwd);
-        setAuthModalOpen(false);
-      } else {
-        setAuthError('Authentication network error');
-      }
-    }
+    setIsAgentMode(true);
+    setAgentPassword(pwd || 'kratos');
+    setAuthModalOpen(false);
+    setAuthError(null);
   };
 
 function parseThinkTags(rawContent, currentReasoning = '') {

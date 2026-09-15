@@ -38,6 +38,29 @@ def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
     if name == "run_terminal_command":
         cmd = str(args.get("command", "")).strip()
         return f"running command {cmd[:45]}" if cmd else "running command"
+    if name == "spawn_subagent":
+        role = str(args.get("role", "")).strip()
+        return f"delegating to {role} subagent" if role else "delegating to subagent"
+    if name == "read_skill":
+        sn = str(args.get("skill_name", "")).strip()
+        return f"reading skill {sn}" if sn else "reading skill"
+    if name == "list_skills":
+        return "listing available skills"
+    if name == "save_memory":
+        key = str(args.get("key", "")).strip()
+        return f"saving memory '{key}'" if key else "saving memory"
+    if name == "read_memory":
+        key = str(args.get("key", "")).strip()
+        return f"recalling memory '{key}'" if key else "recalling memory"
+    if name == "git_status":
+        return "checking git status"
+    if name == "git_diff":
+        return "checking git diff"
+    if name == "git_commit":
+        msg = str(args.get("message", "")).strip()
+        return f"committing git changes: {msg[:30]}" if msg else "committing git changes"
+    if name == "git_push":
+        return "pushing to remote"
     return f"executing {name}"
 
 
@@ -63,6 +86,26 @@ def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -
     if name == "run_terminal_command":
         cmd = str(args.get("command", "")).strip()
         return f"[tool call] ran {cmd[:45]}" if cmd else "[tool call] command executed"
+    if name == "spawn_subagent":
+        role = str(args.get("role", "")).strip()
+        return f"[tool call] completed {role} subagent" if role else "[tool call] completed subagent"
+    if name == "read_skill":
+        sn = str(args.get("skill_name", "")).strip()
+        return f"[tool call] loaded skill {sn}" if sn else "[tool call] loaded skill"
+    if name == "list_skills":
+        return "[tool call] listed available skills"
+    if name == "save_memory":
+        return "[tool call] saved memory"
+    if name == "read_memory":
+        return "[tool call] recalled memory"
+    if name == "git_status":
+        return "[tool call] checked git status"
+    if name == "git_diff":
+        return "[tool call] checked git diff"
+    if name == "git_commit":
+        return "[tool call] committed git changes"
+    if name == "git_push":
+        return "[tool call] pushed to remote"
     return f"[tool call] completed {name}"
 
 
@@ -257,31 +300,16 @@ class AgentLoop:
 
                 # If we have an active plan with unfinished tasks, check if tools are needed or verification applies
                 if self.current_plan and self.current_plan.tasks:
-                    active = self.current_plan.get_active_task()
-                    unfinished = self.current_plan.get_unfinished_tasks()
-
-                    # If model just stated intent without calling any tools on an active task
-                    if active and not active.has_evidence() and len(self.workspace_tracker.all_changed_files) == 0 and conversational_nudge_count < 2:
-                        history.append(ChatMessage(role="assistant", content=final_text or "Inspecting..."))
-                        history.append(ChatMessage(
-                            role="user",
-                            content=(
-                                f"[System Directive]: You stated intent ('{final_text}') for active task '{active.title}', but did not output a tool call. "
-                                "You MUST execute the action now using the tool calling syntax. "
-                                "Output: `call:write_file{\"file_path\": \"...\", \"content\": \"...\"}` or `call:run_terminal_command{\"command\": \"...\"}` or `call:list_directory{\"path\": \".\"}`. "
-                                "Do NOT respond with conversational text without a tool call."
-                            )
-                        ))
-                        conversational_nudge_count += 1
-                        continue
-
                     # 4. Dedicated Verification Phase
                     self.current_plan.state = AgentState.VERIFYING
                     changed = self.workspace_tracker.all_changed_files
                     verif_types = [t.verification for t in self.current_plan.tasks if getattr(t, "verification", "none") != "none"]
                     verif_type = "+".join(sorted(set(verif_types))) if verif_types else "auto"
-                    is_read_only_goal = any(kw in str(self.current_plan.goal or user_query).lower() for kw in ("read", "check", "inspect", "what is", "tell me", "explain", "find", "show", "search", "version"))
-                    is_mutation_task = any(any(kw in t.title.lower() for kw in ("create", "write", "edit", "modify", "scaffold", "html", "webapp", "build")) for t in self.current_plan.tasks)
+                    
+                    goal_lower = str(self.current_plan.goal or user_query).lower()
+                    has_mutation_verbs = any(kw in goal_lower for kw in ("create", "build", "scaffold", "website", "webapp", "app", "implement", "make", "develop", "write", "generate", "code"))
+                    is_read_only_goal = any(kw in goal_lower for kw in ("read", "check", "inspect", "what is", "tell me", "explain", "find", "show", "search", "version")) and not has_mutation_verbs
+                    is_mutation_task = has_mutation_verbs or any(any(kw in t.title.lower() for kw in ("create", "write", "edit", "modify", "scaffold", "html", "webapp", "build", "implement", "develop", "setup", "install", "add", "make", "generate", "code")) for t in self.current_plan.tasks)
                     require_files = not is_read_only_goal and (is_mutation_task or len(self.workspace_tracker.created_files) > 0 or len(self.workspace_tracker.modified_files) > 0)
                     browser_done = any("browser" in e.get("kind", "").lower() for t in self.current_plan.tasks for e in t.evidence)
                     self.last_verification = self.verification_manager.verify_workspace(
@@ -299,14 +327,34 @@ class AgentLoop:
                                 t.add_evidence("verification", {"files_checked": self.last_verification.files_checked})
                                 t.complete(f"Verified {self.last_verification.files_checked} file(s)")
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
-                    elif self.last_verification.passed and not require_files:
+                    elif self.last_verification.passed and is_read_only_goal:
                         for t in self.current_plan.tasks:
                             if t.state != TaskState.COMPLETED:
                                 t.complete("Completed")
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
 
-                    # Check unfinished tasks
+                    # Check unfinished tasks after verification
                     remaining_unfinished = self.current_plan.get_unfinished_tasks()
+
+                    # Auto-continue: If there are still unfinished tasks (e.g. no files created yet), nudge model
+                    if remaining_unfinished and conversational_nudge_count < 5:
+                        next_task = remaining_unfinished[0]
+                        if next_task.state == TaskState.PENDING:
+                            next_task.start()
+                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_task.to_dict(), turn_id))
+
+                        history.append(ChatMessage(role="assistant", content=final_text or "Continuing execution..."))
+                        history.append(ChatMessage(
+                            role="user",
+                            content=(
+                                f"[System Directive - Auto-Continue]: Plan task '{next_task.title}' is pending ({len(remaining_unfinished)} tasks remaining). "
+                                + (f"You stated: '{final_text[:120]}'. " if final_text else "") +
+                                "Do NOT stop or output conversational text without tool calls. "
+                                "Immediately invoke the required tools (`run_terminal_command`, `write_file`, `edit_file`, etc.) to execute this task now."
+                            )
+                        ))
+                        conversational_nudge_count += 1
+                        continue
 
                     # Only complete overall plan if all tasks are COMPLETED and verification passed
                     all_done = (len(remaining_unfinished) == 0 and len(self.current_plan.tasks) > 0)
@@ -443,10 +491,33 @@ class AgentLoop:
 
                         # Command tools fulfill command-oriented tasks
                         elif call.name == "run_terminal_command":
-                            cmd = str(call.arguments.get("command", ""))
-                            # If task indicates building, running, testing, or installing, complete it
-                            if any(kw in active_task.title.lower() for kw in ("run", "install", "build", "test", "start", "verify", "scaffold", "setup", "check")):
-                                active_task.complete(f"Ran {cmd[:35]}", force=True)
+                            cmd = str(call.arguments.get("command", "")).strip()
+                            cmd_lower = cmd.lower()
+                            task_title_lower = active_task.title.lower()
+
+                            is_trivial_probe = any(cmd_lower.startswith(p) for p in ("cd", "dir", "ls", "pwd", "echo", "type ", "cat ", "where ", "which ", "if exist"))
+                            is_scaffold_install = any(kw in cmd_lower for kw in ("npm ", "npx ", "pnpm ", "yarn ", "pip ", "uv ", "python ", "cargo ", "git clone", "create-vite", "vite"))
+                            is_test_or_build = any(kw in cmd_lower for kw in ("test", "pytest", "npm run", "vite build", "build", "tsc", "cargo test", "check"))
+
+                            should_complete = False
+                            completion_msg = f"Ran {cmd[:35]}"
+
+                            if any(kw in task_title_lower for kw in ("inspect", "analyze", "explore", "check", "diagnose", "search")):
+                                should_complete = True
+                                completion_msg = f"Inspected with {cmd[:30]}"
+                            elif any(kw in task_title_lower for kw in ("scaffold", "install", "setup", "initialize", "dependency", "dependencies")):
+                                if is_scaffold_install or not is_trivial_probe:
+                                    should_complete = True
+                                    completion_msg = f"Setup via {cmd[:30]}"
+                            elif any(kw in task_title_lower for kw in ("build", "test", "verify", "validation")):
+                                if is_test_or_build or not is_trivial_probe:
+                                    should_complete = True
+                                    completion_msg = f"Verified via {cmd[:30]}"
+                            elif not is_trivial_probe:
+                                should_complete = True
+
+                            if should_complete:
+                                active_task.complete(completion_msg, force=True)
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
                                 if self.current_plan:
                                     next_pending = self.current_plan.get_pending_tasks()
@@ -454,6 +525,8 @@ class AgentLoop:
                                         next_t = next_pending[0]
                                         next_t.start()
                                         self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
+                            else:
+                                active_task.add_evidence("terminal_command", {"command": cmd[:80]})
 
                         self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
 

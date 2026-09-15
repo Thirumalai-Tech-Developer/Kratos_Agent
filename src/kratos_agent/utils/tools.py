@@ -603,3 +603,194 @@ def git_create_pr(title: str = "", body: str = "", base: str = "main") -> str:
     step_tracker.complete("[bold white]Pull Request[/bold white]", "", success=True)
     return result
 
+
+# ──────────────────────────────────────────────────────────
+# Cognitive Memory Tools (4-Tier Architecture)
+# ──────────────────────────────────────────────────────────
+
+def save_memory(memory_type: str, key: str, content: str) -> str:
+    """
+    Stores an item into cognitive memory across one of the 4 cognitive layers:
+      - 'working': Current task objectives, active scratchpad notes, temporary variables
+      - 'episodic': Specific experiences, past tool outcomes, bug retrospectives, lessons learned
+      - 'semantic': Persistent facts, project conventions, architectural decisions, user preferences
+      - 'procedural': "How-to" workflows, skills, build recipes, verification protocols
+    """
+    step_tracker.start(f"Saving {memory_type} memory: {key}...")
+    try:
+        record = memory.save_cognitive_memory(memory_type=memory_type, key=key, content=content)
+        step_tracker.complete(f"[bold white]Saved Memory[/bold white] [cyan][{record['memory_type'].upper()}] {key}[/cyan]", success=True)
+        return f"Successfully saved {record['memory_type']} memory '{key}' (ID: {record['id']})."
+    except Exception as e:
+        step_tracker.fail("Failed to save memory", str(e))
+        return f"Error saving memory: {e}"
+
+
+def read_memory(memory_type: str = "", key: str = "", query: str = "") -> str:
+    """
+    Recalls items from cognitive memory by type ('working', 'episodic', 'semantic', 'procedural'), key, or search query.
+    If all parameters are empty, returns the full active cognitive memory summary and prompt context.
+    """
+    step_tracker.start(f"Recalling memory ({memory_type or 'all'})...")
+    try:
+        m_type = memory_type.strip() if memory_type.strip() else None
+        k = key.strip() if key.strip() else None
+        q = query.strip() if query.strip() else None
+
+        records = memory.recall_cognitive_memory(memory_type=m_type, key=k, query=q, limit=15)
+        if not records:
+            step_tracker.complete("[bold white]Memory query[/bold white]", "No records found", success=True)
+            return f"No memory records found matching criteria (type={memory_type}, key={key}, query={query})."
+
+        lines = [f"Found {len(records)} cognitive memory record(s):"]
+        for r in records:
+            lines.append(f"• [{r.get('memory_type', '').upper()}] {r.get('key')}: {r.get('content')} (Updated: {r.get('updated_at')})")
+
+        res = "\n".join(lines)
+        step_tracker.complete(f"[bold white]Recalled {len(records)} memories[/bold white]", "", success=True)
+        return res
+    except Exception as e:
+        step_tracker.fail("Failed to read memory", str(e))
+        return f"Error reading memory: {e}"
+
+
+def clear_memory(memory_type: str = "") -> str:
+    """
+    Clears cognitive memory records. If memory_type is specified ('working', 'episodic', 'semantic', 'procedural'),
+    only that layer is cleared. If empty or 'working', clears the active session working scratchpad.
+    """
+    step_tracker.start(f"Clearing memory ({memory_type or 'working'})...")
+    try:
+        m_type = memory_type.strip() if memory_type.strip() else None
+        cleared = memory.clear_cognitive_memory(memory_type=m_type)
+        step_tracker.complete(f"[bold white]Cleared memory[/bold white]", f"Type: {memory_type or 'all'}", success=True)
+        return f"Cleared cognitive memory layer '{memory_type or 'all'}'."
+    except Exception as e:
+        step_tracker.fail("Failed to clear memory", str(e))
+        return f"Error clearing memory: {e}"
+
+
+# ──────────────────────────────────────────────────────────
+# Subagent Orchestration Tool
+# ──────────────────────────────────────────────────────────
+
+_subagent_runner = None
+
+
+def set_subagent_runner(runner) -> None:
+    """Sets the subagent execution runner callback (typically runtime.subagents.run)."""
+    global _subagent_runner
+    _subagent_runner = runner
+
+
+def spawn_subagent(role: str, task: str) -> str:
+    """
+    Spawns an isolated specialized subagent to perform focused work without polluting the main context.
+    Standard roles:
+      - 'code_reviewer': Reviews code, checks best practices, catches edge cases and potential bugs.
+      - 'security_auditor': Scans code/deps for vulnerabilities, credential leaks, and unsafe patterns.
+      - 'researcher': Explores workspace files, documentation, architecture, or web references.
+      - 'debugger': Traces root causes, analyzes stack traces, and reproduces edge cases.
+      - 'architect': Designs component boundaries, API schemas, and state flows.
+      - 'tester': Formulates unit tests, edge case assertions, and verification checklists.
+    """
+    clean_role = (role or "researcher").strip()
+    clean_task = (task or "").strip()
+    if not clean_task:
+        return "Error: Subagent task description cannot be empty."
+
+    step_tracker.start(f"Delegating to {clean_role} subagent: {clean_task[:50]}...")
+    if _subagent_runner is None:
+        step_tracker.complete(f"[bold white]Subagent ({clean_role})[/bold white]", "Runner unconfigured", success=True)
+        return f"[subagent-{clean_role}] Subagent runner not active in current session. Task: {clean_task}"
+
+    try:
+        res = _subagent_runner(clean_role, clean_task)
+        if hasattr(res, "summary"):
+            output = res.summary
+            if getattr(res, "error", None):
+                output = f"[subagent error: {res.error}]\n{output}"
+        else:
+            output = str(res)
+        step_tracker.complete(f"[bold white]Subagent ({clean_role})[/bold white]", "Report ready", success=True)
+        return f"[Subagent '{clean_role}' Report]:\n{output}"
+    except Exception as e:
+        step_tracker.fail(f"Subagent ({clean_role}) failed", str(e))
+        return f"Error executing subagent '{clean_role}': {e}"
+
+
+# ──────────────────────────────────────────────────────────
+# Skill Playbook Tools
+# ──────────────────────────────────────────────────────────
+
+def list_skills(filter_tag: str = "") -> str:
+    """
+    Lists available skill playbooks and expert guidelines installed in Kratos.
+    Optionally filters by keyword or tag (e.g. 'design', 'security', 'api', 'react').
+    """
+    from kratos_agent.core.skills import skill_manager
+
+    step_tracker.start("Listing skills...")
+    try:
+        unique_skills = list({str(s.path): s for s in skill_manager.skills.values()}.values())
+        filt = (filter_tag or "").strip().lower()
+        if filt:
+            unique_skills = [
+                s for s in unique_skills
+                if filt in s.name.lower() or filt in s.description.lower() or any(filt in t.lower() for t in s.tags)
+            ]
+        if not unique_skills:
+            step_tracker.complete("[bold white]Skills listed[/bold white]", "None found", success=True)
+            return f"No skills found matching filter '{filter_tag}'."
+
+        lines = [f"Found {len(unique_skills)} skill(s):"]
+        for s in unique_skills[:35]:
+            desc = s.description[:80] + "…" if len(s.description) > 80 else s.description
+            tags_str = f" [{', '.join(s.tags[:3])}]" if s.tags else ""
+            lines.append(f"• `{s.name}`{tags_str}: {desc}")
+        if len(unique_skills) > 35:
+            lines.append(f"... and {len(unique_skills) - 35} more skills. Filter by tag to narrow down.")
+
+        step_tracker.complete(f"[bold white]Skills listed[/bold white]", f"Total: {len(unique_skills)}", success=True)
+        return "\n".join(lines)
+    except Exception as e:
+        step_tracker.fail("Failed to list skills", str(e))
+        return f"Error listing skills: {e}"
+
+
+def read_skill(skill_name: str) -> str:
+    """
+    Reads and returns the complete guide and best practices for an installed skill
+    (e.g. 'frontend-design', 'theme-factory', 'api-sec', 'canvas-design').
+    """
+    from kratos_agent.core.skills import skill_manager
+
+    s_name = (skill_name or "").strip().lower()
+    if not s_name:
+        return "Error: Please specify a skill_name. Use list_skills to view available skills."
+
+    step_tracker.start(f"Reading skill: {s_name}...")
+    try:
+        skill = skill_manager.skills.get(s_name)
+        if not skill:
+            # Fallback search by substring
+            for k, v in skill_manager.skills.items():
+                if s_name in k or k in s_name:
+                    skill = v
+                    break
+
+        if not skill:
+            step_tracker.fail(f"Skill '{s_name}' not found")
+            return f"Skill '{skill_name}' not found. Call `list_skills()` to see available playbooks."
+
+        content = skill.content
+        if not content and (skill.path / "SKILL.md").exists():
+            content = (skill.path / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+
+        step_tracker.complete("[bold white]Skill Loaded[/bold white]", f"[cyan]{skill.name}[/cyan]", success=True)
+        return f"# SKILL PLAYBOOK: {skill.name}\n\nDescription: {skill.description}\nTags: {', '.join(skill.tags)}\n\n{content}"
+    except Exception as e:
+        step_tracker.fail(f"Failed to read skill '{skill_name}'", str(e))
+        return f"Error reading skill '{skill_name}': {e}"
+
+

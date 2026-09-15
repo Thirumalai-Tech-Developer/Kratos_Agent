@@ -280,6 +280,122 @@
                     }
                 }
             }
+        },
+        {
+            "name": "save_memory",
+            "description": "Stores a record into cognitive memory across one of the 4 cognitive layers: 'working' (active scratchpad), 'episodic' (experiences & bug outcomes), 'semantic' (persistent project facts & conventions), or 'procedural' (workflows & recipes).",
+            "func_name": "save_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Memory tier: 'working', 'episodic', 'semantic', or 'procedural'"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Identifier key for the memory entry (e.g. 'tech_stack', 'bug_fix_vite', 'active_task')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Memory content or factual notes to store"
+                    }
+                },
+                "required": [
+                    "memory_type",
+                    "key",
+                    "content"
+                ]
+            }
+        },
+        {
+            "name": "read_memory",
+            "description": "Recalls cognitive memory records by type ('working', 'episodic', 'semantic', 'procedural'), key, or search query. Leave parameters empty to recall all memories.",
+            "func_name": "read_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Optional memory tier filter: 'working', 'episodic', 'semantic', or 'procedural'"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Optional specific key to recall"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search term to search in memory content"
+                    }
+                }
+            }
+        },
+        {
+            "name": "clear_memory",
+            "description": "Clears cognitive memory records for a specific layer ('working', 'episodic', 'semantic', 'procedural') or active scratchpad.",
+            "func_name": "clear_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Optional memory tier to clear ('working', 'episodic', 'semantic', 'procedural'). Defaults to 'working'."
+                    }
+                }
+            }
+        },
+        {
+            "name": "spawn_subagent",
+            "description": "Spawns an isolated specialized subagent to perform focused work without polluting the main context. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns the subagent's structured report.",
+            "func_name": "spawn_subagent",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Specialized subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "Precise, self-contained description of the task for the subagent to perform"
+                    }
+                },
+                "required": [
+                    "role",
+                    "task"
+                ]
+            }
+        },
+        {
+            "name": "list_skills",
+            "description": "Lists installed expert skills and domain playbooks available in Kratos (over 150 guides including frontend-design, theme-factory, api-sec, auth-sec, sound-audio-fx, etc.).",
+            "func_name": "list_skills",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter_tag": {
+                        "type": "string",
+                        "description": "Optional keyword or tag to filter skills (e.g. 'design', 'security', 'api', 'react')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "read_skill",
+            "description": "Reads and returns the complete expert playbook and best-practice guidelines for an installed skill (e.g. 'frontend-design', 'theme-factory', 'api-sec', 'canvas-design').",
+            "func_name": "read_skill",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The name or slug of the skill to read (e.g. 'frontend-design', 'theme-factory', 'api-sec')"
+                    }
+                },
+                "required": [
+                    "skill_name"
+                ]
+            }
         }
     ]
 }

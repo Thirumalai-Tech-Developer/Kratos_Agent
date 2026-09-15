@@ -93,9 +93,9 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
 
 
 def _permission_for(name: str) -> ToolPermission:
-    if name in {"read_file", "list_directory", "grep_search", "git_status", "git_diff"}:
+    if name in {"read_file", "list_directory", "grep_search", "git_status", "git_diff", "read_skill", "list_skills", "read_memory"}:
         return ToolPermission.READ
-    if name in {"write_file", "edit_file"}:
+    if name in {"write_file", "edit_file", "save_memory", "clear_memory"}:
         return ToolPermission.WRITE
     if name.startswith("git_"):
         return ToolPermission.GIT
