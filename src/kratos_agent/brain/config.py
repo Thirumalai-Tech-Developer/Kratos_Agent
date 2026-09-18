@@ -293,3 +293,24 @@ def get_headroom_proxy_port() -> Optional[int]:
             pass
     return None
 
+
+# ==============================================================================
+# Parallel Execution Configuration
+# ==============================================================================
+
+def is_parallel_execution_enabled() -> bool:
+    """Returns True if concurrent/parallel tool execution is enabled (default: True)."""
+    raw = os.getenv("KRATOS_PARALLEL_EXECUTION", "true").lower().strip()
+    return raw in ("true", "1", "yes", "on")
+
+
+def get_max_parallel_workers() -> int:
+    """Returns the maximum worker threads for parallel tool execution (default: 8)."""
+    raw = os.getenv("KRATOS_MAX_PARALLEL_WORKERS", "8").strip()
+    try:
+        val = int(raw)
+        return max(1, min(val, 32))
+    except ValueError:
+        return 8
+
+

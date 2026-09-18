@@ -6,9 +6,14 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from kratos_agent.brain.config import (
+    get_max_parallel_workers,
+    is_parallel_execution_enabled,
+)
 from .context_pipeline import ContextBuilder
 from .event_bus import event_bus
 from .planner import IntentKind, classify_intent, formulate_agent_plan
@@ -16,6 +21,119 @@ from .runtime_contracts import ChatMessage, EventKind, RuntimeEvent
 from .task_manager import AgentState, ExecutionPlan, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
+
+
+# Tools that are read-only and have zero side effects on filesystem or workspace state.
+# These can always execute concurrently with other read-only tools.
+READ_ONLY_TOOLS = {
+    "read_file",
+    "list_directory",
+    "grep_search",
+    "fetch_url",
+    "google_search",
+    "web_search_duckduckgo",
+    "read_memory",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "read_symbol",
+    "search_symbol",
+    "view_outline",
+    "read_skill",
+    "list_skills",
+    "spawn_subagent",
+    "get_web_trace",
+}
+
+# Tools that must run in isolation (sequential barriers)
+BARRIER_TOOLS = {
+    "run_terminal_command",
+    "spawn_parallel_subagents",
+    "todo_write",
+    "exit_plan_mode",
+    "save_memory",
+    "clear_memory",
+}
+
+
+def partition_tool_waves(calls: List[ToolCall]) -> List[List[ToolCall]]:
+    """Partitions a sequence of tool calls into waves of mutually independent batches.
+
+    Guarantees:
+    - Pure read-only calls are grouped into concurrent batches.
+    - Write/edit calls targeting distinct file paths can run in parallel.
+    - Repeated file targets are split across separate waves.
+    - Barrier tools (shell commands, plan state transitions) run in their own single-call wave.
+    - Preserves execution dependencies while maximizing parallelism.
+    """
+    waves: List[List[ToolCall]] = []
+    current_wave: List[ToolCall] = []
+    current_wave_write_paths: set[str] = set()
+    current_wave_read_paths: set[str] = set()
+    current_has_barrier = False
+
+    for call in calls:
+        name = call.name
+        is_barrier = name in BARRIER_TOOLS
+        is_read_only = name in READ_ONLY_TOOLS
+        is_file_write = name in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content")
+        target_path = str(call.arguments.get("file_path", "") or call.arguments.get("target_file", "")).strip()
+
+        if not current_wave:
+            current_wave.append(call)
+            if is_barrier:
+                current_has_barrier = True
+            elif is_read_only:
+                if target_path:
+                    current_wave_read_paths.add(target_path)
+            elif is_file_write and target_path:
+                current_wave_write_paths.add(target_path)
+            continue
+
+        if is_barrier or current_has_barrier:
+            waves.append(current_wave)
+            current_wave = [call]
+            current_wave_write_paths = {target_path} if is_file_write and target_path else set()
+            current_wave_read_paths = {target_path} if is_read_only and target_path else set()
+            current_has_barrier = is_barrier
+            continue
+
+        if is_read_only:
+            if target_path and target_path in current_wave_write_paths:
+                waves.append(current_wave)
+                current_wave = [call]
+                current_wave_write_paths = set()
+                current_wave_read_paths = {target_path}
+                current_has_barrier = False
+            else:
+                current_wave.append(call)
+                if target_path:
+                    current_wave_read_paths.add(target_path)
+            continue
+
+        if is_file_write:
+            if target_path and (target_path in current_wave_write_paths or target_path in current_wave_read_paths):
+                waves.append(current_wave)
+                current_wave = [call]
+                current_wave_write_paths = {target_path}
+                current_wave_read_paths = set()
+                current_has_barrier = False
+            else:
+                current_wave.append(call)
+                if target_path:
+                    current_wave_write_paths.add(target_path)
+            continue
+
+        waves.append(current_wave)
+        current_wave = [call]
+        current_wave_write_paths = set()
+        current_wave_read_paths = set()
+        current_has_barrier = False
+
+    if current_wave:
+        waves.append(current_wave)
+
+    return waves
 
 
 def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
@@ -41,6 +159,10 @@ def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
     if name == "spawn_subagent":
         role = str(args.get("role", "")).strip()
         return f"delegating to {role} subagent" if role else "delegating to subagent"
+    if name == "spawn_parallel_subagents":
+        sub_list = args.get("subagents", [])
+        count = len(sub_list) if isinstance(sub_list, list) else 1
+        return f"running {count} subagents in parallel"
     if name == "read_skill":
         sn = str(args.get("skill_name", "")).strip()
         return f"reading skill {sn}" if sn else "reading skill"
@@ -95,6 +217,10 @@ def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -
     if name == "spawn_subagent":
         role = str(args.get("role", "")).strip()
         return f"[tool call] completed {role} subagent" if role else "[tool call] completed subagent"
+    if name == "spawn_parallel_subagents":
+        sub_list = args.get("subagents", [])
+        count = len(sub_list) if isinstance(sub_list, list) else 1
+        return f"[tool call] completed {count} parallel subagents"
     if name == "read_skill":
         sn = str(args.get("skill_name", "")).strip()
         return f"[tool call] loaded skill {sn}" if sn else "[tool call] loaded skill"
@@ -207,6 +333,28 @@ class AgentLoop:
     def clear_cancel(self) -> None:
         """Clear any pending cancellation signal."""
         self.cancellation_flag.clear()
+
+    def _execute_tool_call_worker(
+        self,
+        call: ToolCall,
+        allow_tool: Callable[[Any, Dict[str, Any]], tuple[bool, str]],
+    ) -> ToolResult:
+        """Executes a single tool call and prunes its result text."""
+        try:
+            result = self.tools.execute(call, allow_tool)
+            output, truncated = self.context.prune_tool_result(result.content)
+            result.content, result.truncated = output, truncated
+            return result
+        except Exception as exc:
+            from .runtime_contracts import ToolResult
+            return ToolResult(
+                call_id=call.call_id,
+                name=call.name,
+                content=f"Error during parallel tool execution: {type(exc).__name__}: {exc}",
+                is_error=True,
+                truncated=False,
+            )
+
 
     def _track_tool_side_effects(self, name: str, args: Dict[str, Any], is_error: bool, turn_id: str) -> None:
         fp = str(args.get("file_path", "") or args.get("path", "")).strip()
@@ -464,8 +612,9 @@ class AgentLoop:
                 metadata={"tool_calls": [call.__dict__ for call in response.tool_calls]},
             ))
 
-            # Execute Each Tool Call
-            for call in response.tool_calls:
+            # Execute Tool Calls in Parallel Waves
+            waves = partition_tool_waves(response.tool_calls)
+            for wave in waves:
                 if self.cancellation_flag.is_set():
                     if self.current_plan:
                         self.current_plan.pause_running_tasks("Interrupted by user")
@@ -474,126 +623,142 @@ class AgentLoop:
                     self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": "cancelled", "plan": self.current_plan.to_dict() if self.current_plan else None}, turn_id))
                     return message, history
 
-                # Find or start active task in plan
-                active_task = None
-                if self.current_plan:
-                    active_task = self.current_plan.get_active_task()
-                    if not active_task:
-                        pending = self.current_plan.get_pending_tasks()
-                        if pending:
-                            active_task = pending[0]
-                            active_task.start()
-                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, active_task.to_dict(), turn_id))
+                # Determine if wave can execute concurrently
+                use_parallel = (
+                    len(wave) > 1
+                    and is_parallel_execution_enabled()
+                    and not self.cancellation_flag.is_set()
+                )
 
+                # Pre-execution: Register substeps and emit TOOL_CALL_STARTED for all calls in wave
+                for call in wave:
+                    active_task = None
+                    if self.current_plan:
+                        active_task = self.current_plan.get_active_task()
+                        if not active_task:
+                            pending = self.current_plan.get_pending_tasks()
+                            if pending:
+                                active_task = pending[0]
+                                active_task.start()
+                                self.emit(RuntimeEvent(EventKind.TASK_STARTED, active_task.to_dict(), turn_id))
+
+                        if active_task:
+                            sub_text = _format_tool_substep(call.name, call.arguments)
+                            active_task.add_substep("⠋", sub_text, style="bold yellow", is_active=True)
+                            file_path = str(call.arguments.get("file_path", "") or call.arguments.get("path", "") or call.arguments.get("target_file", ""))
+                            self.current_plan.update_task_activity(active_task.id, file_path=file_path, increment_tool=True)
+                            self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
+
+                    action_label = format_tool_action_label(call.name, call.arguments)
+                    display_label = f"[tool call] {action_label}"
+                    self.emit(RuntimeEvent(
+                        EventKind.TOOL_CALL_STARTED,
+                        {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                            "call_id": call.call_id,
+                            "action_label": action_label,
+                            "display": display_label,
+                        },
+                        turn_id,
+                    ))
+                    if call.name == "run_terminal_command":
+                        self.emit(RuntimeEvent(EventKind.COMMAND_STARTED, {"command": str(call.arguments.get("command", ""))}, turn_id))
+
+                # Tool Execution: Parallel (concurrent worker pool) or Sequential
+                if use_parallel:
+                    max_workers = min(len(wave), get_max_parallel_workers())
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        futures = [executor.submit(self._execute_tool_call_worker, c, allow_tool) for c in wave]
+                        results = [f.result() for f in futures]
+                else:
+                    results = [self._execute_tool_call_worker(c, allow_tool) for c in wave]
+
+                # Post-execution: Process results in original wave order
+                for call, result in zip(wave, results):
+                    active_task = self.current_plan.get_active_task() if self.current_plan else None
+
+                    kind = EventKind.TOOL_FAILED if result.is_error else EventKind.TOOL_COMPLETED
+                    self.emit(RuntimeEvent(kind, result.__dict__, turn_id))
+
+                    # Track side effects
+                    self._track_tool_side_effects(call.name, call.arguments, result.is_error, turn_id)
+
+                    # Update Active Task with Result and Concrete Evidence
                     if active_task:
-                        sub_text = _format_tool_substep(call.name, call.arguments)
-                        active_task.add_substep("⠋", sub_text, style="bold yellow", is_active=True)
-                        file_path = str(call.arguments.get("file_path", "") or call.arguments.get("path", ""))
-                        self.current_plan.update_task_activity(active_task.id, file_path=file_path, increment_tool=True)
-                        self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
+                        if result.is_error:
+                            active_task.resolve_substep("✗", f"Failed {call.name}: {result.content[:50]}", style="bold red")
+                            active_task.state = TaskState.NEEDS_ATTENTION
+                            active_task.detail = result.content[:120]
+                            active_task.add_evidence(call.name, {"args": call.arguments, "is_error": True})
+                            self.emit(RuntimeEvent(EventKind.TASK_FAILED, active_task.to_dict(), turn_id))
+                        else:
+                            res_sub = _format_tool_result_substep(call.name, call.arguments, result.content)
+                            active_task.resolve_substep("✓", res_sub, style="dim green")
+                            active_task.add_evidence(call.name, {"args": call.arguments, "is_error": False})
 
-                action_label = format_tool_action_label(call.name, call.arguments)
-                display_label = f"[tool call] {action_label}"
-                self.emit(RuntimeEvent(
-                    EventKind.TOOL_CALL_STARTED,
-                    {
-                        "name": call.name,
-                        "arguments": call.arguments,
-                        "call_id": call.call_id,
-                        "action_label": action_label,
-                        "display": display_label,
-                    },
-                    turn_id,
-                ))
-                if call.name == "run_terminal_command":
-                    self.emit(RuntimeEvent(EventKind.COMMAND_STARTED, {"command": str(call.arguments.get("command", ""))}, turn_id))
-
-                # Execute Tool
-                result = self.tools.execute(call, allow_tool)
-                output, truncated = self.context.prune_tool_result(result.content)
-                result.content, result.truncated = output, truncated
-
-                kind = EventKind.TOOL_FAILED if result.is_error else EventKind.TOOL_COMPLETED
-                self.emit(RuntimeEvent(kind, result.__dict__, turn_id))
-
-                # Track side effects
-                self._track_tool_side_effects(call.name, call.arguments, result.is_error, turn_id)
-
-                # Update Active Task with Result and Concrete Evidence
-                if active_task:
-                    if result.is_error:
-                        active_task.resolve_substep("✗", f"Failed {call.name}: {result.content[:50]}", style="bold red")
-                        active_task.state = TaskState.NEEDS_ATTENTION
-                        active_task.detail = result.content[:120]
-                        active_task.add_evidence(call.name, {"args": call.arguments, "is_error": True})
-                        self.emit(RuntimeEvent(EventKind.TASK_FAILED, active_task.to_dict(), turn_id))
-                    else:
-                        res_sub = _format_tool_result_substep(call.name, call.arguments, result.content)
-                        active_task.resolve_substep("✓", res_sub, style="dim green")
-                        active_task.add_evidence(call.name, {"args": call.arguments, "is_error": False})
-
-                        # File writing / editing tool completes file tasks
-                        if call.name in ("write_file", "edit_file"):
-                            fp = call.arguments.get("file_path", "")
-                            active_task.complete(f"Updated {fp}", force=True)
-                            self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
-
-                            # Start next pending task if available
-                            if self.current_plan:
-                                next_pending = self.current_plan.get_pending_tasks()
-                                if next_pending:
-                                    next_t = next_pending[0]
-                                    next_t.start()
-                                    self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
-
-                        # Command tools fulfill command-oriented tasks
-                        elif call.name == "run_terminal_command":
-                            cmd = str(call.arguments.get("command", "")).strip()
-                            cmd_lower = cmd.lower()
-                            task_title_lower = active_task.title.lower()
-
-                            is_trivial_probe = any(cmd_lower.startswith(p) for p in ("cd", "dir", "ls", "pwd", "echo", "type ", "cat ", "where ", "which ", "if exist"))
-                            is_scaffold_install = any(kw in cmd_lower for kw in ("npm ", "npx ", "pnpm ", "yarn ", "pip ", "uv ", "python ", "cargo ", "git clone", "create-vite", "vite"))
-                            is_test_or_build = any(kw in cmd_lower for kw in ("test", "pytest", "npm run", "vite build", "build", "tsc", "cargo test", "check"))
-
-                            should_complete = False
-                            completion_msg = f"Ran {cmd[:35]}"
-
-                            if any(kw in task_title_lower for kw in ("inspect", "analyze", "explore", "check", "diagnose", "search")):
-                                should_complete = True
-                                completion_msg = f"Inspected with {cmd[:30]}"
-                            elif any(kw in task_title_lower for kw in ("scaffold", "install", "setup", "initialize", "dependency", "dependencies")):
-                                if is_scaffold_install or not is_trivial_probe:
-                                    should_complete = True
-                                    completion_msg = f"Setup via {cmd[:30]}"
-                            elif any(kw in task_title_lower for kw in ("build", "test", "verify", "validation")):
-                                if is_test_or_build or not is_trivial_probe:
-                                    should_complete = True
-                                    completion_msg = f"Verified via {cmd[:30]}"
-                            elif not is_trivial_probe:
-                                should_complete = True
-
-                            if should_complete:
-                                active_task.complete(completion_msg, force=True)
+                            # File writing / editing tool completes file tasks
+                            if call.name in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content"):
+                                fp = call.arguments.get("file_path", "") or call.arguments.get("target_file", "")
+                                active_task.complete(f"Updated {fp}", force=True)
                                 self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
+
+                                # Start next pending task if available
                                 if self.current_plan:
                                     next_pending = self.current_plan.get_pending_tasks()
                                     if next_pending:
                                         next_t = next_pending[0]
                                         next_t.start()
                                         self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
-                            else:
-                                active_task.add_evidence("terminal_command", {"command": cmd[:80]})
 
-                        self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
+                            # Command tools fulfill command-oriented tasks
+                            elif call.name == "run_terminal_command":
+                                cmd = str(call.arguments.get("command", "")).strip()
+                                cmd_lower = cmd.lower()
+                                task_title_lower = active_task.title.lower()
 
-                history.append(ChatMessage(
-                    role="tool",
-                    content=result.content,
-                    name=result.name,
-                    tool_call_id=result.call_id,
-                    metadata={"is_error": result.is_error, "truncated": result.truncated},
-                ))
+                                is_trivial_probe = any(cmd_lower.startswith(p) for p in ("cd", "dir", "ls", "pwd", "echo", "type ", "cat ", "where ", "which ", "if exist"))
+                                is_scaffold_install = any(kw in cmd_lower for kw in ("npm ", "npx ", "pnpm ", "yarn ", "pip ", "uv ", "python ", "cargo ", "git clone", "create-vite", "vite"))
+                                is_test_or_build = any(kw in cmd_lower for kw in ("test", "pytest", "npm run", "vite build", "build", "tsc", "cargo test", "check"))
+
+                                should_complete = False
+                                completion_msg = f"Ran {cmd[:35]}"
+
+                                if any(kw in task_title_lower for kw in ("inspect", "analyze", "explore", "check", "diagnose", "search")):
+                                    should_complete = True
+                                    completion_msg = f"Inspected with {cmd[:30]}"
+                                elif any(kw in task_title_lower for kw in ("scaffold", "install", "setup", "initialize", "dependency", "dependencies")):
+                                    if is_scaffold_install or not is_trivial_probe:
+                                        should_complete = True
+                                        completion_msg = f"Setup via {cmd[:30]}"
+                                elif any(kw in task_title_lower for kw in ("build", "test", "verify", "validation")):
+                                    if is_test_or_build or not is_trivial_probe:
+                                        should_complete = True
+                                        completion_msg = f"Verified via {cmd[:30]}"
+                                elif not is_trivial_probe:
+                                    should_complete = True
+
+                                if should_complete:
+                                    active_task.complete(completion_msg, force=True)
+                                    self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
+                                    if self.current_plan:
+                                        next_pending = self.current_plan.get_pending_tasks()
+                                        if next_pending:
+                                            next_t = next_pending[0]
+                                            next_t.start()
+                                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
+                                else:
+                                    active_task.add_evidence("terminal_command", {"command": cmd[:80]})
+
+                            self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
+
+                    history.append(ChatMessage(
+                        role="tool",
+                        content=result.content,
+                        name=result.name,
+                        tool_call_id=result.call_id,
+                        metadata={"is_error": result.is_error, "truncated": result.truncated},
+                    ))
 
         message = f"Stopped after {max_steps} agent steps to prevent an unbounded tool loop."
         if self.current_plan:

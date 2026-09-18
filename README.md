@@ -15,9 +15,10 @@
 [![Cloudflare](https://img.shields.io/badge/Edge-Cloudflare%20Workers%20%2B%20D1-f38020.svg)](https://workers.cloudflare.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Prompts](https://img.shields.io/badge/Claude%20Code%20Prompts-695%2B-ff007f.svg)](https://github.com/Piebald-AI/claude-code-system-prompts)
-[![Tools](https://img.shields.io/badge/Built--in%20Tools-23-gold.svg)](#-built-in-tool-registry)
+[![Tools](https://img.shields.io/badge/Built--in%20Tools-24-gold.svg)](#-built-in-tool-registry)
 [![Headroom](https://img.shields.io/badge/Context%20Compression-Headroom%20(20--60%25%20Savings)-cyan.svg)](https://github.com/headroomlabs-ai/headroom)
-[![Tests](https://img.shields.io/badge/tests-19%20modules%20(114%20tests)-brightgreen.svg)](#-testing--quality-assurance)
+[![Parallel Execution](https://img.shields.io/badge/Concurrency-Parallel%20Wave%20Scheduler-gold.svg)](#-parallel-tool--subagent-execution-wave-scheduler)
+[![Tests](https://img.shields.io/badge/tests-20%20modules%20(130%20tests)-brightgreen.svg)](#-testing--quality-assurance)
 
 [🌐 Live Cloudflare Web Version](https://kratos-agent.thirutechdeveloper.workers.dev) • [🎮 Quickstart](#-quickstart-cli-version-vs-web-version) • [🖥️ CLI Version](#️-1-cli-version-terminal-shell--one-shot-mode) • [🌐 Web Version](#-2-web-version-vice-city-cyberpunk-console) • [📜 Slash Commands](#-complete-cli-slash-commands-reference)
 
@@ -38,6 +39,7 @@
 - [🔌 Harness & Plugin Architecture](#-harness--plugin-architecture)
 - [🧬 4-Tier Cognitive Memory](#-4-tier-cognitive-memory)
 - [🗜️ Headroom Context Compression (20-60% Token Savings)](#️-headroom-context-compression-20-60-token-savings)
+- [⚡ Parallel Tool & Subagent Execution (Wave Scheduler)](#-parallel-tool--subagent-execution-wave-scheduler)
 - [📦 Installation & Environment Setup](#-installation--environment-setup)
 - [🔑 Configuration & Environment Variables (.env)](#-configuration--environment-variables-env)
 - [🖥️ Standalone Windows Executable (.exe)](#️-standalone-windows-executable-exe)
@@ -66,6 +68,7 @@ Equipped with the complete **Claude Code System Prompts & Sub-Agents suite** (69
 - **Terminal Execution & Verification**: Executes tests, compiles code, runs linters, and verifies deliverables before completing turns.
 - **Self-Forging Tool Engine**: Synthesizes and hot-reloads new Python tools at runtime when needed.
 - **Headroom Context Compression**: Integrated 3-layer context compression (context pipeline, compactor, harness plugin) saving 20-60% tokens on tool results, logs, and history.
+- **Parallel Tool & Subagent Concurrency**: Wave scheduler partitions LLM tool calls into concurrent batches for read-only tools and distinct-path writes, while running multi-role subagents simultaneously.
 - **4-Tier Cognitive Memory**: Working, Episodic, Semantic, and Procedural memory tiers with dual D1/SQLite persistence.
 - **Plugin Harness Architecture**: Extensible kernel-based plugin system for model adapters, memory, auditing, and tool injection.
 - **MCP Protocol Support**: Model Context Protocol integration for external tool servers.
@@ -483,6 +486,50 @@ When installed, Headroom is **automatically detected and enabled**.
 
 ---
 
+## ⚡ Parallel Tool & Subagent Execution (Wave Scheduler)
+
+Kratos Agent features a high-performance **Parallel Wave Scheduler** that drastically slashes turn latency when the LLM outputs multiple tool calls or subagent tasks in a single turn:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       LLM Emits 4 Simultaneous Tool Calls                   │
+│         [read_file("a.py"), read_file("b.py"), grep_search(), write_file()] │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+                   ┌───────────────────────────────────────┐
+                   │   Wave Scheduler (partition_waves)   │
+                   └───────────────────┬───────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌─────────────────────────────────────────┐           ┌───────────────────────┐
+│ Wave 1: Concurrent Worker Pool (8 thr.) │           │ Wave 2: Barrier Write │
+│ • read_file("a.py")  ─┐                 │  ──then─► │ • write_file("out")   │
+│ • read_file("b.py")  ─┼─ (All run at    │           └───────────────────────┘
+│ • grep_search(...)   ─┘   same time)    │
+└─────────────────────────────────────────┘
+```
+
+### Safety & Concurrency Rules
+
+1. **Read-Only Concurrency**: Tools with zero side-effects (`read_file`, `list_directory`, `grep_search`, `fetch_url`, `google_search`, `read_memory`, `git_status`, etc.) run in parallel with up to 8 (configurable) worker threads.
+2. **Path-Safe Mutations**: File creation or edits (`write_file`, `edit_file`) targeting *different* file paths run simultaneously. Mutations to the *same* file or read-after-write dependencies are safely scheduled into sequential waves.
+3. **Sequential Barriers**: Terminal shell commands (`run_terminal_command`), plan transitions (`exit_plan_mode`), and memory updates run isolated in their own dedicated single-call waves.
+4. **Order Contract Guarantee**: History tool messages (`role="tool"`) are fed back to the LLM in the exact original `tool_call_id` sequence emitted by the model, regardless of which worker thread finishes first.
+5. **Multi-Subagent Swarm (`spawn_parallel_subagents`)**: Dispatches multiple specialized subagents (`code_reviewer`, `security_auditor`, `tester`) concurrently, consolidating multi-angle review passes into seconds.
+
+### CLI Command & Controls
+
+| Command | Action |
+| :--- | :--- |
+| `/parallel` (or `/parallel status`) | Inspect current parallel execution status, worker threads, and tool safety groups |
+| `/parallel on` | Enable parallel tool and subagent execution |
+| `/parallel off` | Disable concurrency (revert to strict sequential fallback mode) |
+| `/parallel <workers>` | Configure thread pool size (e.g. `/parallel 16`) |
+
+---
+
 ## 📦 Installation & Environment Setup
 
 ### Prerequisites
@@ -566,6 +613,13 @@ uv run kratos "Build a REST API with FastAPI"
 | `HEADROOM_MODEL` | `gpt-4o` | Tokenizer model for Headroom token counting and compression tuning |
 | `HEADROOM_PROXY_PORT` | `""` | Optional proxy port if running Headroom in sidecar proxy mode |
 
+### Parallel Tool & Subagent Execution Configuration
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `KRATOS_PARALLEL_EXECUTION` | `true` | Enable/disable concurrent tool execution wave scheduler |
+| `KRATOS_MAX_PARALLEL_WORKERS` | `8` | Maximum concurrent worker threads in thread pool (1-32) |
+
 ---
 
 ## 🖥️ Standalone Windows Executable (.exe)
@@ -611,6 +665,7 @@ Inside the interactive Kratos shell (`uv run kratos --cli`), the following slash
 - `/memory`: Displays summary of current session turns, executed tools, and changed files.
 - `/compact` (alias: `/compress`): Compresses conversation history to optimize LLM context window tokens.
 - `/headroom [on|off|status]`: Displays Headroom context compression metrics, total tokens saved, and ratio breakdown, or toggles compression on/off.
+- `/parallel [on|off|status|<workers>]`: Displays parallel execution status, or toggles concurrent execution / configures worker thread pool (e.g. `/parallel 16`).
 - `/reset`: Clears multi-turn memory in the active session.
 
 ### 🔍 Senior Engineering Sweeps
@@ -684,7 +739,7 @@ The tool creation pipeline is managed by [`tool_creator.py`](src/kratos_agent/ut
 
 ## 🔧 Built-in Tool Registry
 
-Kratos ships with **23 built-in tools** defined in [`tools_list.json`](src/kratos_agent/utils/tools_list.json) and implemented in [`tools.py`](src/kratos_agent/utils/tools.py):
+Kratos ships with **24 built-in tools** defined in [`tools_list.json`](src/kratos_agent/utils/tools_list.json) and implemented in [`tools.py`](src/kratos_agent/utils/tools.py):
 
 ### File Operations
 | Tool | Description |
@@ -729,6 +784,7 @@ Kratos ships with **23 built-in tools** defined in [`tools_list.json`](src/krato
 | Tool | Description |
 | :--- | :--- |
 | `spawn_subagent` | Create isolated child agents with structured results |
+| `spawn_parallel_subagents` | Spawn multiple isolated subagents concurrently across parallel worker threads |
 | `self_tool_creator` | Dynamically write and register new tools at runtime |
 | `list_skills` | List all installed skills and knowledge modules |
 | `read_skill` | Read cheatsheets and instructions for a specific skill |
@@ -737,7 +793,7 @@ Kratos ships with **23 built-in tools** defined in [`tools_list.json`](src/krato
 
 ## 🧪 Testing & Quality Assurance
 
-Kratos Agent includes **18 test modules** covering configuration, transport, tool parsing, planners, memory, streaming, and latency tracking:
+Kratos Agent includes **20 test modules (130 tests)** covering configuration, transport, tool parsing, planners, memory, streaming, and parallel concurrency:
 
 ```bash
 # Run the full test suite:
@@ -762,6 +818,7 @@ uv run python -m unittest tests/test_runtime.py
 | `test_deepseek_harness.py` | DeepSeek model harness plugin integration |
 | `test_dynamic_agent_planning.py` | Dynamic planning and task decomposition |
 | `test_headroom_integration.py` | Headroom compression plugin, fallback behavior, pipeline pruning, compactor, and stats |
+| `test_parallel_execution.py` | Parallel wave scheduler, concurrent worker pools, history order preservation, and multi-subagents |
 | `test_event_bus.py` | Publish/subscribe event bus |
 | `test_false_completion.py` | False completion detection and prevention |
 | `test_latency_and_verification_timing.py` | Latency tracking and verification timing |

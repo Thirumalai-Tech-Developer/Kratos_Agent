@@ -57,6 +57,7 @@ StandardPreset = HarnessPreset(
         "You are operating in DeepSeek Harness Standard Mode.",
         "Balance comprehensive reasoning with autonomous tool execution.",
         "Utilize cognitive memory for long-term knowledge retention and task context.",
+        "Parallel tool execution is enabled: emit multiple independent read/inspect/subagent tool calls concurrently in a single turn to save time.",
     ],
 )
 
@@ -74,6 +75,7 @@ CodePreset = HarnessPreset(
         "grep_search",
         "run_terminal_command",
         "spawn_subagent",
+        "spawn_parallel_subagents",
         "read_skill",
         "list_skills",
         "read_symbol",
@@ -97,6 +99,7 @@ CodePreset = HarnessPreset(
         "Focus exclusively on surgical code editing, syntactic correctness, and automated testing.",
         "Prefer surgical replacements over rewriting entire files.",
         "Always execute verification commands (tests, linter, builds) after modifying code.",
+        "Parallel tool execution is enabled: batch multi-file inspections and searches in a single turn to maximize throughput.",
     ],
 )
 

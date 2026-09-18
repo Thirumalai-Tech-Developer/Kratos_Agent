@@ -38,3 +38,16 @@ class SubagentManager:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [pool.submit(self.run, role, task) for task in tasks]
             return [future.result() for future in as_completed(futures)]
+
+    def run_multi_parallel(self, subagent_specs: List[Dict[str, str]], max_workers: int = 4) -> List[SubagentResult]:
+        """Runs multiple subagents with distinct roles and tasks in parallel."""
+        if not subagent_specs:
+            return []
+        workers = max(1, min(len(subagent_specs), max_workers))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(self.run, spec.get("role", "researcher"), spec.get("task", ""))
+                for spec in subagent_specs
+            ]
+            return [future.result() for future in futures]
+

@@ -719,6 +719,72 @@ def spawn_subagent(role: str, task: str) -> str:
         return f"Error executing subagent '{clean_role}': {e}"
 
 
+_parallel_subagent_runner = None
+
+
+def set_parallel_subagent_runner(runner) -> None:
+    """Sets the parallel subagent execution callback (typically runtime.subagents.run_multi_parallel)."""
+    global _parallel_subagent_runner
+    _parallel_subagent_runner = runner
+
+
+def spawn_parallel_subagents(subagents: List[Dict[str, str]]) -> str:
+    """Spawns multiple isolated specialized subagents concurrently in parallel threads.
+
+    Each subagent executes its focused task simultaneously, saving significant time.
+    Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'.
+
+    Args:
+        subagents: List of subagent specs: [{'role': 'code_reviewer', 'task': '...'}, {'role': 'tester', 'task': '...'}]
+
+    Returns:
+        Consolidated markdown report containing findings from all completed subagents.
+    """
+    if not subagents or not isinstance(subagents, list):
+        return "Error: subagents parameter must be a non-empty list of {'role': ..., 'task': ...} objects."
+
+    valid_specs = []
+    for s in subagents:
+        if isinstance(s, dict) and s.get("task"):
+            valid_specs.append({
+                "role": (s.get("role") or "researcher").strip(),
+                "task": s.get("task", "").strip(),
+            })
+
+    if not valid_specs:
+        return "Error: No valid subagent tasks found in arguments."
+
+    t0 = time.monotonic()
+
+    # Use parallel runner if configured, else fall back to ThreadPoolExecutor calling _subagent_runner
+    if _parallel_subagent_runner is not None:
+        results = _parallel_subagent_runner(valid_specs)
+    elif _subagent_runner is not None:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(valid_specs), 6)) as pool:
+            futures = [pool.submit(_subagent_runner, s["role"], s["task"]) for s in valid_specs]
+            results = [f.result() for f in futures]
+    else:
+        return f"[spawn_parallel_subagents] Subagent runner not active in current session. Planned tasks: {len(valid_specs)}"
+
+    elapsed_s = round(time.monotonic() - t0, 2)
+    reports = [f"### ⚡ Parallel Subagent Execution Report ({len(valid_specs)} subagents completed in {elapsed_s}s)\n"]
+
+    for spec, res in zip(valid_specs, results):
+        role = spec["role"]
+        task = spec["task"]
+        if hasattr(res, "summary"):
+            output = res.summary
+            if getattr(res, "error", None):
+                output = f"[error: {res.error}]\n{output}"
+        else:
+            output = str(res)
+        reports.append(f"#### 🤖 Subagent: `{role}` (Task: {task[:60]})\n{output}\n")
+
+    return "\n".join(reports)
+
+
+
 # ──────────────────────────────────────────────────────────
 # Skill Playbook Tools
 # ──────────────────────────────────────────────────────────

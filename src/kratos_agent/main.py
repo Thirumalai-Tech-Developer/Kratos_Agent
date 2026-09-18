@@ -250,8 +250,9 @@ class KratosRuntime:
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.subagents = SubagentManager(self._run_isolated)
-        from kratos_agent.utils.tools import set_subagent_runner, set_plan_mode_handler
+        from kratos_agent.utils.tools import set_subagent_runner, set_parallel_subagent_runner, set_plan_mode_handler
         set_subagent_runner(self.subagents.run)
+        set_parallel_subagent_runner(self.subagents.run_multi_parallel)
         self.plan_mode: bool = False
         set_plan_mode_handler(self._on_plan_mode_exit)
         self.harness = HarnessKernel(self)
@@ -280,6 +281,12 @@ class KratosRuntime:
     def _register_instruction_modules(self) -> None:
         self.instructions.register(InstructionModule("kratos-agent-core", "system", lambda: KRATOS_AGENT_MODE_SYSTEM_PROMPT, 5))
         self.instructions.register(InstructionModule("structural-output-enforcement", "system", lambda: KRATOS_STRUCTURAL_OUTPUT_PROMPT, 8))
+        self.instructions.register(InstructionModule("parallel-execution-directive", "system", lambda: (
+            "PARALLEL TOOL EXECUTION ENABLED:\n"
+            "Kratos supports concurrent multi-tool execution. When you need to inspect multiple files, list multiple directories, "
+            "search for multiple symbols, or run independent subagents, emit all corresponding tool calls concurrently in a single turn. "
+            "All independent/read-only tools will execute simultaneously in parallel to save time and minimize turn latency."
+        ), 9))
         self.instructions.register(InstructionModule("core-safety", "system", lambda: (
             "You are Kratos, an autonomous terminal coding agent. You directly execute actions using tools. "
             "CRITICAL: Never output statements describing what you will do or intend to do (e.g. 'I will inspect the workspace', 'I am going to create the files') without immediately providing the corresponding tool call in the same response. "
@@ -395,7 +402,7 @@ class KratosRuntime:
             self.memory.save()
 
     def _allow_tool(self, spec: Any, arguments: Dict[str, Any]) -> tuple[bool, str]:
-        if spec.name == "spawn_subagent" and getattr(self, "_is_subagent_running", False):
+        if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):
             return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
         if hasattr(self, "harness") and self.harness:
             tools_plugin = self.harness.get_plugin("tools")

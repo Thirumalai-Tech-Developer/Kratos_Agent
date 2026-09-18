@@ -367,6 +367,40 @@
             }
         },
         {
+            "name": "spawn_parallel_subagents",
+            "description": "Spawns multiple isolated specialized subagents concurrently in parallel threads to save time. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns a consolidated markdown report.",
+            "func_name": "spawn_parallel_subagents",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subagents": {
+                        "type": "array",
+                        "description": "List of subagent task specifications to execute simultaneously in parallel",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": {
+                                    "type": "string",
+                                    "description": "Subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
+                                },
+                                "task": {
+                                    "type": "string",
+                                    "description": "Precise task description for this subagent"
+                                }
+                            },
+                            "required": [
+                                "role",
+                                "task"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "subagents"
+                ]
+            }
+        },
+        {
             "name": "list_skills",
             "description": "Lists installed expert skills and domain playbooks available in Kratos (over 150 guides including frontend-design, theme-factory, api-sec, auth-sec, sound-audio-fx, etc.).",
             "func_name": "list_skills",

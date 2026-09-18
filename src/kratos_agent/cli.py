@@ -97,6 +97,7 @@ HELP_TEXT = """
   [bold cyan]/tools[/bold cyan]                   - Inspect all active & self-created tools (edit_file, grep, etc.)
   [bold cyan]/compact[/bold cyan]                 - Compress conversation context (alias: /compress)
   [bold cyan]/headroom[/bold cyan] [dim][on|off|status][/dim]  - Headroom context compression stats & toggle
+  [bold cyan]/parallel[/bold cyan] [dim][on|off|status][/dim]  - Toggle or configure parallel tool & subagent execution
   [bold cyan]/reload[/bold cyan]                  - Live hot-reload all code, tools & skills (alias: /r)
   [bold cyan]/memory[/bold cyan]                  - View persistent agentic memory & command log
   [bold cyan]/web[/bold cyan] [dim][port][/dim]            - Launch interactive Cloudflare D1 Web Console & Trace viewer
@@ -172,6 +173,9 @@ class KratosCompleter(Completer):
         ("/headroom", "Headroom context compression stats & savings (/headroom on|off)"),
         ("/headroom on", "Enable Headroom context compression"),
         ("/headroom off", "Disable Headroom context compression"),
+        ("/parallel", "Toggle or view parallel tool execution status (/parallel on|off)"),
+        ("/parallel on", "Enable concurrent tool & subagent execution"),
+        ("/parallel off", "Disable concurrent tool execution (sequential mode)"),
         ("/harness", "DeepSeek Harness status, preset mode, plugins & trace"),
         ("/harness status", "Inspect active preset, loaded plugins and health"),
         ("/harness mode", "Switch harness preset (standard, code, minimal, creator)"),
@@ -1326,6 +1330,56 @@ def handle_headroom_command(arg: str = ""):
     else:
         console.print("[bold yellow]Headroom plugin is loaded but not active.[/bold yellow]\n")
 
+def handle_parallel_command(arg: str = ""):
+    """Manages parallel tool & subagent execution (status, toggle on/off, worker count)."""
+    import os
+    from kratos_agent.brain.config import is_parallel_execution_enabled, get_max_parallel_workers
+
+    arg = arg.strip().lower()
+
+    if arg in ("on", "enable", "start", "1", "true"):
+        os.environ["KRATOS_PARALLEL_EXECUTION"] = "true"
+        workers = get_max_parallel_workers()
+        console.print(f"[bold green]✓ Parallel tool and subagent execution enabled[/bold green] (max {workers} concurrent workers).\n")
+        return
+
+    if arg in ("off", "disable", "stop", "0", "false"):
+        os.environ["KRATOS_PARALLEL_EXECUTION"] = "false"
+        console.print("[bold yellow]✓ Parallel tool execution disabled (sequential fallback mode).[/bold yellow]\n")
+        return
+
+    if arg.isdigit() and int(arg) > 0:
+        val = int(arg)
+        os.environ["KRATOS_PARALLEL_EXECUTION"] = "true"
+        os.environ["KRATOS_MAX_PARALLEL_WORKERS"] = str(val)
+        console.print(f"[bold green]✓ Parallel execution enabled with {val} max concurrent workers.[/bold green]\n")
+        return
+
+    enabled = is_parallel_execution_enabled()
+    workers = get_max_parallel_workers()
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold gold1")
+    table.add_column(style="white")
+    table.add_row("Status:", "[bold green]✅ ACTIVE (Parallel Enabled)[/bold green]" if enabled else "[bold yellow]❌ DISABLED (Sequential Mode)[/bold yellow]")
+    table.add_row("Max Workers:", f"[bold cyan]{workers}[/bold cyan] concurrent threads")
+    table.add_row("Wave Scheduler:", "[bold green]Active[/bold green] (Safe dependency & barrier isolation)")
+    table.add_row("Concurrent Read Tools:", "read_file, list_directory, grep_search, fetch_url, google_search, read_memory")
+    table.add_row("Path-Safe Mutations:", "write_file, edit_file (distinct files run concurrently)")
+    table.add_row("Subagent Swarm:", "spawn_parallel_subagents (multi-role subagents run simultaneously)")
+    table.add_row("Sequential Barriers:", "run_terminal_command, todo_write, exit_plan_mode")
+
+    console.print()
+    console.print(
+        Panel(
+            table,
+            title="[bold gold1]⚡ PARALLEL TOOL & SUBAGENT EXECUTION[/bold gold1]",
+            border_style="gold1",
+            padding=(1, 2)
+        )
+    )
+    console.print("[dim]Use '/parallel on', '/parallel off', or '/parallel <workers>' (e.g. /parallel 16) to configure.[/dim]\n")
+
 def start_interactive_cli():
     session = PromptSession(
         completer=KratosCompleter(),
@@ -1421,6 +1475,12 @@ def start_interactive_cli():
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
                 handle_headroom_command(arg)
+                continue
+
+            if user_input.lower().startswith("/parallel"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_parallel_command(arg)
                 continue
 
             if user_input.lower() in ("/accounts", "/gateway"):
