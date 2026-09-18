@@ -103,33 +103,41 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKi
         if not any(verb in q for verb in imperative_verbs):
             return IntentKind.QUESTION
 
-    # 7. Complex Multi-Step / Scaffolding / Autonomous Coding Tasks
+    # 7. Complex Multi-Step Scaffolding Tasks (Explicit creation of new full projects)
     complex_indicators = (
         "create a webapp", "create a website", "create an app", "create a full", "build a webapp",
-        "build a website", "build an app", "build a full", "scaffold", "three.js", "threejs",
-        "game", "dashboard", "full stack", "fullstack", "clone", "portfolio"
+        "build a website", "build an app", "build a full", "scaffold a", "scaffold", "three.js", "threejs",
+        "full stack webapp", "fullstack webapp"
     )
     if any(ind in q for ind in complex_indicators):
         return IntentKind.COMPLEX_AGENT_TASK
 
-    # 8. Standard Coding / Refactoring / Modification Tasks
+    # 8. Operational & Autonomous Execution Tasks (Download, run, play, execute, automate)
+    operational_keywords = (
+        "download", "clone", "fetch", "play", "run", "launch", "automate",
+        "install", "start", "stop", "restart", "deploy"
+    )
+    if any(k in q for k in operational_keywords):
+        return IntentKind.CODING_TASK
+
+    # 9. Standard Coding / Refactoring / Modification Tasks
     coding_keywords = (
         "create", "build", "make", "implement", "develop", "refactor", "fix", "debug",
-        "rewrite", "generate", "add a", "update", "patch", "setup", "configure", "install",
+        "rewrite", "generate", "add a", "update", "patch", "setup", "configure",
         "write a", "write", "modify", "delete", "remove", "migrate", "test"
     )
     if any(k in q for k in coding_keywords):
         return IntentKind.CODING_TASK
 
-    # 9. File-specific Tasks
+    # 10. File-specific Tasks
     if any(k in q for k in ("write file", "edit file", "delete file", "run test", "run build", "check file", ".py", ".ts", ".tsx", ".js", ".html", ".css", ".json")):
         return IntentKind.FILE_TASK
 
-    # 10. Short queries or single-word inputs without coding actions
-    if len(words) <= 3 and not any(k in q for k in ("build", "create", "make", "fix", "run")):
+    # 11. Short queries or single-word inputs without coding actions
+    if len(words) <= 3 and not any(k in q for k in ("build", "create", "make", "fix", "run", "play")):
         return IntentKind.CHAT
 
-    # 11. Default fallback for general non-coding statements
+    # 12. Default fallback for general non-coding statements
     return IntentKind.CHAT
 
 
@@ -139,20 +147,22 @@ def should_create_plan(query: str) -> bool:
     return intent.requires_plan
 
 
-PLANNING_SYSTEM_PROMPT = """You are Kratos Planner, the strategic planning module for the Kratos autonomous coding agent.
-Analyze the user's coding request and workspace context, then generate a tailored, realistic, multi-step execution plan.
+PLANNING_SYSTEM_PROMPT = """You are Kratos Planner, the strategic planning module for the Kratos autonomous agent.
+Analyze the user's request and workspace context, then generate a tailored, realistic, multi-step execution plan.
 
 RULES:
-1. Each task MUST be specific, concrete, and directly relevant to the user's exact request (e.g. "Design Streamlit LLM interface in interface.py", "Implement theme toggle component in src/ThemeToggle.tsx").
-2. Do NOT output generic, vague placeholder tasks like "Inspect project environment" or "Implement functionality and logic".
-3. Order tasks sequentially: Architecture/Scaffolding -> Core Implementation -> Features/Styling/Integration -> Testing/Verification.
+1. Each task MUST be specific, concrete, and directly relevant to the user's exact request.
+2. Do NOT output generic, vague placeholder tasks.
+3. Match tasks directly to the user's explicit objective:
+   - If the user asks to download, fetch, clone, run, or play/automate existing software (e.g. games, tools, repos), plan to acquire/download, set up dependencies, execute/play/automate, and verify. NEVER force scaffolding or coding from scratch when asked to download, run, or play.
+   - If the user asks to build, create, or scaffold a project, sequence tasks through architecture, core implementation, features/styling, and verification.
+   - If the user asks to debug, fix, or refactor, sequence tasks through reproduction/diagnosis, root-cause fix, and test verification.
 4. Each task should specify its appropriate `verification` type:
    - "none": Normal code editing, logic writing, or design tasks.
    - "build": Syntax check, compilation, or build verification (e.g. vite build, cargo check, tsc).
-   - "tests": Unit/integration test suites (e.g. pytest, npm test).
+   - "tests": Unit/integration test suites or runtime execution checks.
    - "browser": Dedicated frontend browser UI verification (ONLY for Web UI projects on dedicated verification tasks).
-   - For non-web tasks (Python CLI, Android, backend API, simple edits), do NOT use "browser" verification.
-5. Keep the total number of tasks between 3 and 7 milestones.
+5. Keep the total number of tasks between 3 and 6 milestones.
 6. Return ONLY a valid JSON object matching this schema:
 {
   "goal": "Clear and concise summary of the goal",
@@ -161,16 +171,6 @@ RULES:
       "id": "1",
       "title": "Specific, actionable task title",
       "verification": "none"
-    },
-    {
-      "id": "2",
-      "title": "Specific, actionable task title",
-      "verification": "build"
-    },
-    {
-      "id": "3",
-      "title": "Verify application and layout",
-      "verification": "browser"
     }
   ]
 }
@@ -386,7 +386,10 @@ def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) ->
 
     # Normalize naming for goal (supports Spider-Man, etc.)
     goal_text = re.sub(r'\bspiderman\b', 'spider-man', q_clean, flags=re.IGNORECASE)
-    if not goal_text.lower().startswith(("create", "build", "implement", "add", "fix", "refactor", "develop")):
+
+    is_operational = any(kw in goal_text.lower() for kw in ("download", "clone", "fetch", "get", "play", "run", "launch", "execute", "automate", "test", "inspect", "check"))
+
+    if not is_operational and not goal_text.lower().startswith(("create", "build", "implement", "add", "fix", "refactor", "develop")):
         goal = f"Implement {goal_text[:60]}"
     else:
         goal = goal_text[:60]
@@ -394,25 +397,32 @@ def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) ->
 
     tasks: List[TaskItem] = []
 
-    # 1. Project & File Inspection
-    if target_files:
-        tasks.append(TaskItem(id="1", title=f"Inspect workspace and target file ({', '.join(target_files[:2])})", state=TaskState.PENDING))
+    if is_operational:
+        # Operational task milestones: Acquire -> Setup -> Execute/Play -> Verify
+        tasks.append(TaskItem(id="1", title=f"Locate and acquire target resources for {goal_text[:40]}", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="2", title=f"Configure runtime environment and prerequisites for {goal_text[:40]}", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="3", title=f"Execute, run, or automate {goal_text[:40]}", state=TaskState.PENDING))
+        tasks.append(TaskItem(id="4", title=f"Verify execution outcome and confirm completion", state=TaskState.PENDING, verification="tests"))
     else:
-        tasks.append(TaskItem(id="1", title=f"Inspect workspace and project environment for {goal_text[:40]}", state=TaskState.PENDING))
+        # 1. Project & File Inspection
+        if target_files:
+            tasks.append(TaskItem(id="1", title=f"Inspect workspace and target file ({', '.join(target_files[:2])})", state=TaskState.PENDING))
+        else:
+            tasks.append(TaskItem(id="1", title=f"Inspect workspace and project environment for {goal_text[:40]}", state=TaskState.PENDING))
 
-    # 2. Architecture & Design
-    tasks.append(TaskItem(id="2", title=f"Design architecture and component layout for {goal_text[:45]}", state=TaskState.PENDING))
+        # 2. Architecture & Design
+        tasks.append(TaskItem(id="2", title=f"Design architecture and component layout for {goal_text[:45]}", state=TaskState.PENDING))
 
-    # 3. Core Implementation
-    if target_files:
-        tasks.append(TaskItem(id="3", title=f"Implement core logic in {target_files[0]}", state=TaskState.PENDING))
-    else:
-        tasks.append(TaskItem(id="3", title=f"Implement core functionality for {goal_text[:45]}", state=TaskState.PENDING))
+        # 3. Core Implementation
+        if target_files:
+            tasks.append(TaskItem(id="3", title=f"Implement core logic in {target_files[0]}", state=TaskState.PENDING))
+        else:
+            tasks.append(TaskItem(id="3", title=f"Implement core functionality for {goal_text[:45]}", state=TaskState.PENDING))
 
-    # 4. Integration, Styling & Dependencies
-    tasks.append(TaskItem(id="4", title=f"Configure integration, dependencies, and styling for {goal_text[:40]}", state=TaskState.PENDING))
+        # 4. Integration, Styling & Dependencies
+        tasks.append(TaskItem(id="4", title=f"Configure integration, dependencies, and styling for {goal_text[:40]}", state=TaskState.PENDING))
 
-    # 5. Verification & Testing
-    tasks.append(TaskItem(id="5", title=f"Verify {goal_text[:40]} and confirm workspace integrity", state=TaskState.PENDING, verification="build"))
+        # 5. Verification & Testing
+        tasks.append(TaskItem(id="5", title=f"Verify {goal_text[:40]} and confirm workspace integrity", state=TaskState.PENDING, verification="build"))
 
     return ExecutionPlan(goal=goal, tasks=tasks)

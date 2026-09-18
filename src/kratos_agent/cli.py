@@ -131,8 +131,12 @@ prompt_style = Style.from_dict({
     "scrollbar.button": "bg:#E63946",
 })
 
-# Models sourced dynamically from Brain Gateway — fallback to PUBLIC_MODELS
-from kratos_agent.brain.config import PUBLIC_MODELS as _PUBLIC_MODELS
+# Models sourced dynamically from Brain Gateway
+from kratos_agent.brain.config import (
+    PUBLIC_MODELS as _PUBLIC_MODELS,
+    get_model as _get_model,
+    get_available_models,
+)
 AVAILABLE_MODELS: List[str] = list(_PUBLIC_MODELS)
 
 def normalize_command(cmd_str: str) -> str:
@@ -193,7 +197,8 @@ class KratosCompleter(Completer):
         # 1. Autocomplete for /model <model_name>
         if text_before.startswith("/model "):
             model_query = text_before[len("/model "):].strip().lower()
-            for mid in AVAILABLE_MODELS:
+            current_models = get_available_models(refresh=False) or AVAILABLE_MODELS
+            for mid in current_models:
                 if model_query in mid.lower():
                     yield Completion(
                         text=mid,
@@ -375,7 +380,7 @@ def select_model_arrow_menu(model_ids: List[str], active_model: str) -> Optional
     def get_formatted_text():
         tokens = [
             ("bold #E63946", " ⚔️  Select Active Model\n"),
-            ("italic #D4AF37", "    Use ↑ / ↓ arrow keys (or j/k) to navigate, Enter to select, Esc to cancel\n\n")
+            ("italic #D4AF37", f"    Use ↑ / ↓ arrow keys (or j/k) to navigate, Enter to select, Esc to cancel ({len(model_ids)} available)\n\n")
         ]
         
         visible_count = min(len(model_ids), 12)
@@ -416,8 +421,13 @@ def handle_login(arg: str = ""):
 
 
 def handle_model_command(arg: str = ""):
-    """Handles the /model command with arrow key navigation or direct argument."""
-    model_ids = AVAILABLE_MODELS
+    """Handles the /model command with live endpoint fetching and arrow key navigation."""
+    # Dynamically fetch available models from the active model endpoint
+    live_models = get_available_models(refresh=True)
+    if live_models:
+        AVAILABLE_MODELS.clear()
+        AVAILABLE_MODELS.extend(live_models)
+    model_ids = list(AVAILABLE_MODELS)
 
     if arg:
         target = arg.strip()
@@ -432,7 +442,8 @@ def handle_model_command(arg: str = ""):
                 console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{matches[0]}[/bold cyan]\n")
                 return
             elif len(matches) > 1:
-                console.print(f"[yellow]Ambiguous model '{target}'. Matches: {', '.join(matches)}[/yellow]")
+                console.print(f"[dim]Found {len(matches)} models matching '{target}':[/dim]")
+                model_ids = matches
             else:
                 runtime.set_model(target)
                 console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan]\n")
@@ -660,7 +671,9 @@ def handle_accounts_command():
     table.add_row("Request Timeout", f"{get_request_timeout()}s")
     table.add_row("Max Retries", str(get_max_retries()))
     table.add_row("Proxy Bypass", "[bold green]trust_env = False (Active)[/bold green]")
-    table.add_row("Available Models", ", ".join(PUBLIC_MODELS[:5]) + "...")
+    current_models = get_available_models(refresh=False) or AVAILABLE_MODELS
+    preview = ", ".join(current_models[:5]) + ("..." if len(current_models) > 5 else "") if current_models else "None"
+    table.add_row("Available Models", f"{preview} ({len(current_models)} total)")
 
     console.print(table)
     console.print()
@@ -1301,6 +1314,10 @@ def start_interactive_cli():
             if user_input.lower() == "/reset":
                 messages.clear()
                 memory.clear()
+                if hasattr(runtime, "reset"):
+                    runtime.reset()
+                elif hasattr(runtime, "_history"):
+                    runtime._history.clear()
                 console.print("[bold yellow]🧹 Conversation and agentic memory have been cleared.[/bold yellow]\n")
                 continue
 
@@ -1543,7 +1560,12 @@ def start_interactive_cli():
             if not reply_text.strip():
                 reply_text = "Task executed successfully."
 
-            messages.append({"role": "assistant", "content": reply_text})
+            # Prevent network/provider error messages from contaminating multi-turn conversational history
+            if reply_text.startswith("Model request failed:") or reply_text.startswith("Execution error:"):
+                if messages and messages[-1].get("role") == "user":
+                    messages.pop()
+            else:
+                messages.append({"role": "assistant", "content": reply_text})
 
             # Styled Box Output: Completion Card for coding/project tasks, clean Markdown for chat
             last_plan = _tui.get_last_plan()

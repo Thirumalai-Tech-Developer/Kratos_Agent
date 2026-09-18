@@ -8,15 +8,11 @@ Constants:
 - `DEFAULT_MODEL`: `antigravity/gemini-3.7-flash-high`.
 - `DEFAULT_TIMEOUT_SECONDS`: `60.0`.
 - `DEFAULT_MAX_RETRIES`: `2`.
-- `DEFAULT_PUBLIC_MODELS`: fallback model identifiers.
-- `PUBLIC_MODELS`: model list resolved at import time by `get_model()`.
-
-Functions:
-
-- `get_api_key(explicit_key=None) -> str`: returns the explicit key or the first non-empty value from `OMNI_KEY`, `BRAIN_KEY`, `KRATOS_API_KEY`, and `OPENAI_API_KEY`.
-- `authenticate(explicit_key=None) -> dict[str, str]`: creates JSON/keep-alive headers and adds a Bearer header when a key exists.
-- `get_model(endpoint=None, timeout=3.0) -> list[str]`: performs a proxy-free GET to the model endpoint, accepts OpenAI-style `{data: [{id}]}` or string entries, and falls back to `DEFAULT_PUBLIC_MODELS` on any failure.
-- `fetch_models(endpoint=None, timeout=3.0)`: compatibility alias for `get_model`.
+- `DEFAULT_PUBLIC_MODELS`: fallback model list (empty by default; models are dynamically fetched).
+- `PUBLIC_MODELS`: dynamic model list populated by `get_model()`.
+- `get_model(endpoint=None, timeout=3.0, refresh=False) -> list[str]`: dynamically queries the model endpoint (resolving via `get_model_endpoint_url()`), parses standard OpenAI `{data: [{id}]}`, Ollama/gateway `{models: [{name}]}`, or list schemas, with 30s TTL caching and fallback to configured default model.
+- `fetch_models(endpoint=None, timeout=3.0, refresh=False)`: compatibility alias for `get_model`.
+- `get_available_models(refresh=False, timeout=3.0)`: helper to retrieve live models dynamically.
 - `get_base_url() -> str`: resolves `BRAIN_BASE_URL`, `CHAT_BASE_URL`, `OMNIROUTE_BASE_URL`, then the local default.
 - `get_endpoint_url() -> str`: resolves a direct chat endpoint or appends `/chat/completions` to the base URL.
 - `get_model_endpoint_url() -> str`: resolves a direct model endpoint or appends `/models`.

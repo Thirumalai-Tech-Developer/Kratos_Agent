@@ -141,9 +141,16 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         "save_memory", "read_memory", "clear_memory",
         "fetch_url", "google_search", "self_tool_creator", "calculate_expression",
         "git_status", "git_diff", "git_commit", "git_push", "git_create_pr",
+        "todo_write", "exit_plan_mode", "spawn_subagent", "list_skills", "read_skill",
+        "replace_file_content", "multi_replace_file_content",
+        "read_symbol", "search_symbol", "view_outline",
     }
 
-    RESERVED_TOOL_NAMES = {"tool", "tools", "function", "call", "commentary", "channel", "constrain", "message"}
+    RESERVED_TOOL_NAMES = {
+        "tool", "tools", "function", "call", "commentary", "channel", "constrain", "message",
+        "i", "we", "you", "they", "he", "she", "it", "let", "now", "here", "then", "if", "so",
+        "as", "to", "for", "and", "but", "or", "note", "example", "step", "task", "plan",
+    }
 
     # 1. DeepSeek V3 / R1 <｜tool call begin｜> format:
     ds_tool_pattern = re.compile(
@@ -154,7 +161,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         if any(start <= m.start() < end for start, end in removed_spans):
             continue
         name = m.group(1)
-        if name in RESERVED_TOOL_NAMES:
+        if name.lower() in RESERVED_TOOL_NAMES or len(name) < 2:
             continue
         try:
             args = json.loads(m.group(2))
@@ -177,22 +184,40 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         if any(start <= m.start() < end for start, end in removed_spans):
             continue
         tool_name = m.group(1)
-        if tool_name in RESERVED_TOOL_NAMES:
+        if tool_name.lower() in RESERVED_TOOL_NAMES or len(tool_name) < 2:
             continue
-        body = m.group(2)
-        args = {}
-        for p in dsml_param_pattern.finditer(body):
+        params_body = m.group(2)
+        args: Dict[str, Any] = {}
+        for p in dsml_param_pattern.finditer(params_body):
             p_name = p.group(1)
             p_val = p.group(2).strip()
-            try:
-                parsed_val = json.loads(p_val)
-                args[p_name] = parsed_val
-            except Exception:
-                args[p_name] = p_val
+            # If value is valid JSON, parse it (e.g. objects, arrays, numbers)
+            if (p_val.startswith("{") and p_val.endswith("}")) or (p_val.startswith("[") and p_val.endswith("]")):
+                try:
+                    args[p_name] = json.loads(p_val)
+                    continue
+                except Exception:
+                    pass
+            args[p_name] = p_val
+
+        # Fallback: check if params body contains raw JSON object
+        if not args:
+            json_m = re.search(r'\{[\s\S]*?\}', params_body)
+            if json_m:
+                try:
+                    parsed = json.loads(json_m.group(0))
+                    if isinstance(parsed, dict):
+                        args = parsed
+                except Exception:
+                    pass
+
         if tool_name in VALID_TOOLS or tool_name.isidentifier():
             tool_calls.append({"name": tool_name, "args": args})
             start_span = m.start()
             end_span = m.end()
+            close_m = re.search(r'</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>', text[m.start():])
+            if close_m:
+                end_span = m.start() + close_m.end()
             pre_m = re.search(r'<[｜|]{1,2}DSML[｜|]{1,2}\s*calls>\s*$', text[:start_span], re.IGNORECASE)
             if pre_m:
                 start_span = pre_m.start()
@@ -236,17 +261,63 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                 continue
         pos = m.end()
 
+    # 2b. Markdown fenced JSON block: ```json {"name": "...", "arguments": {...}}
+    json_block_pattern = re.compile(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```')
+    for m in json_block_pattern.finditer(text):
+        if any(start <= m.start() < end for start, end in removed_spans):
+            continue
+        try:
+            data = json.loads(m.group(1))
+            name = data.get("name") or data.get("function") or data.get("tool")
+            args = data.get("arguments") or data.get("parameters") or data.get("args") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    pass
+            if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
+                tool_calls.append({"name": name, "args": args})
+                removed_spans.append((m.start(), m.end()))
+        except Exception:
+            pass
+
+    # 2c. Standalone JSON with "name" and "arguments"
+    raw_json_pattern = re.compile(r'\{[\s\n]*"(?:name|function|tool)"\s*:\s*"([a-zA-Z0-9_]+)"[\s\S]*?\}')
+    pos = 0
+    while pos < len(text):
+        m = raw_json_pattern.search(text, pos)
+        if not m:
+            break
+        if any(start <= m.start() < end for start, end in removed_spans):
+            pos = m.end()
+            continue
+        parsed_obj, json_start, end_span = _extract_json_object(text, m.start())
+        if parsed_obj and isinstance(parsed_obj, dict):
+            name = parsed_obj.get("name") or parsed_obj.get("function") or parsed_obj.get("tool")
+            args = parsed_obj.get("arguments") or parsed_obj.get("parameters") or parsed_obj.get("args") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    pass
+            if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
+                tool_calls.append({"name": name, "args": args})
+                removed_spans.append((json_start, end_span))
+                pos = end_span
+                continue
+        pos = m.end()
+
     # 3. Harmony / OpenAI OSS / ChatML channel commentary format:
     harmony_pattern = re.compile(
-        r'(?:<[|｜][^>|｜]*[|｜]>)*\s*(?:to=call:|call:)?([a-zA-Z0-9_]+)[\s\S]*?(?:<[|｜]message[|｜]>|```(?:json)?|\s*)\s*(\{[\s\S]*?\})\s*(?:<[|｜]call[|｜]>|```)?'
+        r'(?:<[|｜][^>|｜]*[|｜]>\s*)+(?:to=call:|call:)?([a-zA-Z0-9_]+)[\s\S]*?(?:<[|｜]message[|｜]>|```(?:json)?|\s*)\s*(\{[\s\S]*?\})\s*(?:<[|｜]call[|｜]>|```)?'
     )
     for m in harmony_pattern.finditer(text):
         if any(start <= m.start() < end for start, end in removed_spans):
             continue
         name = m.group(1)
-        if name in RESERVED_TOOL_NAMES:
+        if name.lower() in RESERVED_TOOL_NAMES or len(name) < 2:
             continue
-        if name in VALID_TOOLS or name.isidentifier():
+        if name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2):
             try:
                 raw_json = m.group(2)
                 args = json.loads(raw_json)
@@ -271,7 +342,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                         args = json.loads(args)
                     except Exception:
                         pass
-                if name in VALID_TOOLS or (name and name.isidentifier()):
+                if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
                     tool_calls.append({"name": name, "args": args})
                     removed_spans.append((m.start(), m.end()))
                     continue
@@ -280,16 +351,18 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
 
         # Fallback to call:NAME{...} inside <tool_call>
         call_m = re.search(r'(?:call:)?([a-zA-Z0-9_]+)\s*(\{[\s\S]*\})', inner)
-        if call_m and (call_m.group(1) in VALID_TOOLS or call_m.group(1).isidentifier()):
-            try:
-                args = json.loads(call_m.group(2))
-                tool_calls.append({"name": call_m.group(1), "args": args})
-                removed_spans.append((m.start(), m.end()))
-            except Exception:
-                pass
+        if call_m:
+            c_name = call_m.group(1)
+            if c_name.lower() not in RESERVED_TOOL_NAMES and len(c_name) >= 2 and (c_name in VALID_TOOLS or c_name.isidentifier()):
+                try:
+                    args = json.loads(call_m.group(2))
+                    tool_calls.append({"name": c_name, "args": args})
+                    removed_spans.append((m.start(), m.end()))
+                except Exception:
+                    pass
 
     # 5. Standard Kratos format: call:NAME{...} or NAME{...}
-    pattern = re.compile(r'(?:call:)?([a-zA-Z0-9_]+)\s*\{')
+    pattern = re.compile(r'(call:)?([a-zA-Z0-9_]+)\s*\{')
     pos = 0
     while pos < len(text):
         m = pattern.search(text, pos)
@@ -301,8 +374,17 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             pos = m.end()
             continue
 
-        fn_name = m.group(1)
-        if fn_name in VALID_TOOLS or fn_name.isidentifier():
+        has_call_prefix = bool(m.group(1))
+        fn_name = m.group(2)
+
+        # Never treat single letters or common English words as tools
+        if len(fn_name) < 2 or fn_name.lower() in RESERVED_TOOL_NAMES:
+            pos = m.end()
+            continue
+
+        # If explicit call: prefix, allow valid identifier; otherwise require known tool in VALID_TOOLS
+        is_valid_tool = (has_call_prefix and fn_name.isidentifier()) or (fn_name in VALID_TOOLS)
+        if is_valid_tool:
             call_start = m.start()
             brace_start = m.end() - 1
             parsed_args, json_start, json_end = _extract_json_object(text, brace_start)

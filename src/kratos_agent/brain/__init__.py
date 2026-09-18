@@ -5,6 +5,7 @@ from kratos_agent.brain.config import (
     DEFAULT_MODEL,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_PUBLIC_MODELS,
     PUBLIC_MODELS,
     get_base_url,
     get_endpoint_url,
@@ -14,6 +15,9 @@ from kratos_agent.brain.config import (
     get_request_timeout,
     get_max_retries,
     authenticate,
+    get_model,
+    fetch_models,
+    get_available_models,
     BrainError,
     BrainConnectionError,
     BrainTimeoutError,
@@ -31,7 +35,6 @@ from kratos_agent.brain.config import (
     OmnirouteNotFoundError,
     OmnirouteServerError,
 )
-from kratos_agent.brain.config import get_model, fetch_models
 from kratos_agent.brain.client import BrainClient, OmnirouteClient
 from kratos_agent.brain.chat_model import (
     BrainChatModel,
@@ -52,6 +55,7 @@ __all__ = [
     "DEFAULT_MODEL",
     "DEFAULT_TIMEOUT_SECONDS",
     "DEFAULT_MAX_RETRIES",
+    "DEFAULT_PUBLIC_MODELS",
     "PUBLIC_MODELS",
     "get_base_url",
     "get_endpoint_url",
@@ -63,6 +67,7 @@ __all__ = [
     "authenticate",
     "get_model",
     "fetch_models",
+    "get_available_models",
     "BrainError",
     "BrainConnectionError",
     "BrainTimeoutError",

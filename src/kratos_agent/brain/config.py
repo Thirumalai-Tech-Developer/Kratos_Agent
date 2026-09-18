@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
@@ -14,19 +15,12 @@ DEFAULT_MODEL = "antigravity/gemini-3.7-flash-high"
 DEFAULT_TIMEOUT_SECONDS: float = 60.0
 DEFAULT_MAX_RETRIES: int = 2
 
-DEFAULT_PUBLIC_MODELS: List[str] = [
-    "antigravity/gemini-3.7-flash-high",
-    "antigravity/gpt-oss-120b-medium",
-    "gemini-3.7-flash-high",
-    "gemini-3.7-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "claude-3-7-sonnet",
-    "gpt-4o-mini",
-    "ollama-cloud/nemotron-3-super",
-    "auto/best-free",
-]
+# Dynamic fallback list (no longer hardcoded with static models)
+DEFAULT_PUBLIC_MODELS: List[str] = []
+
+_cached_models: List[str] = []
+_cache_timestamp: float = 0.0
+_CACHE_TTL_SECONDS: float = 30.0
 
 
 def get_api_key(explicit_key: Optional[str] = None) -> str:
@@ -37,6 +31,7 @@ def get_api_key(explicit_key: Optional[str] = None) -> str:
         os.getenv("OMNI_KEY")
         or os.getenv("BRAIN_KEY")
         or os.getenv("KRATOS_API_KEY")
+        or os.getenv("API_KEY")
         or os.getenv("OPENAI_API_KEY")
         or ""
     )
@@ -51,38 +46,6 @@ def authenticate(explicit_key: Optional[str] = None) -> Dict[str, str]:
     if key:
         headers["Authorization"] = f"Bearer {key}"
     return headers
-
-
-def get_model(endpoint: Optional[str] = None, timeout: float = 3.0) -> List[str]:
-    """Model"""
-    target_endpoint = endpoint or os.getenv("MODEL_ENDPOINT") or DEFAULT_MODEL_ENDPOINT
-    session = requests.Session()
-    session.trust_env = False
-    header = authenticate()
-    try:
-        result = session.get(target_endpoint, headers=header, timeout=timeout)
-        if result.status_code == 200:
-            result_json = result.json()
-            model_list = []
-            data = result_json.get("data", [])
-            for res in data:
-                if isinstance(res, dict) and "id" in res:
-                    model_list.append(res["id"])
-                elif isinstance(res, str):
-                    model_list.append(res)
-            if model_list:
-                return model_list
-    except Exception:
-        pass
-    return list(DEFAULT_PUBLIC_MODELS)
-
-
-def fetch_models(endpoint: Optional[str] = None, timeout: float = 3.0) -> List[str]:
-    """Alias for get_model."""
-    return get_model(endpoint=endpoint, timeout=timeout)
-
-
-PUBLIC_MODELS = get_model()
 
 
 def get_base_url() -> str:
@@ -133,6 +96,92 @@ def get_default_model() -> str:
         or os.getenv("KRATOS_MODEL")
         or DEFAULT_MODEL
     )
+
+
+def _extract_model_ids(payload: Any) -> List[str]:
+    """Extracts unique model IDs from various LLM gateway response schemas."""
+    raw_list: List[Any] = []
+    if isinstance(payload, list):
+        raw_list = payload
+    elif isinstance(payload, dict):
+        if "data" in payload and isinstance(payload["data"], list):
+            raw_list = payload["data"]
+        elif "models" in payload and isinstance(payload["models"], list):
+            raw_list = payload["models"]
+        elif "items" in payload and isinstance(payload["items"], list):
+            raw_list = payload["items"]
+        elif "id" in payload:
+            raw_list = [payload]
+
+    model_ids: List[str] = []
+    for item in raw_list:
+        mid = ""
+        if isinstance(item, str):
+            mid = item.strip()
+        elif isinstance(item, dict):
+            mid = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+        if mid and mid not in model_ids:
+            model_ids.append(mid)
+    return model_ids
+
+
+def get_model(
+    endpoint: Optional[str] = None,
+    timeout: float = 3.0,
+    refresh: bool = False,
+) -> List[str]:
+    """Dynamically fetches available models from the active model endpoint or cache."""
+    global _cached_models, _cache_timestamp, PUBLIC_MODELS
+
+    target_endpoint = endpoint or get_model_endpoint_url()
+    now = time.time()
+
+    # Use cache if fresh and not forcing refresh (and using default endpoint)
+    if not refresh and endpoint is None and _cached_models and (now - _cache_timestamp) < _CACHE_TTL_SECONDS:
+        return list(_cached_models)
+
+    session = requests.Session()
+    session.trust_env = False
+    header = authenticate()
+    try:
+        result = session.get(target_endpoint, headers=header, timeout=timeout)
+        if result.status_code == 200:
+            result_json = result.json()
+            model_list = _extract_model_ids(result_json)
+            if model_list:
+                _cached_models = list(model_list)
+                _cache_timestamp = now
+                if "PUBLIC_MODELS" in globals() and isinstance(PUBLIC_MODELS, list):
+                    PUBLIC_MODELS.clear()
+                    PUBLIC_MODELS.extend(model_list)
+                return list(model_list)
+    except Exception:
+        pass
+
+    # If fetch failed, fall back to cached models if available
+    if _cached_models:
+        return list(_cached_models)
+
+    # If explicit fallback models provided, use them
+    if DEFAULT_PUBLIC_MODELS:
+        return list(DEFAULT_PUBLIC_MODELS)
+
+    # Dynamic fallback: configured default model from environment
+    default_model = get_default_model()
+    return [default_model] if default_model else []
+
+
+def fetch_models(endpoint: Optional[str] = None, timeout: float = 3.0, refresh: bool = False) -> List[str]:
+    """Alias for get_model."""
+    return get_model(endpoint=endpoint, timeout=timeout, refresh=refresh)
+
+
+def get_available_models(refresh: bool = False, timeout: float = 3.0) -> List[str]:
+    """Fetches currently available models dynamically from the active gateway."""
+    return get_model(refresh=refresh, timeout=timeout)
+
+
+PUBLIC_MODELS: List[str] = get_model()
 
 
 def get_normal_mode_model() -> str:

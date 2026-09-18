@@ -91,6 +91,12 @@ Over 150 expert domain skills are installed in Kratos (e.g. `frontend-design`, `
 * Call `list_skills(filter_tag)` to discover available playbooks.
 * Call `read_skill(skill_name)` to load comprehensive expert guidelines into context.
 
+AUTONOMOUS EXECUTION & GOAL FIDELITY
+
+* Execute what the user actually requested. If the user asks to download, fetch, clone, install, run, or play/automate existing software (e.g. "download mario game and play to complete the game"), find and download the real software or package using terminal commands (`git clone`, `npm`, `pip`, `curl`, etc.) and run/automate it. NEVER try to scaffold or code a substitute from scratch unless explicitly asked to build, create, or scaffold.
+* Autonomously manage your own workflow and milestones using the `todo_write` tool. You decide your own plan and update it dynamically (`pending` -> `in_progress` -> `completed`) as you make progress.
+* You decide autonomously when to inspect, research, plan, execute, and verify. Do not wait for manual commands or slash prompts.
+
 CAPABILITY & CONVERSATIONAL INQUIRIES
 
 For capability questions ("what can you do?", "help", "who are you"):
@@ -291,9 +297,9 @@ class KratosRuntime:
         ), 15))
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
             "AUTONOMOUS EXECUTION PROTOCOL:\n"
-            "1. When a user requests code, scaffolding, or a project, immediately start invoking tools (`write_file`, `run_terminal_command`, `read_file`, `edit_file`, `save_memory`).\n"
-            "2. Never provide conversational filler or mere intent statements. Always execute actions with actual tool calls (`call:TOOL_NAME{...}`).\n"
-            "3. Progress through the plan by executing the required tools for each task until all tasks and verification are complete."
+            "1. Focus directly on the user's explicit objective (e.g. downloading, installing, running, automating, fixing, or building). If the user asks to download or run an existing game or tool, use terminal commands (`run_terminal_command`) to acquire and execute it—do NOT scaffold a substitute from scratch.\n"
+            "2. For multi-step missions, manage your tasks dynamically using `todo_write`. Update task statuses (`pending` -> `in_progress` -> `completed`) as you make progress.\n"
+            "3. Never output mere intent statements without corresponding tool calls. Execute the required tools directly."
         ), 20))
         self.instructions.register(InstructionModule("workspace", "project", lambda: f"Workspace: {self.workspace}\n{project_memory.get_project_context()}", 30))
         self.instructions.register(InstructionModule("skills", "persona", lambda: self.skill_manager.get_all_skills_prompt(), 40))
@@ -305,8 +311,23 @@ class KratosRuntime:
             return []
         history: List[ChatMessage] = []
         for turn in active.turns:
-            history.extend([ChatMessage("user", str(turn.get("user", ""))), ChatMessage("assistant", str(turn.get("agent", "")))])
+            agent_text = str(turn.get("agent", "")).strip()
+            # Do not restore network/provider failure messages as conversational history
+            if (
+                agent_text.startswith("Model request failed:")
+                or agent_text.startswith("Execution error:")
+                or turn.get("status") == "failed"
+            ):
+                continue
+            history.extend([ChatMessage("user", str(turn.get("user", ""))), ChatMessage("assistant", agent_text)])
         return history
+
+    def reset(self) -> None:
+        """Reset conversation history, active session turns, and rebind event store."""
+        self._history = []
+        if self.memory and hasattr(self.memory, "clear"):
+            self.memory.clear()
+        self._event_store = self._open_event_store()
 
     def _open_event_store(self) -> EventStore:
         session_id = self.memory.active_session.session_id if self.memory.active_session else "default"
@@ -413,12 +434,21 @@ class KratosRuntime:
         if user.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:
             resume_plan = self.memory.active_session.get_plan()
         result, final_history = self.loop.run(history, self._allow_tool, resume_plan=resume_plan)
-        self._history = final_history
+        if result.startswith("Model request failed:") or result.startswith("Execution error:"):
+            status = "failed"
+            self._history = [
+                m for m in final_history
+                if not (m.role == "assistant" and (m.content.startswith("Model request failed:") or m.content.startswith("Execution error:")))
+            ]
+            if self._history and self._history[-1].role == "user" and self._history[-1].content == user:
+                self._history.pop()
+        else:
+            self._history = final_history
+            status = "paused" if self._cancellation_flag.is_set() else "completed"
 
         plan_dict = self.loop.current_plan.to_dict() if self.loop.current_plan else None
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
         verif_dict = self.loop.last_verification.__dict__ if getattr(self.loop, "last_verification", None) else None
-        status = "paused" if self._cancellation_flag.is_set() else "completed"
 
         self.memory.record_turn(
             user,
@@ -468,19 +498,22 @@ class KratosRuntime:
                 on_chunk=on_chunk
             )
             result = full_text or "".join(response_chunks)
+            status = "completed"
+            self._history.append(ChatMessage("assistant", result))
         except Exception as ex:
             result = f"Execution error: {ex}"
+            status = "failed"
             event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": result}))
-
-        self._history.append(ChatMessage("assistant", result))
+            if self._history and self._history[-1].role == "user" and self._history[-1].content == query:
+                self._history.pop()
 
         self.memory.record_turn(
             query,
             result,
             [],
-            status="completed"
+            status=status
         )
-        done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": "completed", "preview": result[:150]})
+        done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": status, "preview": result[:150]})
         event_bus.publish(done_evt)
         self._emit(done_evt)
         return result
@@ -496,10 +529,16 @@ class KratosRuntime:
             resume_plan = self.memory.active_session.get_plan()
         result, self._history = self.loop.run(self._history, self._allow_tool, resume_plan=resume_plan)
 
+        if result.startswith("Model request failed:") or result.startswith("Execution error:"):
+            status = "failed"
+            if self._history and self._history[-1].role == "user" and self._history[-1].content == query:
+                self._history.pop()
+        else:
+            status = "paused" if self._cancellation_flag.is_set() else "completed"
+
         plan_dict = self.loop.current_plan.to_dict() if self.loop.current_plan else None
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
         verif_dict = self.loop.last_verification.__dict__ if getattr(self.loop, "last_verification", None) else None
-        status = "paused" if self._cancellation_flag.is_set() else "completed"
 
         self.memory.record_turn(
             query,

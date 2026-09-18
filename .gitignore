@@ -77,6 +77,12 @@ pnpm-debug.log*
 .next/
 out/
 
+# Stale Vite build artifacts embedded in web server
+src/kratos_agent/web/assets/
+
+# Duplicate banner image (keep .png only)
+kratos_banner.jpg
+
 # IDE & OS files
 .vscode/
 .idea/
@@ -86,5 +92,3 @@ out/
 .DS_Store
 Thumbs.db
 desktop.ini
-ben10_app
-tests
