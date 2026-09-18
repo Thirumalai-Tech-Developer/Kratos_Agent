@@ -96,6 +96,7 @@ HELP_TEXT = """
   [bold cyan]/create-tool[/bold cyan] [dim][desc][/dim]    - Autonomously forge and hot-reload a new tool
   [bold cyan]/tools[/bold cyan]                   - Inspect all active & self-created tools (edit_file, grep, etc.)
   [bold cyan]/compact[/bold cyan]                 - Compress conversation context (alias: /compress)
+  [bold cyan]/headroom[/bold cyan] [dim][on|off|status][/dim]  - Headroom context compression stats & toggle
   [bold cyan]/reload[/bold cyan]                  - Live hot-reload all code, tools & skills (alias: /r)
   [bold cyan]/memory[/bold cyan]                  - View persistent agentic memory & command log
   [bold cyan]/web[/bold cyan] [dim][port][/dim]            - Launch interactive Cloudflare D1 Web Console & Trace viewer
@@ -168,6 +169,9 @@ class KratosCompleter(Completer):
         ("/plan on", "Turn on Plan Mode (read-only architectural exploration)"),
         ("/plan off", "Turn off Plan Mode (resume full execution capability)"),
         ("/compact", "Compress conversation history & optimize token context"),
+        ("/headroom", "Headroom context compression stats & savings (/headroom on|off)"),
+        ("/headroom on", "Enable Headroom context compression"),
+        ("/headroom off", "Disable Headroom context compression"),
         ("/harness", "DeepSeek Harness status, preset mode, plugins & trace"),
         ("/harness status", "Inspect active preset, loaded plugins and health"),
         ("/harness mode", "Switch harness preset (standard, code, minimal, creator)"),
@@ -1250,6 +1254,78 @@ def handle_compact_command(messages: List[Dict[str, str]]) -> List[Dict[str, str
     console.print()
     return compressed_msgs
 
+def handle_headroom_command(arg: str = ""):
+    """Manages Headroom context compression (stats, toggle on/off, status)."""
+    arg = arg.strip().lower()
+
+    # Try to get the Headroom plugin from harness or context pipeline
+    plugin = None
+    if hasattr(runtime, "harness") and runtime.harness:
+        plugin = runtime.harness.get_plugin("headroom")
+    if not plugin:
+        from kratos_agent.core.context_pipeline import _get_headroom
+        plugin = _get_headroom()
+
+    from kratos_agent.core.harness.plugins.headroom_plugin import is_headroom_available
+
+    installed = is_headroom_available()
+
+    if arg in ("on", "enable", "start"):
+        if not installed:
+            console.print("[bold red]❌ Headroom is not installed.[/bold red] Run: [bold cyan]pip install headroom-ai[/bold cyan]\n")
+            return
+        if plugin:
+            plugin.toggle(True)
+        console.print("[bold green]✓ Headroom context compression enabled.[/bold green]\n")
+        return
+
+    if arg in ("off", "disable", "stop"):
+        if plugin:
+            plugin.toggle(False)
+        console.print("[bold yellow]✓ Headroom context compression disabled.[/bold yellow]\n")
+        return
+
+    # Display stats / status
+    if not installed:
+        console.print(Panel(
+            "[yellow]Headroom is not installed.[/yellow]\n\n"
+            "Headroom provides 20-60% token savings on tool results, logs, and context.\n"
+            "To install:\n"
+            "  [bold cyan]pip install headroom-ai[/bold cyan]  or  [bold cyan]uv add --optional headroom headroom-ai[/bold cyan]",
+            title="[bold gold1]⚙️  HEADROOM CONTEXT COMPRESSION[/bold gold1]",
+            border_style="yellow",
+            padding=(1, 2)
+        ))
+        console.print()
+        return
+
+    if plugin:
+        stats = plugin.stats
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold gold1")
+        table.add_column(style="white")
+        table.add_row("Status:", "[bold green]✅ ACTIVE[/bold green]" if stats.enabled else "[bold yellow]❌ DISABLED[/bold yellow]")
+        table.add_row("Total Invocations:", str(stats.total_calls))
+        table.add_row("Tokens Saved:", f"[bold cyan]{stats.total_tokens_saved:,}[/bold cyan] tokens")
+        table.add_row("Average Savings:", f"[bold green]{stats.savings_percent}%[/bold green]")
+        table.add_row("Last Turn Ratio:", f"{stats.last_ratio:.1%}")
+        if stats.per_content_type:
+            types_str = ", ".join(f"{k}: {v:,} saved" for k, v in sorted(stats.per_content_type.items(), key=lambda x: -x[1]))
+            table.add_row("By Content Type:", types_str)
+
+        console.print()
+        console.print(
+            Panel(
+                table,
+                title="[bold gold1]⚙️  HEADROOM COMPRESSION STATS[/bold gold1]",
+                border_style="gold1",
+                padding=(1, 2)
+            )
+        )
+        console.print("[dim]Use '/headroom off' to disable, '/headroom on' to enable.[/dim]\n")
+    else:
+        console.print("[bold yellow]Headroom plugin is loaded but not active.[/bold yellow]\n")
+
 def start_interactive_cli():
     session = PromptSession(
         completer=KratosCompleter(),
@@ -1339,6 +1415,12 @@ def start_interactive_cli():
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
                 handle_d1_command(arg)
+                continue
+
+            if user_input.lower().startswith("/headroom"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_headroom_command(arg)
                 continue
 
             if user_input.lower() in ("/accounts", "/gateway"):

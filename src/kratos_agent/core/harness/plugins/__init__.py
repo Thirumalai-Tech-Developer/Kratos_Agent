@@ -5,6 +5,7 @@ from .memory_plugin import MemoryPlugin
 from .deepseek_model_plugin import DeepSeekModelPlugin
 from .audit_plugin import AuditPlugin
 from .creator_plugin import CreatorPlugin
+from .headroom_plugin import HeadroomPlugin
 
 __all__ = [
     "ToolsPlugin",
@@ -12,4 +13,6 @@ __all__ = [
     "DeepSeekModelPlugin",
     "AuditPlugin",
     "CreatorPlugin",
+    "HeadroomPlugin",
 ]
+

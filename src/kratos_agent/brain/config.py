@@ -266,3 +266,30 @@ OmnirouteRateLimitError = BrainRateLimitError
 OmnirouteBadRequestError = BrainBadRequestError
 OmnirouteNotFoundError = BrainNotFoundError
 OmnirouteServerError = BrainServerError
+
+
+# ==============================================================================
+# Headroom Context Compression Configuration
+# ==============================================================================
+
+def is_headroom_enabled() -> bool:
+    """Returns True if Headroom context compression is enabled (default: True)."""
+    raw = os.getenv("HEADROOM_ENABLED", "true").lower().strip()
+    return raw in ("true", "1", "yes", "on")
+
+
+def get_headroom_model() -> str:
+    """Returns the tokenizer model for Headroom token counting (default: gpt-4o)."""
+    return os.getenv("HEADROOM_MODEL", "gpt-4o").strip()
+
+
+def get_headroom_proxy_port() -> Optional[int]:
+    """Returns the Headroom proxy port if configured (e.g. 8787)."""
+    raw = os.getenv("HEADROOM_PROXY_PORT")
+    if raw:
+        try:
+            return int(raw.strip())
+        except ValueError:
+            pass
+    return None
+

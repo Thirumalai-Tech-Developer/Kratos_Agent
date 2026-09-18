@@ -50,7 +50,7 @@ StandardPreset = HarnessPreset(
     allowed_tools=None,  # All registered tools
     model_config={
         "temperature": 0.5,
-        "max_tokens": 8192,
+        "max_tokens": 32768,
         "thinking_enabled": True,
     },
     directives=[
@@ -89,7 +89,7 @@ CodePreset = HarnessPreset(
     ],
     model_config={
         "temperature": 0.1,
-        "max_tokens": 8192,
+        "max_tokens": 32768,
         "thinking_enabled": True,
     },
     directives=[
@@ -111,7 +111,7 @@ MinimalPreset = HarnessPreset(
     ],
     model_config={
         "temperature": 0.0,
-        "max_tokens": 4096,
+        "max_tokens": 32768,
         "thinking_enabled": False,
     },
     directives=[
@@ -128,7 +128,7 @@ CreatorPreset = HarnessPreset(
     allowed_tools=None,  # All tools plus creator meta-tools
     model_config={
         "temperature": 0.3,
-        "max_tokens": 8192,
+        "max_tokens": 32768,
         "thinking_enabled": True,
     },
     directives=[

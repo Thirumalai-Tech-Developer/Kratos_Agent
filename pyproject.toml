@@ -26,6 +26,11 @@ dependencies = [
 kratos = "kratos_agent:main"
 kratos-agent = "kratos_agent:main"
 
+[project.optional-dependencies]
+headroom = [
+    "headroom-ai>=0.37.0",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"

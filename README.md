@@ -16,7 +16,8 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Prompts](https://img.shields.io/badge/Claude%20Code%20Prompts-695%2B-ff007f.svg)](https://github.com/Piebald-AI/claude-code-system-prompts)
 [![Tools](https://img.shields.io/badge/Built--in%20Tools-23-gold.svg)](#-built-in-tool-registry)
-[![Tests](https://img.shields.io/badge/tests-18%20modules-brightgreen.svg)](#-testing--quality-assurance)
+[![Headroom](https://img.shields.io/badge/Context%20Compression-Headroom%20(20--60%25%20Savings)-cyan.svg)](https://github.com/headroomlabs-ai/headroom)
+[![Tests](https://img.shields.io/badge/tests-19%20modules%20(114%20tests)-brightgreen.svg)](#-testing--quality-assurance)
 
 [🌐 Live Cloudflare Web Version](https://kratos-agent.thirutechdeveloper.workers.dev) • [🎮 Quickstart](#-quickstart-cli-version-vs-web-version) • [🖥️ CLI Version](#️-1-cli-version-terminal-shell--one-shot-mode) • [🌐 Web Version](#-2-web-version-vice-city-cyberpunk-console) • [📜 Slash Commands](#-complete-cli-slash-commands-reference)
 
@@ -36,6 +37,7 @@
 - [⚙️ Architecture & Execution Pipeline](#️-architecture--execution-pipeline)
 - [🔌 Harness & Plugin Architecture](#-harness--plugin-architecture)
 - [🧬 4-Tier Cognitive Memory](#-4-tier-cognitive-memory)
+- [🗜️ Headroom Context Compression (20-60% Token Savings)](#️-headroom-context-compression-20-60-token-savings)
 - [📦 Installation & Environment Setup](#-installation--environment-setup)
 - [🔑 Configuration & Environment Variables (.env)](#-configuration--environment-variables-env)
 - [🖥️ Standalone Windows Executable (.exe)](#️-standalone-windows-executable-exe)
@@ -63,6 +65,7 @@ Equipped with the complete **Claude Code System Prompts & Sub-Agents suite** (69
 - **Workspace File Operations**: Inspects, searches, creates, and surgical-edits files with localized context.
 - **Terminal Execution & Verification**: Executes tests, compiles code, runs linters, and verifies deliverables before completing turns.
 - **Self-Forging Tool Engine**: Synthesizes and hot-reloads new Python tools at runtime when needed.
+- **Headroom Context Compression**: Integrated 3-layer context compression (context pipeline, compactor, harness plugin) saving 20-60% tokens on tool results, logs, and history.
 - **4-Tier Cognitive Memory**: Working, Episodic, Semantic, and Procedural memory tiers with dual D1/SQLite persistence.
 - **Plugin Harness Architecture**: Extensible kernel-based plugin system for model adapters, memory, auditing, and tool injection.
 - **MCP Protocol Support**: Model Context Protocol integration for external tool servers.
@@ -325,11 +328,11 @@ When a user submits a prompt, Kratos executes a structured, multi-phase autonomo
 | **Task Manager** | [`core/task_manager.py`](src/kratos_agent/core/task_manager.py) | Task tree state machine (`PENDING` → `RUNNING` → `COMPLETED` / `FAILED`) with Rich TUI rendering |
 | **Memory** | [`core/memory.py`](src/kratos_agent/core/memory.py) | Multi-session `AgenticMemory` engine with JSON disk persistence in `.kratos/sessions/` |
 | **Cognitive Memory** | [`core/cognitive_memory.py`](src/kratos_agent/core/cognitive_memory.py) | 4-tier cognitive memory (Working / Episodic / Semantic / Procedural) with D1/SQLite dual storage |
-| **Context Pipeline** | [`core/context_pipeline.py`](src/kratos_agent/core/context_pipeline.py) | Token budgeting, deterministic tool-result pruning, and transparent compaction checkpoints |
+| **Context Pipeline** | [`core/context_pipeline.py`](src/kratos_agent/core/context_pipeline.py) | Token budgeting, Headroom content-aware compression for tool outputs, deterministic pruning |
 | **Instruction Engine** | [`core/instruction_engine.py`](src/kratos_agent/core/instruction_engine.py) | Composable `InstructionModule` system for system prompts, personas, and skill injections |
 | **Approval Mode** | [`core/approval_mode.py`](src/kratos_agent/core/approval_mode.py) | Three-tier approval gate (`suggest` / `auto-edit` / `full-auto`) with capability-based permission checks |
 | **Verification Manager** | [`core/verification_manager.py`](src/kratos_agent/core/verification_manager.py) | Post-implementation verification: file integrity, syntax validation, test/build checks |
-| **Compactor** | [`core/compactor.py`](src/kratos_agent/core/compactor.py) | Conversation history compressor to optimize LLM context window tokens |
+| **Compactor** | [`core/compactor.py`](src/kratos_agent/core/compactor.py) | Conversation history compressor with Headroom pre-compression and dense checkpoint summaries |
 | **Event Bus** | [`core/event_bus.py`](src/kratos_agent/core/event_bus.py) | Publish/subscribe event bus for decoupled inter-component communication |
 | **Event Store** | [`core/event_store.py`](src/kratos_agent/core/event_store.py) | JSONL-based append-only event log for recovery and debug replay |
 | **Latency Tracker** | [`core/latency_tracker.py`](src/kratos_agent/core/latency_tracker.py) | Request timing, TTFT measurement, and performance metrics collection |
@@ -372,6 +375,7 @@ The **Harness** subsystem (`src/kratos_agent/core/harness/`) provides a kernel-b
 | **Audit Plugin** | [`audit_plugin.py`](src/kratos_agent/core/harness/plugins/audit_plugin.py) | Execution auditing, trace logging, and compliance recording |
 | **Creator Plugin** | [`creator_plugin.py`](src/kratos_agent/core/harness/plugins/creator_plugin.py) | Autonomous tool creation and registration pipeline |
 | **Tools Plugin** | [`tools_plugin.py`](src/kratos_agent/core/harness/plugins/tools_plugin.py) | Tool schema injection and dynamic tool registry management |
+| **Headroom Plugin** | [`headroom_plugin.py`](src/kratos_agent/core/harness/plugins/headroom_plugin.py) | Headroom context compression (20-60% token savings), stats tracking, and `/headroom` command |
 
 ---
 
@@ -391,6 +395,91 @@ Kratos implements a sophisticated cognitive memory architecture with four distin
 - **Local disk JSON backup** in `.kratos/memory/`
 
 Memory is accessible through CLI commands (`/memory`, `/compact`, `/reset`) and programmatically via `save_memory`, `read_memory`, `clear_memory` tools.
+
+---
+
+## 🗜️ Headroom Context Compression (20-60% Token Savings)
+
+Kratos Agent natively integrates [Headroom](https://github.com/headroomlabs-ai/headroom) (`headroom-ai`) for automatic context compression across every LLM call. Headroom reduces token consumption by **20% to 60%** on tool results, terminal output, file reads, JSON payloads, and conversation history while preserving semantic accuracy. It operates **100% locally** — zero data is ever transmitted to external compression endpoints.
+
+### 3-Layer Integration Architecture
+
+```
+                                  ┌────────────────────────┐
+                                  │   Tool Outputs / Logs  │
+                                  └───────────┬────────────┘
+                                              │
+                                              ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 1: Context Pipeline (`context_pipeline.py`)                                      │
+│ • Detects payload content type (JSON, log, code, text)                                 │
+│ • Runs Headroom content-aware compression before head/tail truncation                  │
+│ • Prunes large tool outputs while retaining vital diagnostic lines                     │
+└─────────────────────────────────────────────┬──────────────────────────────────────────┘
+                                              │
+                                              ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 2: Conversation Compactor (`compactor.py`)                                       │
+│ • Compresses older conversation turns through Headroom before summarization            │
+│ • Preserves dense checkpoint fidelity without overflowing context budgets              │
+└─────────────────────────────────────────────┬──────────────────────────────────────────┘
+                                              │
+                                              ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Layer 3: DeepSeek Harness Plugin (`headroom_plugin.py`)                                │
+│ • Registers shared "headroom" service in HarnessKernel                                 │
+│ • Emits `headroom:compressed` events on kernel event bus for live telemetry            │
+│ • Tracks cumulative token savings, ratios, and per-content-type breakdowns             │
+│ • Exposes runtime toggle and stats via `/headroom` CLI slash command                   │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Content-Aware Routing
+
+Headroom inspects incoming payloads and automatically routes them to specialized compression engines:
+
+| Content Type | Engine / Strategy | Typical Savings | Description |
+| :--- | :--- | :--- | :--- |
+| **JSON** | `SmartCrusher` | 30% – 60% | Structural pruning of redundant keys, empty fields, and repeated schemas |
+| **Code / AST** | `CodeCompressor` | 25% – 50% | AST-aware code compression preserving signatures, imports, and logic |
+| **Logs / Traces** | Log filter + deduplication | 35% – 65% | Deduplicates repetitive stack traces, timestamps, and verbose status lines |
+| **Prose / Text** | `Kompress-v2-base` | 20% – 40% | Semantic density compression preserving intent, constraints, and instructions |
+
+### Installation & Graceful Fallback
+
+Headroom is an **optional dependency** — Kratos operates normally with standard head/tail truncation if `headroom-ai` is not installed.
+
+```bash
+# Install Headroom as an optional dependency with uv:
+uv add --optional headroom headroom-ai
+
+# Or with pip:
+pip install headroom-ai
+```
+
+When installed, Headroom is **automatically detected and enabled**.
+
+### CLI Controls
+
+| Command | Action |
+| :--- | :--- |
+| `/headroom` | Display real-time compression metrics, tokens saved, and ratio breakdown |
+| `/headroom on` | Enable context compression |
+| `/headroom off` | Disable context compression (bypass mode) |
+| `/compact` | Trigger manual compaction pass using Headroom |
+
+```
+⚙️  Headroom Context Compression Stats
+   Status:        ✅ enabled
+   Total calls:   14
+   Tokens saved:  38,420
+   Savings:       42.6%
+   Last ratio:    45.1%
+   By content type:
+     json: 21,800 tokens saved
+     log: 12,450 tokens saved
+     code: 4,170 tokens saved
+```
 
 ---
 
@@ -469,6 +558,14 @@ uv run kratos "Build a REST API with FastAPI"
 | `CLOUDFLARE_API_TOKEN` | *(required for D1)* | API Token with "Account → D1 → Edit" permissions |
 | `KRATOS_D1_LOCAL_MIRROR` | `true` | Enable/disable local SQLite mirror backup |
 
+### Headroom Context Compression Configuration (Optional)
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `HEADROOM_ENABLED` | `true` | Enable/disable Headroom context compression (auto-enabled when installed) |
+| `HEADROOM_MODEL` | `gpt-4o` | Tokenizer model for Headroom token counting and compression tuning |
+| `HEADROOM_PROXY_PORT` | `""` | Optional proxy port if running Headroom in sidecar proxy mode |
+
 ---
 
 ## 🖥️ Standalone Windows Executable (.exe)
@@ -513,6 +610,7 @@ Inside the interactive Kratos shell (`uv run kratos --cli`), the following slash
 - `/session rm <id>`: Deletes a stored session.
 - `/memory`: Displays summary of current session turns, executed tools, and changed files.
 - `/compact` (alias: `/compress`): Compresses conversation history to optimize LLM context window tokens.
+- `/headroom [on|off|status]`: Displays Headroom context compression metrics, total tokens saved, and ratio breakdown, or toggles compression on/off.
 - `/reset`: Clears multi-turn memory in the active session.
 
 ### 🔍 Senior Engineering Sweeps
@@ -663,6 +761,7 @@ uv run python -m unittest tests/test_runtime.py
 | `test_d1_storage.py` | D1 database storage and local SQLite mirror |
 | `test_deepseek_harness.py` | DeepSeek model harness plugin integration |
 | `test_dynamic_agent_planning.py` | Dynamic planning and task decomposition |
+| `test_headroom_integration.py` | Headroom compression plugin, fallback behavior, pipeline pruning, compactor, and stats |
 | `test_event_bus.py` | Publish/subscribe event bus |
 | `test_false_completion.py` | False completion detection and prevention |
 | `test_latency_and_verification_timing.py` | Latency tracking and verification timing |

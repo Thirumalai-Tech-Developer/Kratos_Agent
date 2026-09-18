@@ -30,6 +30,7 @@ from kratos_agent.core.harness.plugins import (
     DeepSeekModelPlugin,
     AuditPlugin,
     CreatorPlugin,
+    HeadroomPlugin,
 )
 
 load_dotenv()
@@ -269,8 +270,9 @@ class KratosRuntime:
         deepseek_model_plugin = DeepSeekModelPlugin()
         audit_plugin = AuditPlugin({"log_dir": str(self.workspace / ".kratos" / "trace")})
         creator_plugin = CreatorPlugin()
+        headroom_plugin = HeadroomPlugin()
 
-        for plugin in [tools_plugin, memory_plugin, deepseek_model_plugin, audit_plugin, creator_plugin]:
+        for plugin in [tools_plugin, memory_plugin, deepseek_model_plugin, audit_plugin, creator_plugin, headroom_plugin]:
             self.harness.register_plugin(plugin, enable_immediately=True)
 
         self.harness.apply_preset("standard")

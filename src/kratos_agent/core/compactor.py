@@ -3,6 +3,25 @@ from rich.console import Console
 
 console = Console(highlight=False)
 
+# ---------------------------------------------------------------------------
+# Headroom lazy import — optional dependency
+# ---------------------------------------------------------------------------
+def _try_headroom_compress(text: str) -> str:
+    """Compress text through Headroom if available, otherwise return unchanged."""
+    try:
+        from kratos_agent.core.harness.plugins.headroom_plugin import is_headroom_available
+        if is_headroom_available():
+            from headroom import compress
+            msgs = [{"role": "user", "content": text}]
+            result = compress(msgs, model="gpt-4o")
+            compressed_msgs = getattr(result, "messages", msgs)
+            if compressed_msgs:
+                return compressed_msgs[0].get("content", text)
+    except Exception:
+        pass
+    return text
+
+
 COMPACTION_SYSTEM_PROMPT = """You are an expert AI context compactor. 
 Summarize the previous conversation turns into a dense, high-fidelity context memory checkpoint.
 Preserve all:
@@ -38,11 +57,14 @@ class ConversationCompactor:
         return content_str[:max_chars] + "... [trimmed]"
 
     def compress_heuristic(self, older_messages: List[Dict[str, str]]) -> str:
-        """Fast offline compression when LLM invocation is skipped."""
+        """Fast offline compression — uses Headroom if available, then summarizes."""
         summary_lines = ["[COMPACTED CONVERSATION CHECKPOINT]"]
         for m in older_messages:
             role = m.get("role", "user").capitalize()
             content = m.get("content", "").strip()
+            # Compress content through Headroom before summarizing
+            if len(content) > 200:
+                content = _try_headroom_compress(content)
             # Extract first sentence or intent
             first_line = content.splitlines()[0] if content else ""
             if len(first_line) > 120:
