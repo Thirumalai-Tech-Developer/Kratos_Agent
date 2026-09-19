@@ -47,8 +47,9 @@ def clean_file_path(fp_str: str) -> str:
 def _fallback_extract_tool_call(text: str) -> Optional[Dict[str, Any]]:
     """Resilient extraction when JSON has unescaped quotes or formatting issues."""
     if "edit_file" in text:
-        fp_m = re.search(r'(?<![a-zA-Z0-9_])file_path\s*[:=]\s*["\']?([^"\',\s\n\(\)]+)', text)
-        fp = clean_file_path(fp_m.group(1)) if fp_m else "script.py"
+        fp_m = re.search(r'(?<![a-zA-Z0-9_])file_path\s*[:=]\s*(?:[rfbRFB]#*|#*)?(?:"([^"]+)"|\'([^\']+)\'|([^"\',\s\n\(\)]+))', text)
+        raw_fp = (fp_m.group(1) or fp_m.group(2) or fp_m.group(3)) if fp_m else "script.py"
+        fp = clean_file_path(raw_fp)
         t_m = re.search(r'(?<![a-zA-Z0-9_])target_text\s*[:=]\s*["\'](.*?)["\']\s*,\s*replacement_text', text, re.DOTALL)
         r_m = re.search(r'(?<![a-zA-Z0-9_])replacement_text\s*[:=]\s*["\'](.*?)["\']\s*\}?', text, re.DOTALL)
         if t_m and r_m:
@@ -56,9 +57,10 @@ def _fallback_extract_tool_call(text: str) -> Optional[Dict[str, Any]]:
 
     if "write_file" in text:
         fp = "script.py"
-        fp_m = re.search(r'(?<![a-zA-Z0-9_])file_path\s*[:=]\s*(?:[rfbRFB]#*|#*)?["\']?([^"\',\s\n\(\)]+)', text)
+        fp_m = re.search(r'(?<![a-zA-Z0-9_])file_path\s*[:=]\s*(?:[rfbRFB]#*|#*)?(?:"([^"]+)"|\'([^\']+)\'|([^"\',\s\n\(\)]+))', text)
         if fp_m:
-            fp = clean_file_path(fp_m.group(1))
+            raw_fp = fp_m.group(1) or fp_m.group(2) or fp_m.group(3)
+            fp = clean_file_path(raw_fp)
             if not fp or fp in ("r#", "r", "#"):
                 fp = "script.py"
         start_m = re.search(r'(?<![a-zA-Z0-9_])content\s*[:=]\s*["\']?', text)
@@ -117,14 +119,23 @@ def _extract_json_object(text: str, start_idx: int) -> Tuple[Optional[Dict[str, 
                         return parsed, start_pos, i + 1
                     except Exception:
                         try:
-                            norm_args = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)\s*:', r'\1"\2":', raw_json)
-                            parsed = json.loads(norm_args)
+                            # Normalize Windows backslashes in paths and unescaped backslashes
+                            fixed_json = re.sub(r'([a-zA-Z]:[/\\][^"\n\r]*)', lambda m: m.group(0).replace('\\', '/'), raw_json)
+                            fixed_json = re.sub(r'\\(?![/"\\bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', fixed_json)
+                            parsed = json.loads(fixed_json)
                             return parsed, start_pos, i + 1
                         except Exception:
-                            fallback = _fallback_extract_tool_call(raw_json)
-                            if fallback:
-                                return fallback.get("args", {}), start_pos, i + 1
-                            return None, -1, -1
+                            try:
+                                norm_args = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)\s*:', r'\1"\2":', raw_json)
+                                norm_args = re.sub(r'([a-zA-Z]:[/\\][^"\n\r]*)', lambda m: m.group(0).replace('\\', '/'), norm_args)
+                                norm_args = re.sub(r'\\(?![/"\\bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', norm_args)
+                                parsed = json.loads(norm_args)
+                                return parsed, start_pos, i + 1
+                            except Exception:
+                                fallback = _fallback_extract_tool_call(raw_json)
+                                if fallback:
+                                    return fallback.get("args", {}), start_pos, i + 1
+                                return None, -1, -1
     return None, -1, -1
 
 

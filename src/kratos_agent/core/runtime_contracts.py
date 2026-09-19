@@ -142,6 +142,53 @@ class ToolSpec:
     source: str = "builtin"
 
 
+@dataclass
+class AgentRunState:
+    run_id: str
+    user_request: str
+    workspace: Any
+    target_dir: Optional[str] = None
+    target_deliverables: List[str] = field(default_factory=list)
+    completed_tools: List[Dict[str, Any]] = field(default_factory=list)
+    inspected_files: List[str] = field(default_factory=list)
+    written_files: List[str] = field(default_factory=list)
+    commands_run: List[str] = field(default_factory=list)
+    phase: str = "planning"
+    status: str = "running"
+    start_time: float = field(default_factory=time.monotonic)
+
+    def record_tool_call(self, name: str, args: Dict[str, Any], is_error: bool = False) -> None:
+        self.completed_tools.append({"name": name, "args": args, "is_error": is_error})
+
+    def record_inspected_file(self, file_path: str) -> None:
+        if file_path and file_path not in self.inspected_files:
+            self.inspected_files.append(file_path)
+
+    def record_written_file(self, file_path: str) -> None:
+        if file_path and file_path not in self.written_files:
+            self.written_files.append(file_path)
+
+    def record_command(self, cmd: str) -> None:
+        if cmd and cmd not in self.commands_run:
+            self.commands_run.append(cmd)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "user_request": self.user_request,
+            "workspace": str(self.workspace),
+            "target_dir": self.target_dir,
+            "target_deliverables": list(self.target_deliverables),
+            "completed_tools_count": len(self.completed_tools),
+            "inspected_files": list(self.inspected_files),
+            "written_files": list(self.written_files),
+            "commands_run": list(self.commands_run),
+            "phase": self.phase,
+            "status": self.status,
+            "elapsed_seconds": round(time.monotonic() - self.start_time, 2),
+        }
+
+
 def json_safe(value: Any) -> Any:
     """Convert runtime objects into JSON-safe values without serialising secrets."""
     if hasattr(value, "to_dict"):

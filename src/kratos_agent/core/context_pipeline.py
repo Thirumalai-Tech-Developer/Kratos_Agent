@@ -96,29 +96,45 @@ class ContextBuilder:
     def compact_history(self, messages: List[ChatMessage]) -> Tuple[List[ChatMessage], Dict[str, Any] | None]:
         limit = self.budget.max_input_tokens - self.budget.reserve_output_tokens
         total = sum(self.estimate_tokens(message.content) for message in messages)
-        if total <= limit:
+        if total <= limit or len(messages) <= 1:
             return messages, None
-        # Preserve the newest turns verbatim and create a transparent checkpoint.
+
+        # Always preserve the root user request (messages[0]) so the agent never loses its original task.
+        root_user: Optional[ChatMessage] = None
+        remaining_messages = list(messages)
+        if messages and messages[0].role == "user":
+            root_user = messages[0]
+            remaining_messages = messages[1:]
+
+        # Preserve the newest turns from remaining_messages up to budget
         kept: List[ChatMessage] = []
-        used = 0
-        for message in reversed(messages):
+        used = self.estimate_tokens(root_user.content) if root_user else 0
+        target_limit = limit // 2
+
+        for message in reversed(remaining_messages):
             cost = self.estimate_tokens(message.content)
-            if kept and used + cost > limit // 2:
+            if kept and used + cost > target_limit:
                 break
             kept.append(message)
             used += cost
-        omitted = list(reversed(messages[: len(messages) - len(kept)]))
+
+        omitted = list(reversed(remaining_messages[: len(remaining_messages) - len(kept)]))
         facts = []
         for message in omitted:
             prefix = message.content.replace("\n", " ").strip()[:500]
             if prefix:
                 facts.append(f"- {message.role}: {prefix}")
-        checkpoint = ChatMessage(
-            role="system",
-            content="[COMPACTION CHECKPOINT]\nOlder turns were compacted. Preserve these decisions and requirements:\n" + "\n".join(facts),
-            metadata={"compacted": True},
-        )
-        result = [checkpoint] + list(reversed(kept))
+
+        checkpoint_messages: List[ChatMessage] = []
+        if facts:
+            # Use role="user" so web proxies and OpenAI adapters do not discard system messages inside the message array
+            checkpoint_messages.append(ChatMessage(
+                role="user",
+                content="[COMPACTION CHECKPOINT]\nOlder execution steps were compacted. Retain these findings and constraints:\n" + "\n".join(facts),
+                metadata={"compacted": True},
+            ))
+
+        result = ([root_user] if root_user else []) + checkpoint_messages + list(reversed(kept))
         return result, {"before_tokens": total, "after_tokens": sum(self.estimate_tokens(m.content) for m in result), "omitted_messages": len(omitted)}
 
     def assemble(
@@ -127,10 +143,47 @@ class ContextBuilder:
         history: List[ChatMessage],
         tools: List[Dict[str, Any]],
         workspace: Dict[str, Any],
+        run_state: Optional[Any] = None,
     ) -> Dict[str, Any]:
         self._headroom_stats.clear()
         history, compaction = self.compact_history(history)
-        system = "\n\n".join(section["content"] for section in instruction_sections)
+        if isinstance(instruction_sections, str):
+            system = instruction_sections
+        elif isinstance(instruction_sections, (list, tuple)):
+            parts = []
+            for sec in instruction_sections:
+                if isinstance(sec, dict):
+                    parts.append(str(sec.get("content", "")))
+                else:
+                    parts.append(str(sec))
+            system = "\n\n".join(parts)
+        else:
+            system = str(instruction_sections or "")
+
+        # Inject active task banner if run_state exists to guarantee task preservation
+        if run_state and getattr(run_state, "user_request", ""):
+            req_text = run_state.user_request
+            phase = getattr(run_state, "phase", "executing").upper()
+            banner_lines = [
+                "\n\n=======================================================",
+                "🚨 CURRENT ACTIVE TASK (IMMUTABLE OBJECTIVE):",
+                f"User Request: {req_text}",
+                f"Phase: {phase}",
+            ]
+            deliverables = getattr(run_state, "target_deliverables", [])
+            if deliverables:
+                banner_lines.append(f"Required Deliverable Files: {', '.join(deliverables)}")
+            inspected = getattr(run_state, "inspected_files", [])
+            if inspected:
+                banner_lines.append(f"Recently Inspected Files: {', '.join(inspected[-8:])}")
+            banner_lines.extend([
+                "DIRECTIVE: Proceed with completing the user's specific request. "
+                "Do NOT output conversational 'no task' messages. "
+                "Execute the required tools to fulfill and verify all deliverables.",
+                "=======================================================",
+            ])
+            system += "\n".join(banner_lines)
+
         token_estimate = self.estimate_tokens(system + "\n".join(m.content for m in history))
         request = {
             "instructions": instruction_sections,

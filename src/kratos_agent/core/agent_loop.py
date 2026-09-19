@@ -4,6 +4,7 @@ live task tree progression, workspace tracking, verification, and resilient inte
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +18,14 @@ from kratos_agent.brain.config import (
 from .context_pipeline import ContextBuilder
 from .event_bus import event_bus
 from .planner import IntentKind, classify_intent, formulate_agent_plan
-from .runtime_contracts import ChatMessage, EventKind, RuntimeEvent
+from .runtime_contracts import (
+    AgentRunState,
+    ChatMessage,
+    EventKind,
+    RuntimeEvent,
+    ToolCall,
+    ToolResult,
+)
 from .task_manager import AgentState, ExecutionPlan, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
@@ -245,6 +253,105 @@ def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -
     return f"[tool call] completed {name}"
 
 
+def _extract_target_dir_and_deliverables(query: str, workspace: Path) -> tuple[Optional[str], List[str]]:
+    """Parses target workspace directory and expected output deliverables from user query."""
+    target_dir = None
+    deliverables: List[str] = []
+
+    # 1. Detect explicit directory in quotes or Windows drive path:
+    win_quoted_m = re.search(r'["\']([a-zA-Z]:[/\\][^"\'*?<>|\r\n]+)["\']', query)
+    if win_quoted_m:
+        raw_path = win_quoted_m.group(1).strip()
+        if not re.search(r'\.[a-zA-Z0-9]+$', raw_path):
+            target_dir = raw_path.replace("\\", "/")
+    else:
+        win_unquoted_m = re.search(r'(?<![a-zA-Z0-9_])([a-zA-Z]:[/\\][^\s"\'*?<>|\r\n]+)', query)
+        if win_unquoted_m:
+            raw_path = win_unquoted_m.group(1).strip()
+            if not re.search(r'\.[a-zA-Z0-9]+$', raw_path):
+                target_dir = raw_path.replace("\\", "/")
+
+    # 2. Detect requested deliverable output files:
+    folder_named_m = re.search(
+        r'(?:stored|saved|written)\s+in\s+(?:the\s+|same\s+)?([a-zA-Z0-9_-]+)\s+folder\s+named\s+as\s+([a-zA-Z0-9_.-]+)',
+        query,
+        re.IGNORECASE,
+    )
+    if folder_named_m:
+        folder = folder_named_m.group(1).strip()
+        fname = folder_named_m.group(2).strip()
+        deliverables.append(f"{folder}/{fname}")
+
+    named_m = re.search(r'(?:named\s+as|named)\s+([a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+)', query, re.IGNORECASE)
+    if named_m:
+        fn = named_m.group(1).strip()
+        if not any(d.endswith(fn) for d in deliverables):
+            deliverables.append(fn)
+
+    saved_m = re.search(r'(?:stored|saved|written)\s+(?:as|in|to)\s+([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)', query, re.IGNORECASE)
+    if saved_m:
+        sp = saved_m.group(1).strip().replace("\\", "/")
+        if sp not in deliverables:
+            deliverables.append(sp)
+
+    clean_deliverables = []
+    for d in deliverables:
+        d_norm = d.replace("\\", "/").strip().lstrip("/")
+        if d_norm and d_norm not in clean_deliverables:
+            clean_deliverables.append(d_norm)
+
+    return target_dir, clean_deliverables
+
+
+def _is_no_task_hallucination(text: str) -> bool:
+    """Detects when the model falsely claims there is no task or asks what to do."""
+    if not text:
+        return False
+    t = text.lower()
+    indicators = [
+        "no task in your last message",
+        "no task in your message",
+        "there is no task in your",
+        "there is no task",
+        "there's no task",
+        "nothing to execute yet",
+        "nothing to execute",
+        "so there's nothing to execute",
+        "so there is nothing to execute",
+        "give me the actual request",
+        "please provide a task",
+        "no task provided",
+        "nothing for me to execute",
+    ]
+    return any(ind in t for ind in indicators)
+
+
+def _verify_deliverables(deliverables: List[str], target_dir: Optional[str], workspace: Path) -> tuple[bool, List[str], List[str]]:
+    """Checks if all target deliverables exist on disk and are non-empty."""
+    existing = []
+    missing = []
+    for d in deliverables:
+        candidates = [
+            workspace / d,
+            Path(d),
+        ]
+        if target_dir:
+            candidates.append(Path(target_dir) / d)
+
+        found = False
+        for c in candidates:
+            try:
+                if c.is_file() and c.stat().st_size > 0:
+                    found = True
+                    existing.append(str(c))
+                    break
+            except Exception:
+                pass
+        if not found:
+            missing.append(d)
+    return len(missing) == 0, existing, missing
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -268,6 +375,7 @@ class AgentLoop:
         self.verification_manager = VerificationManager(self.workspace, self.emit)
         self.current_plan: Optional[ExecutionPlan] = None
         self.last_verification: Optional[VerificationResult] = None
+        self.current_run: Optional[AgentRunState] = None
         self._current_turn_id: str = ""
 
         # Wire dynamic todo_write and exit_plan_mode tool handlers
@@ -342,11 +450,22 @@ class AgentLoop:
         """Executes a single tool call and prunes its result text."""
         try:
             result = self.tools.execute(call, allow_tool)
+            # If writing a relative deliverable and target_dir is configured, mirror to target_dir as well
+            if not result.is_error and call.name in ("write_file", "edit_file") and self.current_run and self.current_run.target_dir:
+                fp = str(call.arguments.get("file_path", "")).strip()
+                if fp and not (Path(fp).is_absolute() or re.match(r'^[a-zA-Z]:', fp)):
+                    try:
+                        target_fp = Path(self.current_run.target_dir) / fp
+                        target_fp.parent.mkdir(parents=True, exist_ok=True)
+                        content = str(call.arguments.get("content", ""))
+                        if content:
+                            target_fp.write_text(content, encoding="utf-8")
+                    except Exception:
+                        pass
             output, truncated = self.context.prune_tool_result(result.content)
             result.content, result.truncated = output, truncated
             return result
         except Exception as exc:
-            from .runtime_contracts import ToolResult
             return ToolResult(
                 call_id=call.call_id,
                 name=call.name,
@@ -357,24 +476,35 @@ class AgentLoop:
 
 
     def _track_tool_side_effects(self, name: str, args: Dict[str, Any], is_error: bool, turn_id: str) -> None:
-        fp = str(args.get("file_path", "") or args.get("path", "")).strip()
+        fp = str(args.get("file_path", "") or args.get("path", "") or args.get("target_file", "")).strip()
+
+        if self.current_run:
+            self.current_run.record_tool_call(name, args, is_error)
 
         if name == "write_file":
             if not is_error and fp:
                 self.workspace_tracker.record_file_created(fp)
+                if self.current_run:
+                    self.current_run.record_written_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_CREATED, {"file_path": fp}, turn_id))
         elif name == "edit_file":
             if not is_error and fp:
                 self.workspace_tracker.record_file_modified(fp)
+                if self.current_run:
+                    self.current_run.record_written_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_MODIFIED, {"file_path": fp}, turn_id))
         elif name in ("read_file", "list_directory", "grep_search"):
             if fp:
                 self.workspace_tracker.record_file_inspected(fp)
+                if self.current_run:
+                    self.current_run.record_inspected_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_INSPECTED, {"file_path": fp}, turn_id))
         elif name == "run_terminal_command":
             cmd = str(args.get("command", "")).strip()
             if cmd:
                 self.workspace_tracker.record_command(cmd, 1 if is_error else 0)
+                if self.current_run:
+                    self.current_run.record_command(cmd)
                 self.emit(RuntimeEvent(EventKind.COMMAND_COMPLETED, {"command": cmd, "is_error": is_error}, turn_id))
 
     def run(
@@ -398,6 +528,25 @@ class AgentLoop:
 
         is_continue = user_query.strip().lower() in ("continue", "resume", "/continue")
         intent = IntentKind.CODING_TASK if is_continue else classify_intent(user_query, history)
+
+        # Initialize or maintain stable AgentRunState across turns and model calls
+        target_dir, deliverables = _extract_target_dir_and_deliverables(user_query, self.workspace)
+        run_id = f"kratos_run_{turn_id[:8]}"
+        if not is_continue or not self.current_run:
+            self.current_run = AgentRunState(
+                run_id=run_id,
+                user_request=user_query,
+                workspace=str(self.workspace),
+                target_dir=target_dir,
+                target_deliverables=deliverables,
+            )
+        else:
+            if target_dir and not self.current_run.target_dir:
+                self.current_run.target_dir = target_dir
+            if deliverables:
+                for d in deliverables:
+                    if d not in self.current_run.target_deliverables:
+                        self.current_run.target_deliverables.append(d)
 
         self.emit(RuntimeEvent(
             EventKind.AGENT_STARTED,
@@ -457,12 +606,13 @@ class AgentLoop:
                 self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": "cancelled", "plan": self.current_plan.to_dict() if self.current_plan else None}, turn_id))
                 return message, history
 
-            # Assemble Context & Request
+            # Assemble Context & Request with active run_state
             built = self.context.assemble(
                 self.instructions.build(),
                 history,
                 self.tools.schemas(),
                 {"cwd": str(self.workspace), "platform": "windows"},
+                run_state=self.current_run,
             )
             if built["compaction"]:
                 self.emit(RuntimeEvent(EventKind.COMPACTED, built["compaction"], turn_id))
@@ -502,6 +652,45 @@ class AgentLoop:
             # Handle Case Where Model Produced No Tool Calls
             if not response.tool_calls:
                 final_text = response.text.strip()
+
+                # 1. Anti-Hallucination Guard: Intercept "no task in your message" responses
+                if _is_no_task_hallucination(final_text) and self.current_run and (self.current_run.completed_tools or self.current_run.target_deliverables or intent != IntentKind.CHAT) and conversational_nudge_count < 5:
+                    conversational_nudge_count += 1
+                    history.append(ChatMessage(role="assistant", content=final_text))
+                    nudge_text = (
+                        f"[RUNTIME CORRECTION - ACTIVE TASK IN PROGRESS]\n"
+                        f"The user task is actively running. DO NOT abort, do not claim there is no task, and do not reference past unrelated projects.\n\n"
+                        f"ACTIVE USER OBJECTIVE:\n"
+                        f"\"{self.current_run.user_request}\"\n\n"
+                        f"CURRENT STATE:\n"
+                        f"- Inspected Files: {len(self.current_run.inspected_files)} ({', '.join(self.current_run.inspected_files[-8:]) if self.current_run.inspected_files else 'None'})\n"
+                        f"- Written Deliverables: {len(self.current_run.written_files)} ({', '.join(self.current_run.written_files) if self.current_run.written_files else 'None'})\n"
+                        f"- Target Deliverables: {', '.join(self.current_run.target_deliverables) if self.current_run.target_deliverables else 'Complete analysis and report'}\n\n"
+                        f"ACTION REQUIRED:\n"
+                        f"Proceed immediately with analyzing the findings and generating the requested deliverables. "
+                        f"Call `write_file` now to produce the deliverable report."
+                    )
+                    history.append(ChatMessage(role="user", content=nudge_text))
+                    continue
+
+                # 2. Deliverable Verification Guard: Ensure requested output files exist on disk before completing
+                if self.current_run and self.current_run.target_deliverables and conversational_nudge_count < 5:
+                    all_exist, existing_files, missing_files = _verify_deliverables(
+                        self.current_run.target_deliverables,
+                        self.current_run.target_dir,
+                        self.workspace,
+                    )
+                    if not all_exist:
+                        conversational_nudge_count += 1
+                        history.append(ChatMessage(role="assistant", content=final_text or "Continuing execution..."))
+                        nudge_text = (
+                            f"[RUNTIME VERIFICATION REQUIRED]: The following requested deliverable file(s) have NOT been created on disk yet:\n"
+                            + "\n".join(f"- {m}" for m in missing_files) + "\n\n"
+                            f"You must now invoke `write_file` to write the required report/deliverable to disk. "
+                            f"Do NOT stop or return conversational monologue until the file has been written."
+                        )
+                        history.append(ChatMessage(role="user", content=nudge_text))
+                        continue
 
                 # If we have an active plan with unfinished tasks, check if tools are needed or verification applies
                 if self.current_plan and self.current_plan.tasks:
@@ -593,6 +782,15 @@ class AgentLoop:
                             },
                             turn_id,
                         ))
+
+                if self.current_run and self.current_run.target_deliverables:
+                    all_exist, existing_files, _ = _verify_deliverables(
+                        self.current_run.target_deliverables,
+                        self.current_run.target_dir,
+                        self.workspace,
+                    )
+                    if all_exist:
+                        self.current_run.status = "completed"
 
                 final = final_text or "Task execution finished."
                 history.append(ChatMessage(role="assistant", content=final))

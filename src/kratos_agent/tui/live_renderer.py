@@ -128,7 +128,7 @@ class KratosLiveRenderer:
             console=self._console,
             refresh_per_second=10,
             transient=True,
-            vertical_overflow="visible",
+            vertical_overflow="crop",
         ) as live:
             self._live = live
             thread.start()
@@ -154,6 +154,7 @@ class KratosLiveRenderer:
 
             thread.join(timeout=2.0)
             self._status_bar.set_done()
+            self._renderer.stream_text = ""
             live.update(self._build_renderable())
             self._live = None
 
@@ -183,7 +184,11 @@ class KratosLiveRenderer:
                 parts.append(plan_tree)
 
         # 3. Streamed Response or Contextual Thinking Spinner
-        if self._renderer.stream_text:
+        # In agent mode (with plan tasks), display the clean thinking spinner so the live display
+        # stays compact and never scrolls/duplicates; the final completion card is rendered once upon completion.
+        # In chat mode (no plan tasks), stream text into stream_panel if available and no tools running.
+        has_plan_tasks = bool(self._renderer.plan and self._renderer.plan.tasks and not self._renderer.is_chat_mode)
+        if self._renderer.stream_text and not has_plan_tasks and not self._renderer.has_active_tools():
             stream_panel = Panel(
                 Markdown(self._renderer.stream_text),
                 title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({self.runtime.model_name})[/dim] {approval_gate.mode_badge()}",
@@ -306,13 +311,24 @@ class KratosLiveRenderer:
             if "plan" in payload and isinstance(payload["plan"], dict):
                 self._renderer.on_plan_updated(payload["plan"])
             self._status_bar.set_done()
+            self._renderer.stream_text = ""
         elif kind in (EventKind.TURN_FAILED, EventKind.AGENT_FAILED):
             if "plan" in payload and isinstance(payload["plan"], dict):
                 self._renderer.on_plan_updated(payload["plan"])
             self._status_bar.set_failed(payload.get("error", ""))
+            self._renderer.stream_text = ""
 
         if self._live is not None:
-            try:
-                self._live.update(self._build_renderable())
-            except Exception:
-                pass
+            now = time.monotonic()
+            force_update = kind in (
+                EventKind.AGENT_STARTED,
+                EventKind.PLAN_CREATED,
+                EventKind.TURN_COMPLETED,
+                EventKind.AGENT_COMPLETED,
+            )
+            if force_update or (now - getattr(self, "_last_live_update_time", 0.0) >= 0.03):
+                self._last_live_update_time = now
+                try:
+                    self._live.update(self._build_renderable())
+                except Exception:
+                    pass

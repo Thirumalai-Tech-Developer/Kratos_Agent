@@ -83,6 +83,10 @@ class EventRenderer:
         self._open_tool_steps.clear()
         self._thinking_step_idx = None
 
+    def has_active_tools(self) -> bool:
+        """Returns True if any tool calls are actively executing."""
+        return len(self._open_tool_steps) > 0
+
     # ── Event Callbacks ────────────────────────────────────────────────────────
 
     def on_agent_started(self, payload: Dict[str, Any]) -> None:

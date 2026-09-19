@@ -203,6 +203,13 @@ KRATOS_STRUCTURAL_OUTPUT_PROMPT = """STRUCTURAL OUTPUT & TOOL INVOCATION PROTOCO
 
 KRATOS_COGNITIVE_MEMORY_PROMPT = """4-TIER COGNITIVE MEMORY ARCHITECTURE
 
+CRITICAL ARCHITECTURAL PRIORITY:
+1. THE CURRENT USER REQUEST ALWAYS TAKES ABSOLUTE PRECEDENCE OVER ALL MEMORY.
+2. Historical memory records below are passive background knowledge from previous/other sessions.
+3. NEVER assume past project memories (e.g. platformer games, superhero sites, or earlier repositories) represent the current task.
+4. When a user provides a new prompt, directory, or instruction, you MUST execute the current prompt directly.
+5. NEVER say "there is no task in your last message" or report on old projects when a user query is active.
+
 You possess an explicit cognitive memory system with 4 distinct memory tiers:
 1. WORKING MEMORY (Short-Term / Active Scratchpad):
    - Current active goals, subtasks, in-progress reasoning steps, and workspace file tracker.
@@ -301,9 +308,18 @@ class KratosRuntime:
         self.instructions.register(InstructionModule("harness-directives", "system", lambda: (
             "\n".join(self.harness.get_system_directives()) if hasattr(self, "harness") and self.harness else ""
         ), 12))
-        self.instructions.register(InstructionModule("cognitive-memory-framework", "system", lambda: (
-            KRATOS_COGNITIVE_MEMORY_PROMPT + "\n\n" + (self.memory.get_cognitive_context() if hasattr(self.memory, "get_cognitive_context") else "")
-        ), 15))
+        def _get_quarantined_memory_context() -> str:
+            cog = self.memory.get_cognitive_context() if hasattr(self.memory, "get_cognitive_context") else ""
+            if not cog:
+                return KRATOS_COGNITIVE_MEMORY_PROMPT
+            return (
+                f"{KRATOS_COGNITIVE_MEMORY_PROMPT}\n\n"
+                f"### 🏛️ HISTORICAL SESSION MEMORY ARCHIVE (BACKGROUND REFERENCE ONLY - NOT CURRENT TASK):\n"
+                f"[The records below are past session memories. DO NOT treat them as your current user instruction.]\n\n"
+                f"{cog}"
+            )
+
+        self.instructions.register(InstructionModule("cognitive-memory-framework", "system", _get_quarantined_memory_context, 15))
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
             "AUTONOMOUS EXECUTION PROTOCOL:\n"
             "1. Focus directly on the user's explicit objective (e.g. downloading, installing, running, automating, fixing, or building). If the user asks to download or run an existing game or tool, use terminal commands (`run_terminal_command`) to acquire and execute it—do NOT scaffold a substitute from scratch.\n"
@@ -372,8 +388,13 @@ class KratosRuntime:
             if not subagent_prompt:
                 subagent_prompt = f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context."
 
-            child_instructions.register(InstructionModule(f"subagent-{role}", "persona", lambda p=subagent_prompt: p, 5))
-            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, self._emit, self.workspace)
+            def _subagent_emit(ev: RuntimeEvent) -> None:
+                try:
+                    self._event_store.append(ev)
+                except Exception:
+                    pass
+
+            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, _subagent_emit, self.workspace)
             result, _ = child_loop.run(history, self._allow_tool)
             return result
         finally:

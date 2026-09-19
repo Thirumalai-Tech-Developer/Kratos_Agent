@@ -130,7 +130,7 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKi
         return IntentKind.CODING_TASK
 
     # 10. File-specific Tasks
-    if any(k in q for k in ("write file", "edit file", "delete file", "run test", "run build", "check file", ".py", ".ts", ".tsx", ".js", ".html", ".css", ".json")):
+    if any(k in q for k in ("write file", "edit file", "delete file", "run test", "run build", "check file", "inspect", "report", "readme", ".py", ".ts", ".tsx", ".js", ".html", ".css", ".json", ".md")):
         return IntentKind.FILE_TASK
 
     # 11. Short queries or single-word inputs without coding actions

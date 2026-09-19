@@ -29,10 +29,14 @@ class BrainAdapter(ModelAdapter):
     def complete(self, request: Dict[str, Any], on_chunk: Optional[Callable[[str], None]] = None) -> ModelResponse:
         from kratos_agent.brain.chat_model import extract_tool_calls_from_text
         
+        system_content = request.get("system", "")
         messages = []
         for message in request.get("messages", []):
             role = message.get("role", "user")
             if role == "system":
+                c = str(message.get("content") or "").strip()
+                if c:
+                    system_content = (system_content + "\n\n" + c) if system_content else c
                 continue
             if role == "assistant":
                 content = message.get("content")
@@ -62,8 +66,6 @@ class BrainAdapter(ModelAdapter):
                 })
             else:
                 messages.append({"role": "user", "content": message.get("content", "")})
-
-        system_content = request.get("system", "")
         tools = request.get("tools", [])
         if tools:
             tool_hint = (
