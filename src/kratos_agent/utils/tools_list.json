@@ -450,11 +450,18 @@
                                 },
                                 "status": {
                                     "type": "string",
-                                    "enum": ["pending", "in_progress", "completed"],
+                                    "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "completed"
+                                    ],
                                     "description": "Current status of this task ('pending', 'in_progress', 'completed')"
                                 }
                             },
-                            "required": ["content", "status"]
+                            "required": [
+                                "content",
+                                "status"
+                            ]
                         }
                     }
                 },
@@ -477,6 +484,49 @@
                 },
                 "required": [
                     "plan"
+                ]
+            }
+        },
+        {
+            "name": "role_play_answer",
+            "description": "Generate a deterministic in-character role-play response to a user query. Given a role/persona, a question or prompt, optional context, tone, and max length, it returns a formatted answer that stays in character. It uses templating and persona cues; for advanced responses, connect it to an LLM backend.",
+            "func_name": "role_play_answer",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The question or prompt to answer in character."
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "The character, persona, or role to embody."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional background context for the role-play.",
+                        "default": ""
+                    },
+                    "tone": {
+                        "type": "string",
+                        "description": "Desired tone, e.g. neutral, dramatic, humorous, formal, friendly, mysterious, angry, sad.",
+                        "default": "neutral"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum length of the returned answer in characters.",
+                        "default": 300,
+                        "minimum": 1
+                    },
+                    "include_actions": {
+                        "type": "boolean",
+                        "description": "Whether to include role-play action cues like *pauses and considers*.",
+                        "default": false
+                    }
+                },
+                "required": [
+                    "query",
+                    "role"
                 ]
             }
         }

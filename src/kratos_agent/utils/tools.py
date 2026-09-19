@@ -969,5 +969,42 @@ def exit_plan_mode(plan: str) -> str:
         step_tracker.fail("Failed to exit Plan Mode", str(e))
         return f"Error exiting Plan Mode: {e}"
 
-
-
+# --- Auto-generated tool: role_play_answer ---
+def role_play_answer(query: str, role: str, context: str = '', tone: str = 'neutral', max_length: int = 300, include_actions: bool = False) -> str:
+    '''Generate a deterministic in-character role-play answer.'''
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError('query must be a non-empty string')
+    if not isinstance(role, str) or not role.strip():
+        raise ValueError('role must be a non-empty string')
+    if not isinstance(max_length, int) or max_length < 1:
+        raise ValueError('max_length must be a positive integer')
+    role_clean = role.strip()
+    query_clean = query.strip()
+    tone_clean = tone.strip().lower() if isinstance(tone, str) and tone.strip() else 'neutral'
+    tone_map = {
+        'neutral': 'calmly',
+        'dramatic': 'with dramatic flair',
+        'humorous': 'with a touch of humor',
+        'formal': 'formally',
+        'friendly': 'warmly',
+        'mysterious': 'mysteriously',
+        'angry': 'with restrained anger',
+        'sad': 'with melancholy'
+    }
+    tone_phrase = tone_map.get(tone_clean, f'in a {tone_clean} tone')
+    action = ''
+    if include_actions:
+        action = f'*{role_clean} pauses and considers the question.* '
+    context_phrase = ''
+    if isinstance(context, str) and context.strip():
+        context_phrase = f'Given that {context.strip()}, '
+    answer = (
+        f'{action}{role_clean} responds {tone_phrase}. '
+        f'{context_phrase}You ask: {query_clean}. '
+        f'As {role_clean}, I would say: I must act according to my nature, values, and current situation. '
+        f'My answer is shaped by what I know and what I want. '
+        f'If you need more detail, ask me to elaborate in character.'
+    )
+    if len(answer) > max_length:
+        answer = answer[:max_length - 3].rstrip() + '...'
+    return answer
