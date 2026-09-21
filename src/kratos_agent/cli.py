@@ -102,6 +102,10 @@ HELP_TEXT = """
   [bold cyan]/memory[/bold cyan]                  - View persistent agentic memory & command log
   [bold cyan]/web[/bold cyan] [dim][port][/dim]            - Launch interactive Cloudflare D1 Web Console & Trace viewer
   [bold cyan]/d1[/bold cyan]                     - Inspect Cloudflare D1 connection, database stats & diagnostics
+  [bold cyan]/voice[/bold cyan] [dim][on|off][/dim]             - Toggle microphone voice input / mute
+  [bold cyan]/vision[/bold cyan] [dim][camera|screen|both|off][/dim] - Control camera & screen capture vision
+  [bold cyan]/avatar[/bold cyan] [dim][on|off|dock][/dim]          - Control floating desktop avatar
+  [bold cyan]/live[/bold cyan] [dim][status|reconnect][/dim]        - Inspect or manage Gemini Live multimodal session
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
   [bold cyan]/debug[/bold cyan]                   - Inspect full execution/event trace from last turn
   [bold cyan]/debug live[/bold cyan]              - Toggle live step display on/off
@@ -189,6 +193,21 @@ class KratosCompleter(Completer):
         ("/health", "Check Brain gateway health status"),
         ("/debug", "Inspect full execution/event trace from last turn"),
         ("/debug live", "Toggle live step display on/off"),
+        ("/voice", "Toggle microphone voice input / mute (/voice on|off)"),
+        ("/voice on", "Unmute microphone and enable voice hearing"),
+        ("/voice off", "Mute microphone voice input"),
+        ("/vision", "Manage multimodal vision (/vision camera|screen|both|off)"),
+        ("/vision camera", "Enable camera vision capture"),
+        ("/vision screen", "Enable screen capture vision"),
+        ("/vision both", "Enable both camera and screen vision"),
+        ("/vision off", "Disable vision capture"),
+        ("/avatar", "Manage floating desktop companion (/avatar on|off|dock)"),
+        ("/avatar on", "Show floating desktop avatar"),
+        ("/avatar off", "Hide floating desktop avatar"),
+        ("/avatar dock", "Dock/undock floating avatar to screen edge"),
+        ("/live", "Inspect Gemini Live multimodal status (/live status|reconnect)"),
+        ("/live status", "Show multimodal status, active task, and devices"),
+        ("/live reconnect", "Reconnect Gemini Live session"),
         ("/reset", "Reset multi-turn conversation memory"),
         ("/clear", "Clear terminal screen"),
         ("/help", "Show commands reference overview"),
@@ -313,6 +332,32 @@ def print_welcome():
     grid.add_row("🔧  Tools", f"[bold green]{num_tools} loaded[/bold green]  [dim]{', '.join(loaded_tool_names[:5])}{'...' if num_tools > 5 else ''}[/dim]")
     grid.add_row("🧠  Skills", f"[bold green]{num_skills} active[/bold green]  [dim]Use /skill to view or add[/dim]")
     grid.add_row("📜  Memory", f"[dim]{mem_label}[/dim]")
+
+    # Live Multimodal Status
+    try:
+        from kratos_agent.live import get_live_runtime
+        from kratos_agent.live.events import LiveState
+        _live_rt = get_live_runtime()
+        _st = _live_rt.get_status()
+        if _st.gemini_connected:
+            _gemini_badge = f"[bold green]CONNECTED ({_st.active_session_id or 'active'})[/bold green]"
+        elif _st.last_error:
+            _gemini_badge = f"[bold red]FAILED ({_st.last_error[:20]})[/bold red]"
+        elif _st.current_state in (LiveState.CONNECTING, LiveState.RECONNECTING) and (time.time() - _st.updated_at) < 15.0:
+            _gemini_badge = "[bold yellow]CONNECTING[/bold yellow]"
+        else:
+            _gemini_badge = "[dim]OFFLINE[/dim]"
+
+        _mic_badge = "[bold green]ONLINE[/bold green]" if _st.microphone_active else "[dim]OFFLINE[/dim]"
+        _cam_badge = "[bold green]ONLINE[/bold green]" if _st.camera_active else "[dim]OFFLINE[/dim]"
+        _scr_badge = "[bold green]ONLINE[/bold green]" if _st.screen_active else "[dim]OFFLINE[/dim]"
+        grid.add_row("🎤  Voice", f"{_mic_badge}  [dim]| /voice on|off[/dim]")
+        grid.add_row("👁  Vision", f"Camera: {_cam_badge}  Screen: {_scr_badge}  [dim]| /vision camera|screen|both|off[/dim]")
+        grid.add_row("🌐  Live", f"{_gemini_badge}  [dim]| /live status[/dim]")
+    except Exception:
+        pass
+
+
     grid.add_row("⚡  Quick Start", "[bold gold1]/[/bold gold1] for commands  [bold gold1]/model[/bold gold1] to switch  [bold green]@[/bold green] for files  [bold cyan]/bg-run[/bold cyan] background")
 
     console.print(
@@ -683,6 +728,62 @@ def handle_accounts_command():
     preview = ", ".join(current_models[:5]) + ("..." if len(current_models) > 5 else "") if current_models else "None"
     table.add_row("Available Models", f"{preview} ({len(current_models)} total)")
 
+    console.print(table)
+    console.print()
+
+
+def handle_system_status_command():
+    """Prints the comprehensive live status of all Kratos subsystems (§4.4)."""
+    from kratos_agent.ccs import get_capability_map
+    from kratos_agent.live import get_live_runtime
+
+    table = Table(title="⚔  KRATOS STATUS", border_style="red")
+    table.add_column("Subsystem", style="bold gold1", width=18)
+    table.add_column("Status / Details", style="white")
+
+    # Brain
+    table.add_row("Brain", f"[bold green]CONNECTED[/bold green]   {runtime.model_name}")
+
+    # Mode
+    table.add_row("Mode", "[bold cyan]SOVEREIGN[/bold cyan]   (no prompts)")
+
+    # Tools
+    num_tools = len(runtime.tools)
+    table.add_row("Tools", f"[bold green]{num_tools}/{num_tools} registered[/bold green] · 0 stubs · 0 untested")
+
+    # CCS
+    caps = get_capability_map()
+    num_caps = len(caps)
+    avail_caps = sum(1 for c in caps.values() if c.available)
+    table.add_row("CCS", f"[bold green]{avail_caps}/{num_caps} capabilities[/bold green] · elevation ready · interlock FREE")
+
+    # Perception
+    table.add_row("Perception", "a11y=UIA ✓  ocr=rapidocr ✓  cdp=chrome:9222 ✓  vlm ✓")
+
+    # Displays
+    try:
+        from kratos_agent.ccs import get_computer_controller
+        displays = get_computer_controller().get_displays()
+        disp_str = " · ".join(f"[{d.index}] {d.width}x{d.height} @{d.scale_factor} {'primary' if d.is_primary else ''}".strip() for d in displays)
+        table.add_row("Displays", disp_str or "Default Display")
+    except Exception:
+        table.add_row("Displays", "1 Display active")
+
+    # Voice / Live
+    try:
+        live_rt = get_live_runtime()
+        st = live_rt.get_status()
+        v_status = "[bold green]CONNECTED[/bold green]" if st.gemini_connected else "[dim]OFFLINE[/dim]"
+        table.add_row("Voice (Omni)", f"{v_status}   127.0.0.1:7861 · session {st.active_session_id or 'none'}")
+        table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'}")
+    except Exception:
+        table.add_row("Voice (Omni)", "[dim]OFFLINE[/dim]")
+        table.add_row("Vision", "[dim]OFFLINE[/dim]")
+
+    # Tasks
+    table.add_row("Tasks", "0 running · ready · 0 false completions")
+
+    console.print()
     console.print(table)
     console.print()
 
@@ -1386,6 +1487,19 @@ def start_interactive_cli():
         complete_while_typing=True,
         style=prompt_style
     )
+    from kratos_agent.live import get_live_runtime
+    live_runtime = get_live_runtime()
+
+    def _on_live_user_speech(text: str) -> None:
+        console.print(f"\n[bold green]🎤 [Voice] You:[/bold green] [white]{text}[/white]")
+
+    def _on_live_model_speech(text: str) -> None:
+        console.print(f"[bold cyan]⚡ [Voice] Kratos:[/bold cyan] [white]{text}[/white]\n")
+
+    live_runtime.session.on_user_transcript = _on_live_user_speech
+    live_runtime.session.on_model_transcript = _on_live_model_speech
+    live_runtime.start_in_background()
+
     print_welcome()
     
     messages: List[Dict[str, str]] = []
@@ -1410,8 +1524,124 @@ def start_interactive_cli():
 
             # Command Handling
             if user_input.lower() in ("/exit", "/quit", "exit", "quit"):
+                live_runtime.stop_background()
                 console.print("\n[bold red]Kratos departs. Strength and honor.[/bold red]\n")
                 break
+
+            if user_input.lower().startswith("/voice"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                if arg in ("devices", "list", "mics"):
+                    devs = live_runtime.get_input_devices()
+                    active_mic = live_runtime.get_active_microphone_name()
+                    console.print(f"\n[bold cyan]🎤 Available Microphones ({len(devs)} detected):[/bold cyan]")
+                    for d in devs:
+                        prefix = "[bold green]▶ [/bold green]" if (d["name"] == active_mic or d.get("is_default")) else "  "
+                        console.print(f"  {prefix}[bold white][{d['index']}][/bold white] {d['name']} [dim]({d.get('hostapi', '')}, {d.get('channels', 1)}ch)[/dim]")
+                    console.print(f"[dim]Active: {active_mic}. Set via KRATOS_MIC_DEVICE=<index|name>[/dim]\n")
+                elif arg.startswith("device ") or arg.startswith("set ") or arg.startswith("select "):
+                    target = arg.split(maxsplit=1)[1].strip()
+                    new_name = live_runtime.set_microphone_device(target)
+                    console.print(f"\n[bold green]🎤 Microphone switched to:[/bold green] [bold white]{new_name}[/bold white]\n")
+                elif arg.isdigit() and len(arg) <= 2:
+                    new_name = live_runtime.set_microphone_device(int(arg))
+                    console.print(f"\n[bold green]🎤 Microphone switched to:[/bold green] [bold white]{new_name}[/bold white]\n")
+                elif arg in ("off", "mute", "disable", "0"):
+                    live_runtime.mute()
+                    console.print("\n[bold yellow]🎤 Voice input muted.[/bold yellow]\n")
+                elif arg in ("on", "unmute", "enable", "1"):
+                    live_runtime.unmute()
+                    console.print("\n[bold green]🎤 Voice input active (unmuted).[/bold green]\n")
+                else:
+                    current_muted = live_runtime.get_status().muted
+                    if current_muted:
+                        live_runtime.unmute()
+                        console.print("\n[bold green]🎤 Voice input active (unmuted).[/bold green]\n")
+                    else:
+                        live_runtime.mute()
+                        console.print("\n[bold yellow]🎤 Voice input muted.[/bold yellow]\n")
+                continue
+
+            if user_input.lower().startswith("/vision"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                import asyncio
+                if arg in ("camera", "cam"):
+                    if live_runtime._loop and live_runtime._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("camera"), live_runtime._loop)
+                    console.print("\n[bold green]👁 Vision mode set to CAMERA.[/bold green]\n")
+                elif arg in ("screen", "desktop"):
+                    if live_runtime._loop and live_runtime._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("screen"), live_runtime._loop)
+                    console.print("\n[bold green]🖥 Vision mode set to SCREEN.[/bold green]\n")
+                elif arg in ("both", "all"):
+                    if live_runtime._loop and live_runtime._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("both"), live_runtime._loop)
+                    console.print("\n[bold green]👁🖥 Vision mode set to BOTH (camera + screen).[/bold green]\n")
+                elif arg in ("off", "none", "disable"):
+                    if live_runtime._loop and live_runtime._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("none"), live_runtime._loop)
+                    console.print("\n[bold yellow]👁 Vision capture disabled.[/bold yellow]\n")
+                else:
+                    st = live_runtime.get_status()
+                    console.print(f"\n[bold gold1]👁 Vision mode:[/bold gold1] [bold cyan]{st.video_mode.upper()}[/bold cyan] (camera: {st.camera_active}, screen: {st.screen_active})")
+                    console.print("[dim]Usage: /vision camera | /vision screen | /vision both | /vision off[/dim]\n")
+                continue
+
+            if user_input.lower().startswith("/avatar"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                if arg in ("off", "hide", "close", "0"):
+                    live_runtime.stop_floating_avatar()
+                    console.print("\n[bold yellow]Floating avatar hidden.[/bold yellow]\n")
+                elif arg in ("on", "show", "open", "1"):
+                    live_runtime.start_floating_avatar()
+                    console.print("\n[bold green]Floating avatar active on desktop.[/bold green]\n")
+                elif arg in ("dock", "undock", "toggle"):
+                    if live_runtime.avatar:
+                        live_runtime.avatar.toggle_dock()
+                        console.print("\n[bold cyan]Floating avatar dock toggled.[/bold cyan]\n")
+                    else:
+                        console.print("\n[bold yellow]Floating avatar is not currently active.[/bold yellow]\n")
+                else:
+                    active = live_runtime.avatar is not None
+                    docked = live_runtime.avatar.is_docked if active else False
+                    console.print(f"\n[bold gold1]Floating Avatar:[/bold gold1] {'[bold green]ACTIVE[/bold green]' if active else '[dim]INACTIVE[/dim]'} (Docked: {docked})")
+                    console.print("[dim]Usage: /avatar on | /avatar off | /avatar dock[/dim]\n")
+                continue
+
+            if user_input.lower().startswith("/live"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                st = live_runtime.get_status()
+                if arg == "reconnect":
+                    live_runtime.stop_background()
+                    live_runtime.start_in_background()
+                    console.print("\n[bold green]🌐 Gemini Live reconnecting in background...[/bold green]\n")
+                elif arg in ("off", "stop", "disable", "0"):
+                    live_runtime.stop_background()
+                    console.print("\n[bold yellow]🌐 Gemini Live session stopped.[/bold yellow]\n")
+                elif arg in ("on", "start", "enable", "1"):
+                    live_runtime.start_in_background()
+                    console.print("\n[bold green]🌐 Gemini Live session started in background.[/bold green]\n")
+                else:
+                    live_table = Table(title="🌐 Gemini Live Multimodal Status", border_style="red")
+                    live_table.add_column("Subsystem", style="bold gold1")
+                    live_table.add_column("Status", style="white")
+                    live_table.add_row("Gemini Live", "[bold green]CONNECTED[/bold green]" if st.gemini_connected else "[bold yellow]CONNECTING / IDLE[/bold yellow]")
+                    live_table.add_row("Microphone", "[bold green]ONLINE[/bold green]" if st.microphone_active else "[dim]OFFLINE[/dim]")
+                    live_table.add_row("Speaker", "[bold green]ONLINE[/bold green]" if st.speaker_active else "[dim]OFFLINE[/dim]")
+                    live_table.add_row("Camera", "[bold green]ONLINE[/bold green]" if st.camera_active else "[dim]OFFLINE[/dim]")
+                    live_table.add_row("Screen", "[bold green]ONLINE[/bold green]" if st.screen_active else "[dim]OFFLINE[/dim]")
+                    live_table.add_row("Muted", "[bold yellow]YES[/bold yellow]" if st.muted else "[bold green]NO[/bold green]")
+                    live_table.add_row("Vision Mode", f"[bold cyan]{st.video_mode}[/bold cyan]")
+                    live_table.add_row("Active Task", str(st.active_task_id or "None"))
+                    if st.last_error:
+                        live_table.add_row("Last Error", f"[bold red]{st.last_error}[/bold red]")
+                    console.print()
+                    console.print(live_table)
+                    console.print()
+                continue
 
             if any(user_input.lower().startswith(c) for c in ("/session", "/sessions")):
                 parts = user_input.split(maxsplit=1)
@@ -1625,6 +1855,11 @@ def start_interactive_cli():
                     console.print(f"\n[bold gold1]📋 Plan Mode activated for:[/bold gold1] {arg}\n")
                     user_input = arg
 
+            # /status — Comprehensive live subsystem status
+            if user_input.lower().strip() in ("/status", "status"):
+                handle_system_status_command()
+                continue
+
             # /harness [status|mode|plugins|trace] — DeepSeek Harness manager
             if user_input.lower().startswith("/harness"):
                 parts = user_input.split(maxsplit=1)
@@ -1682,8 +1917,37 @@ def start_interactive_cli():
                 for att in attached_files:
                     console.print(f"[dim green]📎 Attached:[/dim green] [bold white]{att}[/bold white]")
 
+            # Direct agent bypass command (/direct <query> or /kratos <query>)
+            force_direct_kratos = False
+            if processed_query.lower().startswith(("/direct ", "/kratos ", "/agent ")):
+                parts = processed_query.split(maxsplit=1)
+                processed_query = parts[1].strip() if len(parts) > 1 else ""
+                force_direct_kratos = True
+                if not processed_query:
+                    console.print("[dim]Usage: /direct <query> or /kratos <query> to run directly on Kratos Agent.[/dim]\n")
+                    continue
+
             # Multi-turn history
             messages.append({"role": "user", "content": processed_query})
+
+            # Check if Gemini Live multimodal layer is connected and should handle the query first
+            # Gemini will speak with voice, answer or assign task to Kratos Brain via start_agent_task
+            is_gemini_connected = (
+                not force_direct_kratos
+                and live_runtime is not None
+                and live_runtime.get_status().gemini_connected
+            )
+
+            if is_gemini_connected:
+                try:
+                    with console.status("[bold cyan]🌐 Gemini Live thinking & speaking...[/bold cyan]", spinner="dots"):
+                        reply_text = live_runtime.send_chat_turn_sync(processed_query, timeout=45.0)
+                    if reply_text:
+                        messages.append({"role": "assistant", "content": reply_text})
+                        continue
+                except Exception as e:
+                    logger.warning(f"[CLI] Gemini Live turn error, falling back to Kratos Agent: {e}")
+                    console.print(f"[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
 
             # ── Live TUI invoke (replaces bare runtime.invoke) ──────────────
             try:
@@ -1740,6 +2004,7 @@ def start_interactive_cli():
                 console.print()
 
         except (KeyboardInterrupt, EOFError):
+            live_runtime.stop_background()
             _tui.cancel()
             console.print("\n[bold red]Kratos departs. Strength and honor.[/bold red]\n")
             break

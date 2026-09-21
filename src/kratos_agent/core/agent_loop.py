@@ -23,10 +23,11 @@ from .runtime_contracts import (
     ChatMessage,
     EventKind,
     RuntimeEvent,
+    TerminalLatch,
     ToolCall,
     ToolResult,
 )
-from .task_manager import AgentState, ExecutionPlan, TaskState
+from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
 
@@ -373,6 +374,7 @@ class AgentLoop:
 
         self.workspace_tracker = WorkspaceTracker(self.workspace)
         self.verification_manager = VerificationManager(self.workspace, self.emit)
+        self.terminal_latch = TerminalLatch()
         self.current_plan: Optional[ExecutionPlan] = None
         self.last_verification: Optional[VerificationResult] = None
         self.current_run: Optional[AgentRunState] = None
@@ -385,6 +387,61 @@ class AgentLoop:
             set_plan_mode_handler(self._on_plan_mode_exit)
         except Exception:
             pass
+
+    def _check_task_completion_gate(self, task: TaskItem, turn_id: str) -> tuple[bool, Optional[str]]:
+        """Checks completion gate for a task. Returns (allowed, correction)."""
+        if not getattr(task, "requires_observable_evidence", False):
+            return True, None
+
+        ccs = getattr(self.tools, "ccs", None) or getattr(self.tools, "_ccs", None)
+        if not ccs:
+            try:
+                from kratos_agent.ccs import get_controller
+                ccs = get_controller()
+            except Exception:
+                ccs = None
+
+        evidence = getattr(task, "observed_evidence", None)
+        if (evidence is None or not getattr(evidence, "trustworthy", False)) and getattr(task, "assertion", None):
+            evidence = self.verification_manager.verify_observable_outcome(task.assertion, ccs)
+            task.observed_evidence = evidence
+
+        verdict = self.verification_manager.gate_completion(task, {"title": task.title}, evidence)
+        if verdict.allow:
+            return True, None
+
+        # Rejected by gate!
+        attempts = getattr(task, "_completion_attempts", 0) + 1
+        setattr(task, "_completion_attempts", attempts)
+
+        if attempts < 3:
+            self.emit(RuntimeEvent(
+                EventKind.FALSE_COMPLETION,
+                {
+                    "task_id": task.id,
+                    "claimed": {"title": task.title},
+                    "observed": evidence.to_model_dict() if evidence and hasattr(evidence, "to_model_dict") else None,
+                    "attempt": attempts,
+                    "retries_left": 3 - attempts,
+                    "correction": verdict.correction,
+                },
+                turn_id,
+            ))
+            return False, verdict.correction
+        else:
+            task.fail(verdict.correction)
+            if self.terminal_latch.try_set(task.id, "FAILED"):
+                self.emit(RuntimeEvent(
+                    EventKind.TASK_FAILED,
+                    {
+                        **task.to_dict(),
+                        "honest_failure": True,
+                        "evidence": evidence.to_model_dict() if evidence and hasattr(evidence, "to_model_dict") else None,
+                        "reason": evidence.detail if evidence and hasattr(evidence, "detail") else verdict.correction,
+                    },
+                    turn_id,
+                ))
+            return False, None
 
     def _on_todo_update(self, todos: list) -> None:
         """Handles whole-list todo updates from todo_write tool call."""
@@ -714,18 +771,38 @@ class AgentLoop:
                         turn_id=turn_id,
                     )
 
+                    # Check completion gate on any tasks requiring observable evidence
+                    evidence_gate_blocked = False
+                    for t in self.current_plan.tasks:
+                        if getattr(t, "requires_observable_evidence", False) and t.state != TaskState.COMPLETED:
+                            allowed, correction = self._check_task_completion_gate(t, turn_id)
+                            if not allowed and correction:
+                                history.append(ChatMessage(role="assistant", content=final_text or "Checking task outcome..."))
+                                history.append(ChatMessage(role="user", content=f"[RUNTIME VERIFICATION FAILED - {t.title}]: {correction}"))
+                                conversational_nudge_count += 1
+                                evidence_gate_blocked = True
+                                break
+                    if evidence_gate_blocked:
+                        continue
+
                     # If verification passed and files were validated, fulfill all verified tasks with evidence
                     if self.last_verification and self.last_verification.passed and self.last_verification.files_checked > 0:
                         for t in self.current_plan.tasks:
                             if t.state in (TaskState.PENDING, TaskState.RUNNING):
+                                if getattr(t, "requires_observable_evidence", False):
+                                    allowed, _ = self._check_task_completion_gate(t, turn_id)
+                                    if not allowed:
+                                        continue
                                 t.add_evidence("verification", {"files_checked": self.last_verification.files_checked})
                                 t.complete(f"Verified {self.last_verification.files_checked} file(s)")
-                                self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
+                                if self.terminal_latch.try_set(t.id, "COMPLETED"):
+                                    self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
                     elif self.last_verification.passed and is_read_only_goal:
                         for t in self.current_plan.tasks:
                             if t.state != TaskState.COMPLETED:
                                 t.complete("Completed")
-                                self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
+                                if self.terminal_latch.try_set(t.id, "COMPLETED"):
+                                    self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
 
                     # Check unfinished tasks after verification
                     remaining_unfinished = self.current_plan.get_unfinished_tasks()
@@ -754,34 +831,39 @@ class AgentLoop:
                     all_done = (len(remaining_unfinished) == 0 and len(self.current_plan.tasks) > 0)
                     if self.last_verification.passed and all_done:
                         self.current_plan.state = AgentState.COMPLETED
-                        self.emit(RuntimeEvent(
-                            EventKind.AGENT_COMPLETED,
-                            {
-                                "goal": self.current_plan.goal,
-                                "plan": self.current_plan.to_dict(),
-                                "files_changed": self.workspace_tracker.summary(),
-                                "verification": self.last_verification.__dict__,
-                                "final": final_text,
-                            },
-                            turn_id,
-                        ))
+                        run_id = self.current_run.run_id if self.current_run else turn_id
+                        if self.terminal_latch.try_set(run_id, "COMPLETED"):
+                            self.emit(RuntimeEvent(
+                                EventKind.AGENT_COMPLETED,
+                                {
+                                    "goal": self.current_plan.goal,
+                                    "plan": self.current_plan.to_dict(),
+                                    "files_changed": self.workspace_tracker.summary(),
+                                    "verification": self.last_verification.__dict__,
+                                    "final": final_text,
+                                },
+                                turn_id,
+                            ))
                     else:
                         self.current_plan.state = AgentState.FAILED
                         for ut in remaining_unfinished:
                             if ut.state != TaskState.FAILED:
                                 ut.fail("Task was not executed or lacked completion evidence.")
-                                self.emit(RuntimeEvent(EventKind.TASK_FAILED, ut.to_dict(), turn_id))
+                                if self.terminal_latch.try_set(ut.id, "FAILED"):
+                                    self.emit(RuntimeEvent(EventKind.TASK_FAILED, ut.to_dict(), turn_id))
 
                         error_reason = self.last_verification.summary if not self.last_verification.passed else f"{len(remaining_unfinished)} task(s) remained unfinished."
-                        self.emit(RuntimeEvent(
-                            EventKind.AGENT_FAILED,
-                            {
-                                "goal": self.current_plan.goal,
-                                "plan": self.current_plan.to_dict(),
-                                "error": error_reason,
-                            },
-                            turn_id,
-                        ))
+                        run_id = self.current_run.run_id if self.current_run else turn_id
+                        if self.terminal_latch.try_set(run_id, "FAILED"):
+                            self.emit(RuntimeEvent(
+                                EventKind.AGENT_FAILED,
+                                {
+                                    "goal": self.current_plan.goal,
+                                    "plan": self.current_plan.to_dict(),
+                                    "error": error_reason,
+                                },
+                                turn_id,
+                            ))
 
                 if self.current_run and self.current_run.target_deliverables:
                     all_exist, existing_files, _ = _verify_deliverables(
@@ -898,16 +980,21 @@ class AgentLoop:
                             # File writing / editing tool completes file tasks
                             if call.name in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content"):
                                 fp = call.arguments.get("file_path", "") or call.arguments.get("target_file", "")
-                                active_task.complete(f"Updated {fp}", force=True)
-                                self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
+                                allowed = True
+                                if getattr(active_task, "requires_observable_evidence", False):
+                                    allowed, _ = self._check_task_completion_gate(active_task, turn_id)
+                                if allowed:
+                                    active_task.complete(f"Updated {fp}", force=True)
+                                    if self.terminal_latch.try_set(active_task.id, "COMPLETED"):
+                                        self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
 
-                                # Start next pending task if available
-                                if self.current_plan:
-                                    next_pending = self.current_plan.get_pending_tasks()
-                                    if next_pending:
-                                        next_t = next_pending[0]
-                                        next_t.start()
-                                        self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
+                                    # Start next pending task if available
+                                    if self.current_plan:
+                                        next_pending = self.current_plan.get_pending_tasks()
+                                        if next_pending:
+                                            next_t = next_pending[0]
+                                            next_t.start()
+                                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
 
                             # Command tools fulfill command-oriented tasks
                             elif call.name == "run_terminal_command":
@@ -937,14 +1024,19 @@ class AgentLoop:
                                     should_complete = True
 
                                 if should_complete:
-                                    active_task.complete(completion_msg, force=True)
-                                    self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
-                                    if self.current_plan:
-                                        next_pending = self.current_plan.get_pending_tasks()
-                                        if next_pending:
-                                            next_t = next_pending[0]
-                                            next_t.start()
-                                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
+                                    allowed = True
+                                    if getattr(active_task, "requires_observable_evidence", False):
+                                        allowed, _ = self._check_task_completion_gate(active_task, turn_id)
+                                    if allowed:
+                                        active_task.complete(completion_msg, force=True)
+                                        if self.terminal_latch.try_set(active_task.id, "COMPLETED"):
+                                            self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
+                                        if self.current_plan:
+                                            next_pending = self.current_plan.get_pending_tasks()
+                                            if next_pending:
+                                                next_t = next_pending[0]
+                                                next_t.start()
+                                                self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
                                 else:
                                     active_task.add_evidence("terminal_command", {"command": cmd[:80]})
 

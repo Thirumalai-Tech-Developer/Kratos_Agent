@@ -529,6 +529,2700 @@
                     "role"
                 ]
             }
+        },
+        {
+            "name": "system_inspect",
+            "description": "Returns the capability map and system hardware/OS information.",
+            "func_name": "system_inspect",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "gui_mouse",
+            "description": "Controls the mouse on the host system. Actions: move, click, double_click, drag, scroll.",
+            "func_name": "gui_mouse",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "x": {
+                        "type": "integer"
+                    },
+                    "y": {
+                        "type": "integer"
+                    },
+                    "button": {
+                        "type": "string",
+                        "default": "left"
+                    },
+                    "clicks": {
+                        "type": "integer",
+                        "default": 1
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "gui_keyboard",
+            "description": "Controls the host keyboard. Actions: type, press.",
+            "func_name": "gui_keyboard",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "text": {
+                        "type": "string"
+                    },
+                    "keys": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "gui_vision",
+            "description": "Captures the screen and returns a base64 encoded PNG for multimodal visual verification.",
+            "func_name": "gui_vision",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "window_manager",
+            "description": "Manages windows on the host desktop. Actions: list, focus, close.",
+            "func_name": "window_manager",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "window_id": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "application_manager",
+            "description": "Manages desktop applications. Actions: list, launch.",
+            "func_name": "application_manager",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "app_name_or_path": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "ActionResult",
+            "description": "ActionResult(ok: bool, action: str, detail: str = '', data: dict | None = None, screenshot_ref: str | None = None, duration_ms: int = 0)",
+            "func_name": "ActionResult",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "ok"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "detail"
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "data"
+                    },
+                    "screenshot_ref": {
+                        "type": "string",
+                        "description": "screenshot ref"
+                    },
+                    "duration_ms": {
+                        "type": "integer",
+                        "description": "duration ms"
+                    }
+                },
+                "required": [
+                    "ok",
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "Any",
+            "description": "Special type indicating an unconstrained type.",
+            "func_name": "Any",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "args"
+                    },
+                    "kwargs": {
+                        "type": "string",
+                        "description": "kwargs"
+                    }
+                },
+                "required": [
+                    "args",
+                    "kwargs"
+                ]
+            }
+        },
+        {
+            "name": "CapabilityUnavailable",
+            "description": "Raised when a requested capability is not present on this platform/machine.",
+            "func_name": "CapabilityUnavailable",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "capability": {
+                        "type": "string",
+                        "description": "capability"
+                    },
+                    "platform": {
+                        "type": "string",
+                        "description": "platform"
+                    },
+                    "hint": {
+                        "type": "string",
+                        "description": "hint"
+                    },
+                    "install": {
+                        "type": "string",
+                        "description": "install"
+                    }
+                },
+                "required": [
+                    "capability",
+                    "platform"
+                ]
+            }
+        },
+        {
+            "name": "Dict",
+            "description": "Deprecated alias to dict.",
+            "func_name": "Dict",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "args"
+                    },
+                    "kwargs": {
+                        "type": "string",
+                        "description": "kwargs"
+                    }
+                },
+                "required": [
+                    "args",
+                    "kwargs"
+                ]
+            }
+        },
+        {
+            "name": "Evidence",
+            "description": "Proof that an outcome is true. Never constructed by hand from an",
+            "func_name": "Evidence",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "claim": {
+                        "type": "string",
+                        "description": "claim"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "method"
+                    },
+                    "met": {
+                        "type": "string",
+                        "description": "met"
+                    },
+                    "observed": {
+                        "type": "object",
+                        "description": "observed"
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "description": "confidence"
+                    },
+                    "samples": {
+                        "type": "string",
+                        "description": "samples"
+                    },
+                    "interval_ms": {
+                        "type": "string",
+                        "description": "interval ms"
+                    },
+                    "frame_ref": {
+                        "type": "string",
+                        "description": "frame ref"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "detail"
+                    },
+                    "sampled_at": {
+                        "type": "string",
+                        "description": "sampled at"
+                    },
+                    "stale_ms": {
+                        "type": "string",
+                        "description": "stale ms"
+                    }
+                },
+                "required": [
+                    "claim",
+                    "method",
+                    "met",
+                    "observed"
+                ]
+            }
+        },
+        {
+            "name": "List",
+            "description": "Deprecated alias to list.",
+            "func_name": "List",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "args"
+                    },
+                    "kwargs": {
+                        "type": "string",
+                        "description": "kwargs"
+                    }
+                },
+                "required": [
+                    "args",
+                    "kwargs"
+                ]
+            }
+        },
+        {
+            "name": "Optional",
+            "description": "Optional[X] is equivalent to Union[X, None].",
+            "func_name": "Optional",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "args"
+                    },
+                    "kwds": {
+                        "type": "string",
+                        "description": "kwds"
+                    }
+                },
+                "required": [
+                    "args",
+                    "kwds"
+                ]
+            }
+        },
+        {
+            "name": "OutcomeAssertion",
+            "description": "Declarative post-condition. Written by the PLANNER when the step is created,",
+            "func_name": "OutcomeAssertion",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "kind"
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "params"
+                    },
+                    "timeout_s": {
+                        "type": "string",
+                        "description": "timeout s"
+                    },
+                    "poll_ms": {
+                        "type": "string",
+                        "description": "poll ms"
+                    },
+                    "require_samples": {
+                        "type": "string",
+                        "description": "require samples"
+                    },
+                    "sample_gap_ms": {
+                        "type": "string",
+                        "description": "sample gap ms"
+                    }
+                },
+                "required": [
+                    "kind"
+                ]
+            }
+        },
+        {
+            "name": "Path",
+            "description": "PurePath subclass that can make system calls.",
+            "func_name": "Path",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "args"
+                    },
+                    "kwargs": {
+                        "type": "string",
+                        "description": "kwargs"
+                    }
+                },
+                "required": [
+                    "args",
+                    "kwargs"
+                ]
+            }
+        },
+        {
+            "name": "Point",
+            "description": "Point(x: int, y: int)",
+            "func_name": "Point",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "integer",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "integer",
+                        "description": "y"
+                    }
+                },
+                "required": [
+                    "x",
+                    "y"
+                ]
+            }
+        },
+        {
+            "name": "Rect",
+            "description": "Rect(x: int, y: int, w: int, h: int)",
+            "func_name": "Rect",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "integer",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "integer",
+                        "description": "y"
+                    },
+                    "w": {
+                        "type": "integer",
+                        "description": "w"
+                    },
+                    "h": {
+                        "type": "integer",
+                        "description": "h"
+                    }
+                },
+                "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                ]
+            }
+        },
+        {
+            "name": "active_window_info",
+            "description": "Returns the title and bounds of the foreground active window.",
+            "func_name": "active_window_info",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "app_command_palette",
+            "description": "Opens the application command palette (Ctrl+Shift+P).",
+            "func_name": "app_command_palette",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "app_install",
+            "description": "Installs a package or application using winget/choco/brew/pip.",
+            "func_name": "app_install",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package": {
+                        "type": "string",
+                        "description": "package"
+                    },
+                    "manager": {
+                        "type": "string",
+                        "description": "manager"
+                    }
+                },
+                "required": [
+                    "package"
+                ]
+            }
+        },
+        {
+            "name": "app_launch",
+            "description": "Launches an application without shell interpolation, returning the needed assertion.",
+            "func_name": "app_launch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "target"
+                    },
+                    "args": {
+                        "type": "array",
+                        "description": "args"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "cwd"
+                    },
+                    "elevated": {
+                        "type": "string",
+                        "description": "elevated"
+                    },
+                    "wait": {
+                        "type": "string",
+                        "description": "wait"
+                    }
+                },
+                "required": [
+                    "target"
+                ]
+            }
+        },
+        {
+            "name": "app_list_running",
+            "description": "Lists running desktop applications.",
+            "func_name": "app_list_running",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "filter"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "app_search_store",
+            "description": "Searches package managers for available software.",
+            "func_name": "app_search_store",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "query"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "source"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "app_switch",
+            "description": "Switches to next or previous open application.",
+            "func_name": "app_switch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "description": "direction"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "app_task",
+            "description": "Executes an autonomous task scoped to a single application.",
+            "func_name": "app_task",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "goal"
+                    },
+                    "max_steps": {
+                        "type": "string",
+                        "description": "max steps"
+                    }
+                },
+                "required": [
+                    "app",
+                    "goal"
+                ]
+            }
+        },
+        {
+            "name": "app_terminate",
+            "description": "Terminates a process or application.",
+            "func_name": "app_terminate",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "pid"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "force": {
+                        "type": "string",
+                        "description": "force"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "app_uninstall",
+            "description": "Uninstalls a package.",
+            "func_name": "app_uninstall",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package": {
+                        "type": "string",
+                        "description": "package"
+                    },
+                    "manager": {
+                        "type": "string",
+                        "description": "manager"
+                    }
+                },
+                "required": [
+                    "package"
+                ]
+            }
+        },
+        {
+            "name": "app_wait",
+            "description": "Waits for an application to start or exit.",
+            "func_name": "app_wait",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "pid"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "timeout"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "ask_omni_vision",
+            "description": "Asks Gemini Live via Omni to describe the user's current view; degrades to local screenshot.",
+            "func_name": "ask_omni_vision",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "question"
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "focus"
+                    },
+                    "max_words": {
+                        "type": "string",
+                        "description": "max words"
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "timeout"
+                    }
+                },
+                "required": [
+                    "question"
+                ]
+            }
+        },
+        {
+            "name": "bluetooth_control",
+            "description": "Scans or manages Bluetooth devices.",
+            "func_name": "bluetooth_control",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_click",
+            "description": "Clicks an element in the browser via CDP.",
+            "func_name": "browser_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    },
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_dialog",
+            "description": "Handles browser dialogs (alerts, prompts, confirms).",
+            "func_name": "browser_dialog",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "text"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_download",
+            "description": "Downloads a file via the browser.",
+            "func_name": "browser_download",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "url"
+                    },
+                    "dest": {
+                        "type": "string",
+                        "description": "dest"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_fill_form",
+            "description": "Fills multiple form inputs in the browser.",
+            "func_name": "browser_fill_form",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fields": {
+                        "type": "array",
+                        "description": "fields"
+                    }
+                },
+                "required": [
+                    "fields"
+                ]
+            }
+        },
+        {
+            "name": "browser_js",
+            "description": "Evaluates JavaScript in the browser context via CDP.",
+            "func_name": "browser_js",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "script": {
+                        "type": "string",
+                        "description": "script"
+                    }
+                },
+                "required": [
+                    "script"
+                ]
+            }
+        },
+        {
+            "name": "browser_navigate",
+            "description": "Navigates the browser: back, forward, reload, or goto.",
+            "func_name": "browser_navigate",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "url"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_open",
+            "description": "Opens a URL in Chrome/Edge/Firefox returning needs_assertion.",
+            "func_name": "browser_open",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "url"
+                    },
+                    "browser": {
+                        "type": "string",
+                        "description": "browser"
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": "profile"
+                    }
+                },
+                "required": [
+                    "url"
+                ]
+            }
+        },
+        {
+            "name": "browser_profile_list",
+            "description": "Lists available user browser profiles.",
+            "func_name": "browser_profile_list",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "browser_read",
+            "description": "Reads text, markdown, or DOM snapshot from the browser.",
+            "func_name": "browser_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "description": "mode"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_screenshot",
+            "description": "Captures a screenshot of the browser view.",
+            "func_name": "browser_screenshot",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "full_page": {
+                        "type": "string",
+                        "description": "full page"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_snapshot_dom",
+            "description": "Captures a snapshot of the browser DOM structure.",
+            "func_name": "browser_snapshot_dom",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "browser_state",
+            "description": "Returns active URL, title, and state of the browser.",
+            "func_name": "browser_state",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "browser_tab",
+            "description": "Manages browser tabs.",
+            "func_name": "browser_tab",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "index": {
+                        "type": "string",
+                        "description": "index"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "url"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "browser_type",
+            "description": "Types text into an input field in the browser.",
+            "func_name": "browser_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "text"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    },
+                    "clear": {
+                        "type": "string",
+                        "description": "clear"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "browser_wait_for",
+            "description": "Waits for page load or element in the browser.",
+            "func_name": "browser_wait_for",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "condition": {
+                        "type": "string",
+                        "description": "condition"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "mode"
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "timeout"
+                    }
+                },
+                "required": [
+                    "condition"
+                ]
+            }
+        },
+        {
+            "name": "clear_blocker",
+            "description": "Clears a detected blocker and returns evidence that it is gone.",
+            "func_name": "clear_blocker",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            }
+        },
+        {
+            "name": "clipboard_get",
+            "description": "Reads current text or content from the system clipboard.",
+            "func_name": "clipboard_get",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "format": {
+                        "type": "string",
+                        "description": "format"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "clipboard_restore",
+            "description": "Restores prior clipboard text.",
+            "func_name": "clipboard_restore",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "content"
+                    }
+                },
+                "required": [
+                    "content"
+                ]
+            }
+        },
+        {
+            "name": "clipboard_set",
+            "description": "Sets the system clipboard text.",
+            "func_name": "clipboard_set",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "content"
+                    }
+                },
+                "required": [
+                    "content"
+                ]
+            }
+        },
+        {
+            "name": "computer_task",
+            "description": "Executes a multi-step GUI task with mandatory perception checkpoints.",
+            "func_name": "computer_task",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "goal"
+                    },
+                    "max_steps": {
+                        "type": "string",
+                        "description": "max steps"
+                    }
+                },
+                "required": [
+                    "goal"
+                ]
+            }
+        },
+        {
+            "name": "cursor_position",
+            "description": "Returns the current mouse cursor coordinates.",
+            "func_name": "cursor_position",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "detect_blockers",
+            "description": "Detects modal dialogs, cookie consent banners, or YouTube bot walls.",
+            "func_name": "detect_blockers",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "frame_ref": {
+                        "type": "string",
+                        "description": "frame ref"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "scope"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "disk_cleanup",
+            "description": "Cleans temporary files and caches.",
+            "func_name": "disk_cleanup",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "targets": {
+                        "type": "array",
+                        "description": "targets"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "disk_info",
+            "description": "Returns disk usage and partition information.",
+            "func_name": "disk_info",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "display_info",
+            "description": "Returns information about connected monitors and resolutions.",
+            "func_name": "display_info",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "env_var",
+            "description": "Gets or sets environment variables.",
+            "func_name": "env_var",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "scope"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "file_copy",
+            "description": "Copies a file.",
+            "func_name": "file_copy",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "src"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "dst"
+                    },
+                    "overwrite": {
+                        "type": "string",
+                        "description": "overwrite"
+                    }
+                },
+                "required": [
+                    "src",
+                    "dst"
+                ]
+            }
+        },
+        {
+            "name": "file_delete",
+            "description": "Deletes a file safely.",
+            "func_name": "file_delete",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    },
+                    "permanent": {
+                        "type": "string",
+                        "description": "permanent"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "file_move",
+            "description": "Moves or renames a file.",
+            "func_name": "file_move",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "src"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "dst"
+                    },
+                    "overwrite": {
+                        "type": "string",
+                        "description": "overwrite"
+                    }
+                },
+                "required": [
+                    "src",
+                    "dst"
+                ]
+            }
+        },
+        {
+            "name": "file_open",
+            "description": "Opens a file with its default application.",
+            "func_name": "file_open",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "file_reveal",
+            "description": "Reveals a file in File Explorer / Finder.",
+            "func_name": "file_reveal",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "firewall_rule",
+            "description": "Manages OS firewall rules.",
+            "func_name": "firewall_rule",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "get_capability_map",
+            "description": "Detects and caches the host's capabilities.",
+            "func_name": "get_capability_map",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "get_computer_controller",
+            "description": "Returns the platform-specific computer controller singleton.",
+            "func_name": "get_computer_controller",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "gui_explore",
+            "description": "Walks menus and windows to map the UI structure of an application.",
+            "func_name": "gui_explore",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "depth": {
+                        "type": "string",
+                        "description": "depth"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "hosts_file_edit",
+            "description": "Reads or edits the OS hosts file.",
+            "func_name": "hosts_file_edit",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "hostname": {
+                        "type": "string",
+                        "description": "hostname"
+                    },
+                    "ip": {
+                        "type": "string",
+                        "description": "ip"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "input_lock_state",
+            "description": "Returns the state of CapsLock, NumLock, and ScrollLock.",
+            "func_name": "input_lock_state",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "input_release_all",
+            "description": "Releases all keyboard keys and mouse buttons.",
+            "func_name": "input_release_all",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "input_sequence",
+            "description": "Executes an ordered batch of input actions in a single atomic sequence.",
+            "func_name": "input_sequence",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "actions": {
+                        "type": "array",
+                        "description": "actions"
+                    }
+                },
+                "required": [
+                    "actions"
+                ]
+            }
+        },
+        {
+            "name": "key_hold",
+            "description": "Holds a key down for a specified duration.",
+            "func_name": "key_hold",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "key"
+                    },
+                    "ms": {
+                        "type": "string",
+                        "description": "ms"
+                    }
+                },
+                "required": [
+                    "key"
+                ]
+            }
+        },
+        {
+            "name": "key_tap",
+            "description": "Taps a keyboard shortcut or key combination (e.g. 'ctrl+v', 'enter').",
+            "func_name": "key_tap",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "keys"
+                    }
+                },
+                "required": [
+                    "keys"
+                ]
+            }
+        },
+        {
+            "name": "media_control",
+            "description": "Controls system media playback keys.",
+            "func_name": "media_control",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "media_control_verify",
+            "description": "Controls media playback and immediately verifies state via media_probe.",
+            "func_name": "media_control_verify",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "media_probe",
+            "description": "Inspects video playback state via CDP, sampling twice to confirm advancing time.",
+            "func_name": "media_probe",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "selector"
+                    },
+                    "samples": {
+                        "type": "string",
+                        "description": "samples"
+                    },
+                    "gap_ms": {
+                        "type": "string",
+                        "description": "gap ms"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "mouse_click",
+            "description": "Clicks the mouse button at current position or specified coordinates.",
+            "func_name": "mouse_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    },
+                    "button": {
+                        "type": "string",
+                        "description": "button"
+                    },
+                    "clicks": {
+                        "type": "string",
+                        "description": "clicks"
+                    },
+                    "modifiers": {
+                        "type": "array",
+                        "description": "modifiers"
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "style"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "mouse_double_click",
+            "description": "Double-clicks the left mouse button.",
+            "func_name": "mouse_double_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "mouse_drag",
+            "description": "Drags the mouse from one point to another.",
+            "func_name": "mouse_drag",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_x": {
+                        "type": "string",
+                        "description": "from x"
+                    },
+                    "from_y": {
+                        "type": "string",
+                        "description": "from y"
+                    },
+                    "to_x": {
+                        "type": "string",
+                        "description": "to x"
+                    },
+                    "to_y": {
+                        "type": "string",
+                        "description": "to y"
+                    },
+                    "button": {
+                        "type": "string",
+                        "description": "button"
+                    },
+                    "duration_ms": {
+                        "type": "string",
+                        "description": "duration ms"
+                    }
+                },
+                "required": [
+                    "from_x",
+                    "from_y",
+                    "to_x",
+                    "to_y"
+                ]
+            }
+        },
+        {
+            "name": "mouse_move",
+            "description": "Moves the mouse cursor to (x, y) instantly or smoothly.",
+            "func_name": "mouse_move",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    },
+                    "duration_ms": {
+                        "type": "string",
+                        "description": "duration ms"
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "style"
+                    }
+                },
+                "required": [
+                    "x",
+                    "y"
+                ]
+            }
+        },
+        {
+            "name": "mouse_right_click",
+            "description": "Right-clicks the mouse button.",
+            "func_name": "mouse_right_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "mouse_scroll",
+            "description": "Scrolls the mouse wheel vertically or horizontally.",
+            "func_name": "mouse_scroll",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dy": {
+                        "type": "string",
+                        "description": "dy"
+                    },
+                    "dx": {
+                        "type": "string",
+                        "description": "dx"
+                    },
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    }
+                },
+                "required": [
+                    "dy"
+                ]
+            }
+        },
+        {
+            "name": "network_info",
+            "description": "Returns network adapter configuration and IP addresses.",
+            "func_name": "network_info",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "play_macro",
+            "description": "Plays back a previously recorded macro.",
+            "func_name": "play_macro",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "speed": {
+                        "type": "string",
+                        "description": "speed"
+                    },
+                    "loop": {
+                        "type": "string",
+                        "description": "loop"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            }
+        },
+        {
+            "name": "process_kill",
+            "description": "Kills a process by PID.",
+            "func_name": "process_kill",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "pid"
+                    }
+                },
+                "required": [
+                    "pid"
+                ]
+            }
+        },
+        {
+            "name": "process_list",
+            "description": "Lists running OS processes.",
+            "func_name": "process_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "filter"
+                    },
+                    "limit": {
+                        "type": "string",
+                        "description": "limit"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "process_resources",
+            "description": "Samples CPU and memory usage of a process.",
+            "func_name": "process_resources",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "pid"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "read_notifications",
+            "description": "Reads recent OS notifications.",
+            "func_name": "read_notifications",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "limit": {
+                        "type": "string",
+                        "description": "limit"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "record_macro",
+            "description": "Records a user macro for subsequent playback.",
+            "func_name": "record_macro",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "seconds": {
+                        "type": "string",
+                        "description": "seconds"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            }
+        },
+        {
+            "name": "registry_delete",
+            "description": "Deletes a Windows registry key or value.",
+            "func_name": "registry_delete",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hive": {
+                        "type": "string",
+                        "description": "hive"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "key"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    }
+                },
+                "required": [
+                    "hive",
+                    "key"
+                ]
+            }
+        },
+        {
+            "name": "registry_read",
+            "description": "Reads a Windows registry value.",
+            "func_name": "registry_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hive": {
+                        "type": "string",
+                        "description": "hive"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "key"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    }
+                },
+                "required": [
+                    "hive",
+                    "key"
+                ]
+            }
+        },
+        {
+            "name": "registry_write",
+            "description": "Writes a value to the Windows registry.",
+            "func_name": "registry_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hive": {
+                        "type": "string",
+                        "description": "hive"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "key"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    },
+                    "data": {
+                        "type": "string",
+                        "description": "data"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "type"
+                    }
+                },
+                "required": [
+                    "hive",
+                    "key",
+                    "value",
+                    "data"
+                ]
+            }
+        },
+        {
+            "name": "schedule_task",
+            "description": "Manages scheduled tasks.",
+            "func_name": "schedule_task",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "command"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "screen_diff",
+            "description": "Compares two screenshots to identify changed regions.",
+            "func_name": "screen_diff",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref_a": {
+                        "type": "string",
+                        "description": "ref a"
+                    },
+                    "ref_b": {
+                        "type": "string",
+                        "description": "ref b"
+                    },
+                    "threshold": {
+                        "type": "string",
+                        "description": "threshold"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "screen_read_text",
+            "description": "Runs OCR on the current screen or specified region.",
+            "func_name": "screen_read_text",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "region": {
+                        "type": "object",
+                        "description": "region"
+                    },
+                    "monitor": {
+                        "type": "string",
+                        "description": "monitor"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "lang"
+                    },
+                    "dedupe": {
+                        "type": "string",
+                        "description": "dedupe"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "screen_wait_for",
+            "description": "Waits for an element or text to appear on screen.",
+            "func_name": "screen_wait_for",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expectation": {
+                        "type": "string",
+                        "description": "expectation"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "mode"
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "timeout"
+                    },
+                    "poll": {
+                        "type": "string",
+                        "description": "poll"
+                    }
+                },
+                "required": [
+                    "expectation"
+                ]
+            }
+        },
+        {
+            "name": "screenshot_capture",
+            "description": "Captures a screenshot of the specified monitor or region.",
+            "func_name": "screenshot_capture",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monitor": {
+                        "type": "string",
+                        "description": "monitor"
+                    },
+                    "region": {
+                        "type": "object",
+                        "description": "region"
+                    },
+                    "include_cursor": {
+                        "type": "string",
+                        "description": "include cursor"
+                    },
+                    "downscale": {
+                        "type": "string",
+                        "description": "downscale"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "self_install_capability",
+            "description": "Installs missing system capability or tool dependency.",
+            "func_name": "self_install_capability",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "capability": {
+                        "type": "string",
+                        "description": "capability"
+                    }
+                },
+                "required": [
+                    "capability"
+                ]
+            }
+        },
+        {
+            "name": "service_control",
+            "description": "Queries or controls OS background services.",
+            "func_name": "service_control",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            }
+        },
+        {
+            "name": "shortcut_create",
+            "description": "Creates a desktop or start menu shortcut.",
+            "func_name": "shortcut_create",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "target"
+                    }
+                },
+                "required": [
+                    "path",
+                    "target"
+                ]
+            }
+        },
+        {
+            "name": "startup_entry",
+            "description": "Manages startup entries.",
+            "func_name": "startup_entry",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "name"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "command"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "system_elevate",
+            "description": "Executes a command with elevated administrator privileges.",
+            "func_name": "system_elevate",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "command"
+                    },
+                    "wait": {
+                        "type": "string",
+                        "description": "wait"
+                    }
+                },
+                "required": [
+                    "command"
+                ]
+            }
+        },
+        {
+            "name": "system_info",
+            "description": "Returns detailed OS version, CPU, and hardware specs.",
+            "func_name": "system_info",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "system_power",
+            "description": "Performs system power actions: 'lock', 'sleep', 'restart', 'shutdown'.",
+            "func_name": "system_power",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "delay_s": {
+                        "type": "string",
+                        "description": "delay s"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "terminal_close",
+            "description": "Closes an active terminal session.",
+            "func_name": "terminal_close",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "session id"
+                    }
+                },
+                "required": [
+                    "session_id"
+                ]
+            }
+        },
+        {
+            "name": "terminal_open",
+            "description": "Opens a visible terminal session.",
+            "func_name": "terminal_open",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shell": {
+                        "type": "string",
+                        "description": "shell"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "cwd"
+                    },
+                    "elevated": {
+                        "type": "string",
+                        "description": "elevated"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "terminal_read",
+            "description": "Reads captured output from a terminal session.",
+            "func_name": "terminal_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "session id"
+                    },
+                    "lines": {
+                        "type": "string",
+                        "description": "lines"
+                    },
+                    "via": {
+                        "type": "string",
+                        "description": "via"
+                    }
+                },
+                "required": [
+                    "session_id"
+                ]
+            }
+        },
+        {
+            "name": "terminal_send",
+            "description": "Sends a command string to a terminal session.",
+            "func_name": "terminal_send",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "session id"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "command"
+                    },
+                    "enter": {
+                        "type": "string",
+                        "description": "enter"
+                    }
+                },
+                "required": [
+                    "session_id",
+                    "command"
+                ]
+            }
+        },
+        {
+            "name": "terminal_wait_for_prompt",
+            "description": "Waits for a terminal prompt to become idle.",
+            "func_name": "terminal_wait_for_prompt",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "session id"
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "timeout"
+                    }
+                },
+                "required": [
+                    "session_id"
+                ]
+            }
+        },
+        {
+            "name": "type_text",
+            "description": "Types Unicode or ASCII text using batched injection or clipboard paste.",
+            "func_name": "type_text",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "text"
+                    },
+                    "interval_ms": {
+                        "type": "string",
+                        "description": "interval ms"
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "strategy"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "ui_find",
+            "description": "Finds a single UI element by name, query, or role.",
+            "func_name": "ui_find",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "query"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "role"
+                    },
+                    "index": {
+                        "type": "string",
+                        "description": "index"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "ui_find_all",
+            "description": "Finds all matching UI elements.",
+            "func_name": "ui_find_all",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "query"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "role"
+                    },
+                    "limit": {
+                        "type": "string",
+                        "description": "limit"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "ui_invoke",
+            "description": "Directly invokes a UI automation pattern without moving the mouse.",
+            "func_name": "ui_invoke",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "pattern"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    }
+                },
+                "required": [
+                    "ref"
+                ]
+            }
+        },
+        {
+            "name": "ui_read_element",
+            "description": "Reads attributes of a cached element reference.",
+            "func_name": "ui_read_element",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "ref"
+                    }
+                },
+                "required": [
+                    "ref"
+                ]
+            }
+        },
+        {
+            "name": "ui_tree_dump",
+            "description": "Dumps the Accessibility/UI Automation tree for active windows.",
+            "func_name": "ui_tree_dump",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    },
+                    "window": {
+                        "type": "string",
+                        "description": "window"
+                    },
+                    "max_depth": {
+                        "type": "string",
+                        "description": "max depth"
+                    },
+                    "max_nodes": {
+                        "type": "string",
+                        "description": "max nodes"
+                    },
+                    "visible_only": {
+                        "type": "string",
+                        "description": "visible only"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "undo_last_operation",
+            "description": "Reverts the last state-changing action.",
+            "func_name": "undo_last_operation",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "verify_gui_state",
+            "description": "Verifies that a desired visual or UI state is currently true on screen.",
+            "func_name": "verify_gui_state",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expectation": {
+                        "type": "string",
+                        "description": "expectation"
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "description": "evidence"
+                    }
+                },
+                "required": [
+                    "expectation"
+                ]
+            }
+        },
+        {
+            "name": "verify_outcome",
+            "description": "Directly verifies an outcome assertion against live system state.",
+            "func_name": "verify_outcome",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "assertion": {
+                        "type": "object",
+                        "description": "assertion"
+                    },
+                    "fresh": {
+                        "type": "string",
+                        "description": "fresh"
+                    }
+                },
+                "required": [
+                    "assertion"
+                ]
+            }
+        },
+        {
+            "name": "virtual_desktop",
+            "description": "Manages virtual desktops.",
+            "func_name": "virtual_desktop",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "index": {
+                        "type": "string",
+                        "description": "index"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "volume_control",
+            "description": "Controls or queries system audio volume.",
+            "func_name": "volume_control",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "value"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "wallpaper_set",
+            "description": "Sets the desktop wallpaper.",
+            "func_name": "wallpaper_set",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "wifi_control",
+            "description": "Scans or manages Wi-Fi connections.",
+            "func_name": "wifi_control",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    },
+                    "ssid": {
+                        "type": "string",
+                        "description": "ssid"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "window_action",
+            "description": "Performs window action: 'minimize', 'maximize', 'restore', 'close'.",
+            "func_name": "window_action",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle": {
+                        "type": "string",
+                        "description": "handle"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "action"
+                    }
+                },
+                "required": [
+                    "handle"
+                ]
+            }
+        },
+        {
+            "name": "window_arrange",
+            "description": "Arranges windows according to a layout.",
+            "func_name": "window_arrange",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "layout": {
+                        "type": "string",
+                        "description": "layout"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "window_focus",
+            "description": "Brings a window into focus by title regex or window handle.",
+            "func_name": "window_focus",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle": {
+                        "type": "string",
+                        "description": "handle"
+                    },
+                    "title_regex": {
+                        "type": "string",
+                        "description": "title regex"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "window_list",
+            "description": "Lists open application windows on the desktop.",
+            "func_name": "window_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_minimized": {
+                        "type": "string",
+                        "description": "include minimized"
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "app"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "window_move_resize",
+            "description": "Moves and resizes a window.",
+            "func_name": "window_move_resize",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle": {
+                        "type": "string",
+                        "description": "handle"
+                    },
+                    "x": {
+                        "type": "string",
+                        "description": "x"
+                    },
+                    "y": {
+                        "type": "string",
+                        "description": "y"
+                    },
+                    "w": {
+                        "type": "string",
+                        "description": "w"
+                    },
+                    "h": {
+                        "type": "string",
+                        "description": "h"
+                    }
+                },
+                "required": [
+                    "handle",
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                ]
+            }
+        },
+        {
+            "name": "window_screenshot",
+            "description": "Captures a screenshot of a specific window.",
+            "func_name": "window_screenshot",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle": {
+                        "type": "string",
+                        "description": "handle"
+                    },
+                    "client_only": {
+                        "type": "string",
+                        "description": "client only"
+                    }
+                },
+                "required": [
+                    "handle"
+                ]
+            }
         }
     ]
 }

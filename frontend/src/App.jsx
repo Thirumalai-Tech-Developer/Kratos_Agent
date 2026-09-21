@@ -25,6 +25,7 @@ export default function App() {
   const [sqlResults, setSqlResults] = useState([]);
   const [sqlLoading, setSqlLoading] = useState(false);
   const [sqlError, setSqlError] = useState(null);
+  const [liveStatus, setLiveStatus] = useState(null);
 
   // Chat & Execution State
   const [messages, setMessages] = useState([]);
@@ -48,13 +49,16 @@ export default function App() {
       fetchTelemetry(),
       fetchTools(),
       fetchSessions(),
-      fetchEvents()
+      fetchEvents(),
+      fetchLiveStatus()
     ]);
   };
 
-  // Initial Load
+  // Initial Load & polling
   useEffect(() => {
     refreshAll();
+    const interval = setInterval(fetchLiveStatus, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchStats = async () => {
@@ -106,6 +110,28 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setEvents(data || []);
+      }
+    } catch (_) {}
+  };
+
+  const fetchLiveStatus = async () => {
+    try {
+      const res = await fetch('/api/live/status');
+      if (res.ok) {
+        setLiveStatus(await res.json());
+      }
+    } catch (_) {}
+  };
+
+  const handleLiveControl = async (action, value = null) => {
+    try {
+      const res = await fetch('/api/live/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, value }),
+      });
+      if (res.ok) {
+        setLiveStatus(await res.json());
       }
     } catch (_) {}
   };
@@ -540,6 +566,56 @@ function parseThinkTags(rawContent, currentReasoning = '') {
             >
               <Database className="w-4 h-4 text-purple-400" />
               <span>D1 SQL PLAYGROUND</span>
+            </button>
+          </div>
+
+          {/* Live Multimodal Perception Bar */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 py-1.5 px-3 rounded-xl bg-slate-900/80 border border-white/10 text-xs font-rajdhani whitespace-nowrap">
+            <div className="flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${liveStatus?.gemini_connected ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${liveStatus?.gemini_connected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              </span>
+              <span className={`font-pixl font-bold text-[10px] ${liveStatus?.gemini_connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {liveStatus?.gemini_connected ? 'LIVE' : 'LIVE IDLE'}
+              </span>
+            </div>
+
+            <div className="h-3 w-px bg-white/10"></div>
+
+            <button
+              onClick={() => handleLiveControl('toggle_mute')}
+              title="Click to toggle microphone mute"
+              className={`px-2 py-0.5 rounded text-[10px] font-pixl flex items-center gap-1 transition ${
+                liveStatus?.muted
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : (liveStatus?.microphone_active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 text-slate-400')
+              }`}
+            >
+              <span>🎤</span>
+              <span>{liveStatus?.muted ? 'MUTED' : (liveStatus?.microphone_active ? 'VOICE ON' : 'VOICE OFF')}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const modes = ['camera', 'screen', 'both', 'none'];
+                const currentIdx = modes.indexOf(liveStatus?.video_mode || 'camera');
+                const nextMode = modes[(currentIdx + 1) % modes.length];
+                handleLiveControl('set_vision_mode', nextMode);
+              }}
+              title="Click to cycle vision source (camera -> screen -> both -> off)"
+              className="px-2 py-0.5 rounded text-[10px] font-pixl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 hover:bg-cyan-500/30 transition"
+            >
+              <span>👁</span>
+              <span>VISION: {liveStatus?.video_mode?.toUpperCase() || 'OFF'}</span>
+            </button>
+
+            <button
+              onClick={() => handleLiveControl('reconnect')}
+              title="Click to reconnect Gemini Live session"
+              className="px-1.5 py-0.5 rounded text-[10px] font-pixl text-slate-400 hover:text-white hover:bg-white/10 transition"
+            >
+              <span>⟳</span>
             </button>
           </div>
         </div>

@@ -89,10 +89,14 @@ class HookRegistry:
                 cmd_template = hook_def.get("command", "")
                 if not cmd_template:
                     continue
-                cmd = self._render_template(cmd_template, ctx)
                 try:
+                    cmd = self._render_template(cmd_template, ctx)
+                    import sys
+                    from kratos_agent.utils.shell_quote import argv_for
+                    shell_type = "powershell" if sys.platform == "win32" else "bash"
+                    argv = argv_for(shell_type, cmd)
                     result = subprocess.run(
-                        cmd, shell=True, capture_output=True, text=True, timeout=10,
+                        argv, shell=False, capture_output=True, text=True, timeout=10,
                         encoding="utf-8", errors="replace"
                     )
                     if result.returncode != 0 and result.stderr:

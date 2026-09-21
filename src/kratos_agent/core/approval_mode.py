@@ -5,9 +5,8 @@ Mirrors Codex CLI (suggest / auto-edit / full-auto) and Kimi Code safe mode.
 Modes:
   SUGGEST    — Agent can read/analyze only. All writes/execs need user approval.
   AUTO_EDIT  — Agent can edit files freely. Shell commands need user approval.
-  FULL_AUTO  — Agent has full autonomy (current Kratos default).
-
-Additionally enforces a SAFE blocklist of destructive shell patterns regardless of mode.
+  FULL_AUTO  — Agent has full autonomy.
+  SOVEREIGN  — No limitations. Full authority. Default for Jarvis.
 """
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import json
 import re
 from enum import Enum
 from pathlib import Path
+from dataclasses import dataclass
 
 from rich.console import Console
 from rich.prompt import Prompt
@@ -39,20 +39,32 @@ _DANGEROUS_PATTERNS = [
 ]
 _COMPILED_DANGEROUS = [re.compile(p, re.IGNORECASE) for p in _DANGEROUS_PATTERNS]
 
-
 def is_dangerous_command(command: str) -> bool:
     """Returns True if a shell command matches any known destructive pattern."""
     return any(p.search(command) for p in _COMPILED_DANGEROUS)
 
-
 # ──────────────────────────────────────────────────────────
-# Approval Mode Enum
+# Approval Mode Enum & Capabilities
 # ──────────────────────────────────────────────────────────
 class ApprovalMode(str, Enum):
     SUGGEST   = "suggest"     # Read only, all mutations need approval
     AUTO_EDIT = "auto-edit"   # Files auto, shell needs approval
-    FULL_AUTO = "full-auto"   # Full autonomy (default)
+    FULL_AUTO = "full-auto"   # Full autonomy
+    SOVEREIGN = "sovereign"   # Jarvis authority
 
+@dataclass
+class Decision:
+    allow: bool
+    needs_confirmation: bool
+    reason: str
+
+class AuditLogger:
+    def record(self, capability: str, target: str | None, decision: str, mode: str):
+        try:
+            from kratos_agent.ccs.safety_ops import safety
+            safety.record_audit(capability, target, decision, mode)
+        except Exception:
+            pass
 
 class ApprovalGate:
     """
@@ -63,17 +75,18 @@ class ApprovalGate:
     SETTINGS_FILE = Path(".kratos/settings.json")
 
     def __init__(self):
-        self._mode = ApprovalMode.FULL_AUTO
+        self._mode = ApprovalMode.SOVEREIGN # Set default to Sovereign
+        self._audit = AuditLogger()
         self._load()
 
     def _load(self):
         try:
             if self.SETTINGS_FILE.exists():
                 data = json.loads(self.SETTINGS_FILE.read_text(encoding="utf-8"))
-                mode_val = data.get("approval_mode", "full-auto")
+                mode_val = data.get("approval_mode", "sovereign")
                 self._mode = ApprovalMode(mode_val)
         except Exception:
-            self._mode = ApprovalMode.FULL_AUTO
+            self._mode = ApprovalMode.SOVEREIGN
 
     def _save(self):
         try:
@@ -100,17 +113,32 @@ class ApprovalGate:
             ApprovalMode.SUGGEST:   "[yellow]",
             ApprovalMode.AUTO_EDIT: "[cyan]",
             ApprovalMode.FULL_AUTO: "[green]",
+            ApprovalMode.SOVEREIGN: "[bold magenta]",
         }
         color = mode_colors.get(mode, "[white]")
         console.print(f"[bold]Approval mode set to {color}{mode.value}[/]")
 
+    def resolve(self, capability: str, target: str | None = None) -> Decision:
+        if self._mode is ApprovalMode.SOVEREIGN:
+            # Jarvis authority. No human in the loop. Audit only.
+            self._audit.record(capability=capability, target=target, decision="ALLOW", mode="sovereign")
+            return Decision(allow=True, needs_confirmation=False, reason="sovereign")
+
+        # Fallbacks for other modes based on basic string matching on capability
+        if capability in ("read", "network", "display", "gui_read"):
+            return Decision(allow=True, needs_confirmation=False, reason=self._mode.value)
+
+        if self._mode == ApprovalMode.FULL_AUTO:
+            return Decision(allow=True, needs_confirmation=False, reason=self._mode.value)
+
+        if self._mode == ApprovalMode.AUTO_EDIT and capability in ("write", "git"):
+            return Decision(allow=True, needs_confirmation=False, reason="auto-edit allows writes")
+
+        # SUGGEST or destructive/shell in AUTO_EDIT needs confirmation
+        return Decision(allow=False, needs_confirmation=True, reason=f"requires approval in {self._mode.value} mode")
+
     def check_shell(self, command: str) -> bool:
-        """
-        Returns True if the shell command is allowed to proceed.
-        Always blocks dangerous commands.
-        In SUGGEST or AUTO_EDIT mode, prompts user before executing.
-        """
-        # Safety blocklist — always enforced
+        """Legacy helper for simple string checks. Used by standard Kratos tools."""
         if is_dangerous_command(command):
             console.print(
                 f"\n[bold red]⛔ BLOCKED (dangerous command):[/bold red] [yellow]{command}[/yellow]\n"
@@ -118,29 +146,32 @@ class ApprovalGate:
             )
             return False
 
-        if self._mode == ApprovalMode.FULL_AUTO:
+        decision = self.resolve("execute", command)
+        if decision.allow and not decision.needs_confirmation:
             return True
 
-        if self._mode in (ApprovalMode.SUGGEST, ApprovalMode.AUTO_EDIT):
+        if decision.needs_confirmation:
             console.print(f"\n[bold yellow]⚡ Shell command requires approval ({self._mode.value} mode):[/bold yellow]")
             console.print(f"[cyan]{command}[/cyan]")
             answer = Prompt.ask("Allow? [y/N]", default="n")
             return answer.strip().lower() in ("y", "yes")
 
-        return True
+        return False
 
     def check_write(self, file_path: str) -> bool:
-        """
-        Returns True if the file write is allowed.
-        Blocked in SUGGEST mode (read-only).
-        """
-        if self._mode == ApprovalMode.SUGGEST:
+        """Legacy helper for file writes."""
+        decision = self.resolve("write", file_path)
+        if decision.allow and not decision.needs_confirmation:
+            return True
+
+        if decision.needs_confirmation and self._mode == ApprovalMode.SUGGEST:
             console.print(
                 f"\n[bold yellow]✋ File write blocked (suggest mode):[/bold yellow] [cyan]{file_path}[/cyan]\n"
                 "Switch to auto-edit or full-auto mode to allow writes: [bold]/mode auto-edit[/bold]"
             )
             return False
-        return True
+            
+        return decision.allow
 
     def mode_badge(self) -> str:
         """Returns a compact colored badge for the CLI prompt."""
@@ -148,9 +179,9 @@ class ApprovalGate:
             ApprovalMode.SUGGEST:   "[yellow]●SUGGEST[/yellow]",
             ApprovalMode.AUTO_EDIT: "[cyan]●AUTO-EDIT[/cyan]",
             ApprovalMode.FULL_AUTO: "[green]●FULL-AUTO[/green]",
+            ApprovalMode.SOVEREIGN: "[bold magenta]⚡ SOVEREIGN[/bold magenta]",
         }
         return badges.get(self._mode, "")
-
 
 # Global singleton
 approval_gate = ApprovalGate()

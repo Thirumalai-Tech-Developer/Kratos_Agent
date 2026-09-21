@@ -88,10 +88,28 @@ class ContextBuilder:
         # Step 2: Apply existing head/tail truncation if still too long
         if len(text) <= self.budget.max_tool_result_chars:
             return text, hr_stats.get("compressed", False)
+            
+        limit = self.budget.max_tool_result_chars
         lines = text.splitlines()
+        
+        # If text is composed of very few lines but massive length (e.g. minified code, base64)
+        if len(lines) <= 5:
+            half = limit // 2
+            omitted_chars = max(0, len(text) - limit)
+            truncated_text = f"{text[:half]}\n… [{omitted_chars} characters omitted; full result retained in session trace] …\n{text[-half:]}"
+            return truncated_text, True
+
         head, tail = lines[:40], lines[-40:]
         omitted = max(0, len(lines) - len(head) - len(tail))
-        return "\n".join(head + [f"… [{omitted} lines omitted; full result retained in session trace] …"] + tail), True
+        truncated_text = "\n".join(head + [f"… [{omitted} lines omitted; full result retained in session trace] …"] + tail)
+        
+        # Guard against head+tail still exceeding character limit
+        if len(truncated_text) > limit:
+            half = limit // 2
+            omitted_chars = max(0, len(truncated_text) - limit)
+            truncated_text = f"{truncated_text[:half]}\n… [{omitted_chars} characters omitted] …\n{truncated_text[-half:]}"
+            
+        return truncated_text, True
 
     def compact_history(self, messages: List[ChatMessage]) -> Tuple[List[ChatMessage], Dict[str, Any] | None]:
         limit = self.budget.max_input_tokens - self.budget.reserve_output_tokens

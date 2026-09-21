@@ -18,6 +18,7 @@ from kratos_agent.core.memory import memory
 from kratos_agent.core.approval_mode import approval_gate
 from kratos_agent.core.hooks import hook_registry
 from kratos_agent.core import git_tools as _git
+from kratos_agent.utils.tool_creator import self_tool_creator
 
 # Reconfigure stdout for UTF-8 on Windows
 if sys.platform == "win32":
@@ -94,12 +95,36 @@ def is_persistent_server_command(command: str) -> bool:
     ]
     return any(re.search(pat, last_cmd) for pat in server_patterns)
 
-def run_terminal_command(command: str) -> str:
+def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) -> str:
     """
     Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly.
     Shows real-time dynamic single-line status, handles background servers, and tracks completion.
+    PREFERRED: pass argv as a list. Only use command as a string when you genuinely need shell features.
     """
-    command = clean_command(command)
+    import sys
+    from kratos_agent.core.command_lint import lint_command
+    from kratos_agent.utils.shell_quote import argv_for
+
+    shell_dialect = "powershell" if sys.platform == "win32" else "bash"
+
+    if argv:
+        exec_argv = argv
+        command = " ".join(argv)
+    else:
+        command = clean_command(command)
+        # Pre-flight command linter before execution
+        lint = lint_command(command, shell_dialect)
+        if not lint.ok:
+            return json.dumps({
+                "ok": False,
+                "code": lint.code,
+                "problems": lint.problems,
+                "suggestion": lint.suggestion,
+                "hint": lint.hint,
+            }, indent=2)
+
+        exec_argv = argv_for(shell_dialect, command, prefer_encoded=True)
+
     # Codex-style approval gate + safety blocklist
     if not approval_gate.check_shell(command):
         return f"Shell command blocked by approval mode ({approval_gate.mode.value}): {command}"
@@ -110,11 +135,17 @@ def run_terminal_command(command: str) -> str:
     # Check if the command is attempting to start a persistent long-running server
     is_server_start = is_persistent_server_command(command)
     
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+
     try:
         if is_server_start:
             proc = subprocess.Popen(
-                command,
-                shell=True,
+                exec_argv,
+                shell=False,
+                creationflags=creationflags,
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -134,8 +165,10 @@ def run_terminal_command(command: str) -> str:
 
         # Standard command execution with live single-line status updates
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            exec_argv,
+            shell=False,
+            creationflags=creationflags,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -182,6 +215,17 @@ def run_terminal_command(command: str) -> str:
             output_parts.append(f"OUTPUT:\n{full_output}")
         else:
             output_parts.append("(Command completed with no output)")
+
+        parse_error_patterns = [
+            "ParserError",
+            "TerminatorExpected",
+            "CommandNotFoundException",
+            "Traceback (most recent call last)",
+            "error :",
+            "is not recognized as an internal or external command",
+        ]
+        if any(p in full_output for p in parse_error_patterns):
+            output_parts.append("[PARSE_ERROR DETECTED]: The shell reported a syntax, terminator, or parser error.")
 
         output_parts.append(f"Exit Code: {proc.returncode}")
         

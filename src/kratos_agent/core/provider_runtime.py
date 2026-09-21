@@ -13,7 +13,9 @@ class ModelAdapter(ABC):
     capabilities: ModelCapabilities
 
     @abstractmethod
-    def complete(self, request: Dict[str, Any], on_chunk: Optional[Callable[[str], None]] = None) -> ModelResponse: ...
+    def complete(self, request: Dict[str, Any], on_chunk: Optional[Callable[[str], None]] = None) -> ModelResponse:
+        from kratos_agent.ccs.base import CapabilityUnavailable
+        raise CapabilityUnavailable(capability="model_complete", platform="abstract", hint="ModelAdapter.complete is an abstract method.")
 
 
 ModelProvider = ModelAdapter

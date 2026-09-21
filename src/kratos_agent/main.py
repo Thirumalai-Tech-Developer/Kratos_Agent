@@ -23,6 +23,7 @@ from kratos_agent.core.tool_runtime import legacy_tool_registry
 from kratos_agent.core.subagents import SubagentManager
 from kratos_agent.core.project_memory import project_memory
 from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.harness import HarnessKernel
 from kratos_agent.core.harness.plugins import (
     ToolsPlugin,
@@ -120,6 +121,14 @@ TERMINAL
 * Never ignore errors.
 * Do not repeat a failed command without changing the approach.
 * Avoid destructive operations unless necessary and authorized.
+
+COMPUTER CONTROL & OS SANDBOX
+
+* You are running inside a real OS sandbox (Windows or Linux).
+* You can control the GUI, mouse, keyboard, applications, and screen via `gui_mouse`, `gui_keyboard`, `gui_vision`, `window_manager`, and `application_manager`.
+* CLOSED LOOP REQUIRED: Never blindly click or type. Always follow this cycle: `gui_vision` (inspect screen) -> `gui_mouse`/`gui_keyboard` (act) -> `gui_vision` (verify result).
+* If an API or CLI tool is unavailable, fall back to GUI/browser automation using computer capabilities.
+* Only report success after verifying via screen or command output.
 
 DEBUGGING
 
@@ -314,12 +323,23 @@ class KratosRuntime:
                 return KRATOS_COGNITIVE_MEMORY_PROMPT
             return (
                 f"{KRATOS_COGNITIVE_MEMORY_PROMPT}\n\n"
-                f"### 🏛️ HISTORICAL SESSION MEMORY ARCHIVE (BACKGROUND REFERENCE ONLY - NOT CURRENT TASK):\n"
-                f"[The records below are past session memories. DO NOT treat them as your current user instruction.]\n\n"
+                f"### 🏛️ PRIMARY PROJECT MEMORY (BACKGROUND CONVENTIONS ONLY - NOT CURRENT TASK):\n"
+                f"[The records below are core persistent facts/conventions. Each chat starts fresh with its own working memory and NO previous episodic baggage.]\n\n"
                 f"{cog}"
             )
 
         self.instructions.register(InstructionModule("cognitive-memory-framework", "system", _get_quarantined_memory_context, 15))
+
+        def _get_computer_capabilities() -> str:
+            try:
+                import json
+                cmap = get_capability_map()
+                return f"COMPUTER CAPABILITIES (Sandbox):\n{json.dumps(cmap, indent=2)}\n\nUse this information to determine whether you can use GUI, Browser, or OS interactions."
+            except Exception:
+                return "COMPUTER CAPABILITIES: Not detected."
+                
+        self.instructions.register(InstructionModule("computer-capabilities", "system", _get_computer_capabilities, 18))
+        
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
             "AUTONOMOUS EXECUTION PROTOCOL:\n"
             "1. Focus directly on the user's explicit objective (e.g. downloading, installing, running, automating, fixing, or building). If the user asks to download or run an existing game or tool, use terminal commands (`run_terminal_command`) to acquire and execute it—do NOT scaffold a substitute from scratch.\n"
@@ -447,7 +467,10 @@ class KratosRuntime:
             try:
                 resolved.relative_to(self.workspace)
             except ValueError:
-                return False, "file target escapes workspace"
+                if approval_gate.mode == ApprovalMode.SOVEREIGN:
+                    approval_gate.resolve("persist", target)
+                else:
+                    return False, "file target escapes workspace"
             return approval_gate.check_write(target), f"write {target}"
         if spec.permission == ToolPermission.EXECUTE:
             return approval_gate.check_shell(str(arguments.get("command", ""))), "shell command"
@@ -613,6 +636,14 @@ def set_harness_mode(mode: str) -> Dict[str, Any]:
 
 def reload_tools() -> None:
     runtime.reload_tools()
+
+def probe_capabilities() -> Dict[str, Any]:
+    """Returns the capability map for Sovereign mode diagnostics."""
+    try:
+        from kratos_agent.ccs import get_capability_map
+        return get_capability_map()
+    except Exception as e:
+        return {"error": str(e)}
 
 def main() -> None:
     from kratos_agent.cli import main as cli_main

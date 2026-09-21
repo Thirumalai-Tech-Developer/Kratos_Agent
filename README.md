@@ -18,9 +18,10 @@
 [![Tools](https://img.shields.io/badge/Built--in%20Tools-24-gold.svg)](#-built-in-tool-registry)
 [![Headroom](https://img.shields.io/badge/Context%20Compression-Headroom%20(20--60%25%20Savings)-cyan.svg)](https://github.com/headroomlabs-ai/headroom)
 [![Parallel Execution](https://img.shields.io/badge/Concurrency-Parallel%20Wave%20Scheduler-gold.svg)](#-parallel-tool--subagent-execution-wave-scheduler)
-[![Tests](https://img.shields.io/badge/tests-20%20modules%20(130%20tests)-brightgreen.svg)](#-testing--quality-assurance)
+[![Multimodal Live](https://img.shields.io/badge/Multimodal-Voice%20%2B%20Vision%20(Gemini%20Live)-magenta.svg)](#-multimodal-live-voice--vision-integration)
+[![Tests](https://img.shields.io/badge/tests-21%20modules%20(167%20tests)-brightgreen.svg)](#-testing--quality-assurance)
 
-[🌐 Live Cloudflare Web Version](https://kratos-agent.thirutechdeveloper.workers.dev) • [🎮 Quickstart](#-quickstart-cli-version-vs-web-version) • [🖥️ CLI Version](#️-1-cli-version-terminal-shell--one-shot-mode) • [🌐 Web Version](#-2-web-version-vice-city-cyberpunk-console) • [📜 Slash Commands](#-complete-cli-slash-commands-reference)
+[🌐 Live Cloudflare Web Version](https://kratos-agent.thirutechdeveloper.workers.dev) • [🎤 Multimodal Live](#-multimodal-live-voice--vision-integration) • [🎮 Quickstart](#-quickstart-cli-version-vs-web-version) • [🖥️ CLI Version](#️-1-cli-version-terminal-shell--one-shot-mode) • [🌐 Web Version](#-2-web-version-vice-city-cyberpunk-console) • [📜 Slash Commands](#-complete-cli-slash-commands-reference)
 
 </div>
 
@@ -29,6 +30,7 @@
 ## 📑 Table of Contents
 
 - [⚡ Overview](#-overview)
+- [🎤 Multimodal Live: Voice & Vision Integration](#-multimodal-live-voice--vision-integration)
 - [🎮 Quickstart: CLI Version vs Web Version](#-quickstart-cli-version-vs-web-version)
   - [🖥️ 1. CLI Version (Terminal Shell & One-Shot Mode)](#️-1-cli-version-terminal-shell--one-shot-mode)
   - [🌐 2. Web Version (Vice City Cyberpunk Console)](#-2-web-version-vice-city-cyberpunk-console)
@@ -62,6 +64,7 @@
 
 Equipped with the complete **Claude Code System Prompts & Sub-Agents suite** (695+ indexed prompts, workflows, and sub-agents), Kratos delivers:
 
+- **Multimodal Live Perception**: Direct bidirectional Gemini Live integration providing natural voice hearing, voice output, camera vision, and screen vision running synchronously alongside the Kratos execution brain.
 - **True Autonomous Planning**: Breaks complex tasks into verifiable sub-goals with dynamic state machines (`PENDING` → `RUNNING` → `COMPLETED`).
 - **Real-Time Token Streaming**: True SSE incremental token streaming across both local Python runtime and Cloudflare Edge Worker (`cloudflare:sockets`).
 - **Workspace File Operations**: Inspects, searches, creates, and surgical-edits files with localized context.
@@ -72,6 +75,106 @@ Equipped with the complete **Claude Code System Prompts & Sub-Agents suite** (69
 - **4-Tier Cognitive Memory**: Working, Episodic, Semantic, and Procedural memory tiers with dual D1/SQLite persistence.
 - **Plugin Harness Architecture**: Extensible kernel-based plugin system for model adapters, memory, auditing, and tool injection.
 - **MCP Protocol Support**: Model Context Protocol integration for external tool servers.
+
+---
+
+## 🎤 Multimodal Live: Voice & Vision Integration
+
+Kratos Agent features a unified multimodal perception layer powered directly by the **Gemini Live API** (`gemini-3.8-live-extended-thinking`). Gemini Live acts as the **ears, voice, and eyes** of the system, while Kratos remains the **autonomous execution brain**.
+
+```text
+USER ───► [ 🎤 SPEAK / 👁️ CAMERA / 🖥️ SCREEN ]
+                    │
+                    ▼
+          ┌───────────────────┐
+          │   GEMINI LIVE     │
+          │                   │
+          │ Hearing           │
+          │ Vision            │
+          │ Conversation      │
+          │ Voice             │
+          └─────────┬─────────┘
+                    │
+                    │ start_agent_task(desc, visual_context)
+                    ▼
+          ┌───────────────────┐
+          │   KRATOS BRIDGE   │
+          └─────────┬─────────┘
+                    │
+                    ▼
+          ┌───────────────────┐
+          │   KRATOS AGENT    │
+          │                   │
+          │ Planner           │
+          │ Agent Loop        │
+          │ Tools & Terminal  │
+          │ Memory & D1       │
+          │ Verification      │
+          └─────────┬─────────┘
+                    │
+                    │ runtime events
+                    ▼
+          ┌───────────────────┐
+          │  NARRATION LAYER  │
+          └─────────┬─────────┘
+                    │
+                    ▼
+               GEMINI LIVE
+                    │
+                    ▼
+             [ 🔊 SPEAKER ]
+```
+
+### 🌟 Key Capabilities
+* 🎤 **Voice Hearing & Speech Understanding**: 16kHz 16-bit PCM streaming microphone listener with real-time transcription and automatic interruption handling.
+* 🔊 **Natural Voice Output**: 24kHz 16-bit PCM speaker output playing Gemini's spoken replies with zero conversational latency.
+* 👁️ **Camera Vision**: Real-time video frame capture via OpenCV (`cv2.VideoCapture`) with automatic thumbnail compression and ~1 FPS throttling.
+* 🖥️ **Screen Vision**: Primary monitor capture via `mss` with automatic aspect ratio scaling and ~1 FPS throttling.
+* 🧠 **Single Unified Runtime**: No separate "Live Agent" or duplicate planners. Gemini Live delegates workspace tasks to Kratos via native Live tool calls (`start_agent_task`, `cancel_active_task`, `get_task_status`).
+* 🎙️ **Event Narration**: High-signal execution milestones (`INSPECTING`, `PLANNING`, `MODIFYING`, `RUNNING_TESTS`, `VERIFYING`, `COMPLETED`) are automatically sanitized and narrated in natural speech.
+* 🛡️ **Fault Isolation**: If microphone or camera is unavailable, Kratos CLI and Web continue operating normally without interruption.
+
+### ⚡ Single-Command Startup
+
+You **NEVER** need to run `python live.py` or any secondary script. The Live subsystem starts automatically with Kratos:
+
+#### Starting the CLI with Live
+```bash
+uv run kratos-agent --cli
+```
+Automatically launches:
+1. Kratos CLI Shell
+2. Gemini Live Session
+3. Microphone Listener
+4. Speaker Output
+5. Camera or Screen Vision
+6. Kratos Bridge & Narration
+
+#### Starting the Web Console with Live
+```bash
+uv run kratos-agent --web
+```
+Automatically launches:
+1. Kratos Web Server & Console (`http://127.0.0.1:7860`)
+2. Gemini Live Multimodal Subsystem in background
+3. Web REST API endpoints for Live status and controls (`/api/live/status`, `/api/live/control`)
+4. Interactive Live perception bar in the Web UI
+
+### 📜 CLI Slash Commands for Multimodal Live
+| Command | Description |
+|---|---|
+| `/voice` | Toggle microphone mute on/off |
+| `/voice on` | Unmute microphone and enable voice hearing |
+| `/voice off` | Mute microphone voice input |
+| `/vision` | Show current vision capture mode |
+| `/vision camera` | Set vision source to camera |
+| `/vision screen` | Set vision source to screen capture |
+| `/vision both` | Enable both camera and screen vision |
+| `/vision off` | Disable vision capture |
+| `/live status` | View detailed Live subsystem status table |
+| `/live reconnect` | Reconnect the Gemini Live session |
+
+---
 
 ---
 

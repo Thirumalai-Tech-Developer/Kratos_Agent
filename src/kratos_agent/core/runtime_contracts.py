@@ -63,6 +63,46 @@ class EventKind(str, Enum):
     TURN_COMPLETED = "turn.completed"
     TURN_FAILED = "turn.failed"
 
+    # Evidence & Verification Integrity (Defect Remediation)
+    EVIDENCE = "evidence"
+    FALSE_COMPLETION = "false_completion"
+    RETRACTION = "retraction"
+    DISPUTE = "dispute"
+    PERF_WARNING = "perf_warning"
+    BLOCKER_DETECTED = "blocker_detected"
+    CAPABILITY = "capability"
+
+
+class TerminalLatch:
+    """A task emits exactly one terminal status. Ever."""
+
+    def __init__(self, audit_recorder: Any = None):
+        self._set: dict[str, str] = {}
+        self._audit = audit_recorder
+
+    def try_set(self, task_id: str, status: str) -> bool:
+        prev = self._set.get(task_id)
+        if prev is not None:
+            import logging
+            logging.getLogger("kratos.latch").error(
+                "TERMINAL LATCH VIOLATION: task %s already %s, refused %s",
+                task_id,
+                prev,
+                status,
+            )
+            if self._audit and hasattr(self._audit, "record"):
+                self._audit.record(
+                    kind="latch_violation",
+                    task_id=task_id,
+                    first=prev,
+                    refused=status,
+                )
+            return False
+        if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
+            return True  # non-terminal, always allowed
+        self._set[task_id] = status
+        return True
+
 
 @dataclass
 class ChatMessage:

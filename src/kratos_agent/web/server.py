@@ -58,72 +58,80 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-
-        # REST API Routes
-        if path == "/api/stats":
-            self._handle_get_stats()
-            return
-        elif path == "/api/telemetry":
-            self._handle_get_telemetry()
-            return
-        elif path == "/api/tools":
-            self._handle_get_tools()
-            return
-        elif path == "/api/sessions":
-            self._handle_get_sessions()
-            return
-        elif path.startswith("/api/sessions/"):
-            session_id = path.replace("/api/sessions/", "").strip("/")
-            self._handle_get_session_detail(session_id)
-            return
-        elif path.startswith("/api/events/"):
-            session_id = path.replace("/api/events/", "").strip("/")
-            self._handle_get_events(session_id)
-            return
-        elif path == "/api/events":
-            self._handle_get_events()
-            return
-
-        # Static assets (Vite assets, images, fonts, HTML)
-        current_web_dir = get_web_dir()
-        rel_path = path.lstrip("/")
-        if not rel_path or rel_path == "index.html":
-            target_file = current_web_dir / "index.html"
-            self._serve_file(target_file, "text/html; charset=utf-8")
-            return
-
-        target_file = (current_web_dir / rel_path).resolve()
-        # Security check: ensure target is within current_web_dir
         try:
-            target_file.relative_to(current_web_dir)
-        except ValueError:
-            self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
-            return
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
 
-        if target_file.is_file():
-            content_type, _ = mimetypes.guess_type(str(target_file))
-            if not content_type:
-                if target_file.suffix.lower() == ".js":
-                    content_type = "application/javascript; charset=utf-8"
-                elif target_file.suffix.lower() == ".css":
-                    content_type = "text/css; charset=utf-8"
-                else:
-                    content_type = "application/octet-stream"
-            elif "text" in content_type or "javascript" in content_type:
-                content_type += "; charset=utf-8"
-            self._serve_file(target_file, content_type)
-            return
+            # REST API Routes
+            if path == "/api/stats":
+                self._handle_get_stats()
+                return
+            elif path == "/api/telemetry":
+                self._handle_get_telemetry()
+                return
+            elif path == "/api/tools":
+                self._handle_get_tools()
+                return
+            elif path == "/api/sessions":
+                self._handle_get_sessions()
+                return
+            elif path.startswith("/api/sessions/"):
+                session_id = path.replace("/api/sessions/", "").strip("/")
+                self._handle_get_session_detail(session_id)
+                return
+            elif path.startswith("/api/events/"):
+                session_id = path.replace("/api/events/", "").strip("/")
+                self._handle_get_events(session_id)
+                return
+            elif path == "/api/events":
+                self._handle_get_events()
+                return
+            elif path == "/api/live/status":
+                self._handle_get_live_status()
+                return
 
-        # Fallback to index.html for SPA client-side routing
-        index_file = current_web_dir / "index.html"
-        if index_file.is_file():
-            self._serve_file(index_file, "text/html; charset=utf-8")
-            return
+            # Static assets (Vite assets, images, fonts, HTML)
+            current_web_dir = get_web_dir()
+            rel_path = path.lstrip("/")
+            if not rel_path or rel_path == "index.html":
+                target_file = current_web_dir / "index.html"
+                self._serve_file(target_file, "text/html; charset=utf-8")
+                return
 
-        # 404 Not Found
-        self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
+            target_file = (current_web_dir / rel_path).resolve()
+            # Security check: ensure target is within current_web_dir
+            try:
+                target_file.relative_to(current_web_dir)
+            except ValueError:
+                self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            if target_file.is_file():
+                content_type, _ = mimetypes.guess_type(str(target_file))
+                if not content_type:
+                    if target_file.suffix.lower() == ".js":
+                        content_type = "application/javascript; charset=utf-8"
+                    elif target_file.suffix.lower() == ".css":
+                        content_type = "text/css; charset=utf-8"
+                    else:
+                        content_type = "application/octet-stream"
+                elif "text" in content_type or "javascript" in content_type:
+                    content_type += "; charset=utf-8"
+                self._serve_file(target_file, content_type)
+                return
+
+            # Fallback to index.html for SPA client-side routing
+            index_file = current_web_dir / "index.html"
+            if index_file.is_file():
+                self._serve_file(index_file, "text/html; charset=utf-8")
+                return
+
+            # 404 Not Found
+            self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
@@ -152,6 +160,25 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         elif path == "/api/auth/agent-mode":
             self._handle_auth_agent_mode(payload)
             return
+        elif path == "/api/live/control":
+            self._handle_live_control(payload)
+            return
+        elif path == "/api/voice/stream":
+            self._handle_voice_stream(payload)
+            return
+        elif path == "/api/voice/command":
+            self._handle_voice_command(payload)
+            return
+        elif path == "/api/voice/panic":
+            self._handle_voice_panic(payload)
+            return
+        elif path.startswith("/api/voice/task/") and path.endswith("/dispute"):
+            task_id = path.split("/")[4]
+            self._handle_voice_dispute(task_id, payload)
+            return
+        elif path == "/api/voice/task/dispute":
+            self._handle_voice_dispute(payload.get("task_id", ""), payload)
+            return
 
         self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -165,6 +192,76 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
+
+    # ── Live Multimodal Handlers ───────────────────────────────────────────────
+
+    def _handle_get_live_status(self) -> None:
+        try:
+            from kratos_agent.live import get_live_runtime
+            live_rt = get_live_runtime()
+            self._send_json(live_rt.get_status().to_dict())
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_live_control(self, payload: Dict[str, Any]) -> None:
+        try:
+            import asyncio
+            from kratos_agent.live import get_live_runtime
+            live_rt = get_live_runtime()
+            action = str(payload.get("action", "")).lower().strip()
+            val = payload.get("value")
+
+            if action == "mute":
+                live_rt.mute()
+            elif action == "unmute":
+                live_rt.unmute()
+            elif action == "toggle_mute":
+                if live_rt.get_status().muted:
+                    live_rt.unmute()
+                else:
+                    live_rt.mute()
+            elif action == "set_vision_mode" and isinstance(val, str):
+                if live_rt._loop and live_rt._loop.is_running():
+                    asyncio.run_coroutine_threadsafe(live_rt.set_vision_mode(val), live_rt._loop)
+            elif action == "reconnect":
+                live_rt.stop_background()
+                live_rt.start_in_background()
+
+            self._send_json(live_rt.get_status().to_dict())
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_voice_dispute(self, task_id: str, payload: Dict[str, Any]) -> None:
+        try:
+            import asyncio
+            from kratos_agent.core.dispute import handle_dispute
+            from kratos_agent.main import runtime
+            obs = payload.get("user_observation", "") or payload.get("observation", "")
+            lang = payload.get("lang", "auto")
+            res = asyncio.run(handle_dispute(runtime, task_id=task_id, observation=obs, lang=lang))
+            self._send_json(res.to_dict())
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_voice_command(self, payload: Dict[str, Any]) -> None:
+        try:
+            cmd = payload.get("command", "")
+            from kratos_agent.main import run_agent
+            res = run_agent(cmd)
+            self._send_json({"ok": True, "result": res})
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_voice_panic(self, payload: Dict[str, Any]) -> None:
+        try:
+            from kratos_agent.ccs.safety_ops import panic_halt
+            panic_halt(reason=payload.get("reason", "voice_panic"))
+            self._send_json({"ok": True, "panic": "halted"})
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_voice_stream(self, payload: Dict[str, Any]) -> None:
+        self._send_json({"ok": True, "stream": "active"})
 
     # ── Static File Helper ─────────────────────────────────────────────────────
 
@@ -392,6 +489,35 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 "content": exec_result["text"],
                 "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
             })
+
+    def _handle_voice_stream(self, payload: Dict[str, Any]) -> None:
+        """Omni Voice SSE Streaming Endpoint."""
+        # Stub for Voice stream to be implemented according to Omni Spec
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        
+        # In a real implementation, this ties into event_adapter.py and the event_bus
+        self.wfile.write(b"event: ready\ndata: {}\n\n")
+        self.wfile.flush()
+
+    def _handle_voice_command(self, payload: Dict[str, Any]) -> None:
+        """Omni Voice Command Execution."""
+        # Stub for Voice command
+        self._send_json({"status": "ok", "message": "Command received"})
+
+    def _handle_voice_panic(self, payload: Dict[str, Any]) -> None:
+        """Omni Voice Panic trigger."""
+        try:
+            from kratos_agent.ccs.safety_ops import safety
+            self._send_json({"status": "ok", "message": "PANIC TRIGGERED"})
+            # safety.panic() halts the process, so send response first.
+            threading.Thread(target=safety.panic, daemon=True).start()
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_chat_sync(self, payload: Dict[str, Any]) -> None:
         """Synchronous chat execution endpoint."""
@@ -658,6 +784,16 @@ def start_server(
     print(f"📊 Storage: {'Cloudflare D1 (Cloud)' if d1_db.is_remote else 'D1 SQLite Mirror (Local)'}")
     print("⚡ Real-time Agent Arena & Tool Dispatcher ready.\n")
 
+    # Start Gemini Live multimodal subsystem alongside Web (skip during automated test runs)
+    if not os.getenv("PYTEST_CURRENT_TEST"):
+        try:
+            from kratos_agent.live import get_live_runtime
+            live_runtime = get_live_runtime()
+            live_runtime.start_in_background()
+            print("🎤 Gemini Live Multimodal Subsystem: ONLINE\n")
+        except Exception as e:
+            print(f"⚠️ Gemini Live could not start: {e}\n")
+
     if open_browser:
         try:
             webbrowser.open(url)
@@ -672,7 +808,12 @@ def start_server(
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            print("\nShutting down Kratos Web Server...")
+            print("\nShutting down Kratos Web Server & Live subsystem...")
+            try:
+                from kratos_agent.live import get_live_runtime
+                get_live_runtime().stop_background()
+            except Exception:
+                pass
             server.shutdown()
         return server
 

@@ -13,6 +13,16 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from .runtime_contracts import EventKind, RuntimeEvent
+from .evidence import Evidence, OutcomeAssertion
+
+
+@dataclass(slots=True)
+class Verdict:
+    allow: bool
+    code: str = ""
+    reason: str = ""
+    correction: str = ""
+    evidence: Optional[Evidence] = None
 
 
 @dataclass
@@ -30,6 +40,57 @@ class VerificationManager:
     def __init__(self, workspace: Path, emit: Optional[Callable[[RuntimeEvent], None]] = None) -> None:
         self.workspace = workspace.resolve()
         self.emit = emit or (lambda e: None)
+
+    def verify_observable_outcome(
+        self,
+        assertion: OutcomeAssertion,
+        ccs: Any,
+        *,
+        require_fresh: bool = True,
+    ) -> Evidence:
+        """Run an assertion against LIVE state. Never against a cached frame
+        unless require_fresh=False is passed explicitly."""
+        from kratos_agent.ccs.assertions import assertion_runner
+        return assertion_runner.run(ccs, assertion)
+
+    def gate_completion(
+        self,
+        task: Any,
+        declared_result: dict,
+        evidence: Optional[Evidence],
+    ) -> Verdict:
+        """THE gate. Called by agent_loop before any task may transition to COMPLETED."""
+        if not getattr(task, "requires_observable_evidence", False):
+            return Verdict(allow=True, reason="informational_task")
+
+        if evidence is None:
+            kind = getattr(getattr(task, "assertion", None), "kind", "outcome")
+            return Verdict(
+                allow=False,
+                code="NO_EVIDENCE",
+                correction=(
+                    "You declared this step complete but no outcome was observed. "
+                    "Dispatching an action is not completing it. Run the declared "
+                    f"assertion ({kind}) and attach the Evidence, "
+                    "or report failure honestly. Do NOT declare success again "
+                    "without evidence."
+                ),
+            )
+
+        if not evidence.trustworthy:
+            return Verdict(
+                allow=False,
+                code="UNVERIFIED_OUTCOME",
+                correction=(
+                    f"The outcome was checked and is NOT true. Observed: "
+                    f"{evidence.detail}. Do not claim success. Either fix the "
+                    "underlying cause and re-verify, or report the failure with "
+                    "this observation as the reason."
+                ),
+                evidence=evidence,
+            )
+
+        return Verdict(allow=True, reason="evidence_met", evidence=evidence)
 
     def verify_workspace(
         self,

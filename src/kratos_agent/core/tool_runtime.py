@@ -45,6 +45,11 @@ class ToolRegistry:
         valid, reason = self._validate(registered.spec, call.arguments)
         if not valid:
             return ToolResult(call.call_id, call.name, reason, is_error=True)
+            
+        forbidden, forbid_reason = self._forbidden_target(call)
+        if forbidden:
+            return ToolResult(call.call_id, call.name, f"Forbidden target: {forbid_reason}", is_error=True)
+            
         allowed, reason = allow(registered.spec, call.arguments)
         if not allowed:
             return ToolResult(call.call_id, call.name, f"Tool execution requires approval: {reason}", is_error=True)
@@ -69,10 +74,30 @@ class ToolRegistry:
             return False, f"Unknown arguments: {', '.join(unknown)}"
         return True, "allowed"
 
+    def _forbidden_target(self, call: ToolCall) -> tuple[bool, str]:
+        """Self-preservation invariants that block destructive actions against Kratos itself."""
+        args_str = json.dumps(call.arguments).lower()
+        if call.name in ("run_terminal_command", "app_launch", "system_elevate"):
+            if any(x in args_str for x in ["taskkill /f /im kratos", "killall kratos", "format c:", "mkfs"]):
+                return True, "Cannot kill Kratos or format disks."
+            if "rm -rf /" in args_str or "del /s /q c:\\windows" in args_str:
+                return True, "Cannot delete critical OS folders."
+        if call.name in ("write_file", "edit_file", "file_delete"):
+            target = str(call.arguments.get("file_path", "")).lower()
+            if ".kratos/trace" in target or ".kratos/audit" in target or ".kratos/snapshots" in target:
+                return True, "Cannot modify or delete Kratos audit/snapshot logs."
+            if target.startswith("c:\\windows") or target.startswith("/bin") or target.startswith("/usr"):
+                return True, "Cannot write to critical OS folders directly."
+            if target.startswith("\\\\.\\physicaldrive") or target.startswith("/dev/sd") or target.startswith("/dev/nvme"):
+                return True, "Cannot write to raw block devices."
+        return False, ""
+
+
 
 def legacy_tool_registry(workspace: Path) -> ToolRegistry:
     """Adapt existing curated Kratos tools without exposing arbitrary Python code."""
     from kratos_agent.utils import tools as legacy
+    from kratos_agent.utils import computer_tools
     # Tools are shipped with Kratos; the workspace is the *target* project and
     # must not be required to contain the Kratos source tree.
     manifest = Path(__file__).resolve().parents[1] / "utils" / "tools_list.json"
@@ -81,6 +106,8 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
     for item in data.get("tools", []):
         function_name = item.get("func_name")
         handler = getattr(legacy, function_name, None)
+        if handler is None:
+            handler = getattr(computer_tools, function_name, None)
         if handler is None:
             continue
         name = item.get("name", function_name)

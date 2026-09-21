@@ -114,6 +114,10 @@ class TaskItem:
     tool_count: int = 0
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
+    requires_observable_evidence: bool = False
+    assertion: Optional[Any] = None
+    observed_evidence: Optional[Any] = None
+    claim: str = ""
 
     def start(self) -> None:
         self.state = TaskState.RUNNING

@@ -14,6 +14,7 @@ from kratos_agent.web.server import start_server
 
 class TestWebLiveChatAndTelemetry(unittest.TestCase):
     def setUp(self):
+        urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
         self.db_path = self.base_path / "test_d1.db"
@@ -48,9 +49,15 @@ class TestWebLiveChatAndTelemetry(unittest.TestCase):
         )
         self.port = self.server.server_address[1]
         self.base_url = f"http://127.0.0.1:{self.port}"
+        import time
+        time.sleep(0.1)
 
     def tearDown(self):
-        self.server.shutdown()
+        try:
+            self.server.shutdown()
+            self.server.server_close()
+        except Exception:
+            pass
         import gc
         gc.collect()
         try:

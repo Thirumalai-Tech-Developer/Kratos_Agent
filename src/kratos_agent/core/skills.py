@@ -113,8 +113,8 @@ class SkillManager:
             try:
                 console.print(f"[bold yellow]⚡ [Cloning Skill Repository][/bold yellow] [bold cyan]{url}[/bold cyan]")
                 res = subprocess.run(
-                    f"git clone --depth 1 {url} \"{temp_dir}\"",
-                    shell=True,
+                    ["git", "clone", "--depth", "1", url, str(temp_dir)],
+                    shell=False,
                     capture_output=True,
                     text=True
                 )

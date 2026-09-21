@@ -285,19 +285,37 @@ class CognitiveMemoryStore:
                         pass
         return summary
 
-    def get_prompt_context(self, session_id: Optional[str] = None, max_per_type: int = 4) -> str:
-        """Constructs a high-density markdown block categorized by the 4 cognitive memory types."""
+    def get_prompt_context(self, session_id: Optional[str] = None, max_per_type: int = 4, include_episodic: bool = False) -> str:
+        """Constructs a high-density markdown block of primary cognitive memory.
+        
+        Per user directive:
+        When starting something, it becomes a new chat. Do NOT load previous episodic memories.
+        Only load primary memory (semantic project facts/conventions and essential procedural workflows)
+        needed across all chats. Working memory is only loaded for the current active session.
+        """
         sections = []
 
         type_headers = {
-            "working": "🧠 WORKING MEMORY (Active Task & Scratchpad)",
-            "episodic": "📜 EPISODIC MEMORY (Experiences & Lessons Learned)",
-            "semantic": "📚 SEMANTIC MEMORY (Project Facts & Conventions)",
-            "procedural": "⚙️ PROCEDURAL MEMORY (Workflows & Skills)",
+            "semantic": "📚 PRIMARY MEMORY (Core Project Facts & Conventions)",
+            "procedural": "⚙️ PROCEDURAL MEMORY (Workflows & Recipes)",
+            "working": "🧠 WORKING MEMORY (Current Session Scratchpad)",
+            "episodic": "📜 EPISODIC MEMORY (Current Session Lessons)",
         }
 
-        for m_type in ("semantic", "procedural", "working", "episodic"):
-            records = self.recall(memory_type=m_type, session_id=session_id, limit=max_per_type)
+        # Only load primary (semantic) and procedural memory across sessions.
+        # Episodic memory from past chats is excluded to ensure every new chat starts clean.
+        types_to_load = ["semantic", "procedural"]
+        if session_id:
+            types_to_load.append("working")
+            if include_episodic:
+                types_to_load.append("episodic")
+
+        for m_type in types_to_load:
+            records = self.recall(
+                memory_type=m_type,
+                session_id=session_id if m_type in ("working", "episodic") else None,
+                limit=max_per_type,
+            )
             if not records:
                 continue
 
@@ -315,9 +333,9 @@ class CognitiveMemoryStore:
             return ""
 
         return (
-            "### 🏛️ COGNITIVE MEMORY BASE:\n"
+            "### 🏛️ PRIMARY MEMORY (Essential Context):\n"
             + "\n\n".join(sections)
-            + "\n\n*Note: Use `save_memory`, `read_memory`, and `clear_memory` to update these cognitive layers.*"
+            + "\n\n*Note: Each chat starts clean without previous episodic baggage. Use `read_memory` if specific historical facts or past experiences are explicitly needed.*"
         )
 
 
