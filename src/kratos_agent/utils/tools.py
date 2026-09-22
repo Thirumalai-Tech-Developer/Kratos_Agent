@@ -103,7 +103,8 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
     """
     import sys
     from kratos_agent.core.command_lint import lint_command
-    from kratos_agent.utils.shell_quote import argv_for
+    from kratos_agent.system.shell.renderer import render_command_argv
+    from kratos_agent.system.shell.output_parser import normalize_command_output
 
     shell_dialect = "powershell" if sys.platform == "win32" else "bash"
 
@@ -123,7 +124,7 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
                 "hint": lint.hint,
             }, indent=2)
 
-        exec_argv = argv_for(shell_dialect, command, prefer_encoded=True)
+        exec_argv = render_command_argv(command)
 
     # Codex-style approval gate + safety blocklist
     if not approval_gate.check_shell(command):
@@ -200,7 +201,9 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
                 pass
             step_tracker.fail(f"[bold red]Execution error[/bold red]", str(stream_err))
 
-        full_output = "".join(output_lines).strip()
+        raw_text = "".join(output_lines).strip()
+        cmd_result = normalize_command_output(raw_text, exit_code=proc.returncode)
+        full_output = (cmd_result.stdout or cmd_result.stderr).strip()
         lines = full_output.splitlines()
 
         # Token-conscious output truncation (Kimi-Code / FCC / Codex pattern)

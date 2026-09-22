@@ -15,10 +15,12 @@ class ComputerManager:
     """Universal Computer Use Engine runtime orchestrator."""
 
     def __init__(self) -> None:
+        import threading
         self.observer = get_observer()
         self.executor = get_executor()
         self.verifier = get_verifier()
         self.planner = ComputerPlanner()
+        self._execution_lock = threading.Lock()
 
     def observe(
         self,
@@ -36,16 +38,17 @@ class ComputerManager:
         )
 
     def execute_action(self, action: ComputerAction) -> ActionResult:
-        """Executes a single computer action with before/after state verification."""
-        before = self.observe(include_interactive=False)
-        result = self.executor.execute(action)
+        """Executes a single computer action with before/after state verification (§50)."""
+        with self._execution_lock:
+            before = self.observe(include_interactive=False)
+            result = self.executor.execute(action)
 
-        # Invalidate cache for mutating actions
-        from kratos_agent.computer.state_cache import get_state_cache
-        get_state_cache().invalidate()
+            # Invalidate cache for mutating actions
+            from kratos_agent.computer.state_cache import get_state_cache
+            get_state_cache().invalidate()
 
-        time.sleep(0.1)
-        after = self.observe(include_interactive=False, force_refresh=True)
+            time.sleep(0.1)
+            after = self.observe(include_interactive=False, force_refresh=True)
 
         # Verify action
         verified, detail = self.verifier.verify_action(

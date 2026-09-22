@@ -10,7 +10,9 @@ class RequestCategory(str, Enum):
     CHAT = "CHAT"
     CODE = "CODE"
     TOOL = "TOOL"
+    FILE_OPERATION = "FILE_OPERATION"
     COMPUTER_USE = "COMPUTER_USE"
+    BROWSER = "BROWSER"
     MEMORY_QUERY = "MEMORY_QUERY"
     COMPLEX_TASK = "COMPLEX_TASK"
 
@@ -41,7 +43,8 @@ class RequestRouter:
         (re.compile(r"^git\s+(status|diff|log|branch)$", re.IGNORECASE), "git_status"),
         (re.compile(r"^(list|show)\s+(files|directory|folder)$", re.IGNORECASE), "list_directory"),
     ]
-    _COMPUTER_PATTERNS = re.compile(r"\b(open|launch|click|type|scroll|press|browser|chrome|youtube|window|desktop|app)\b", re.IGNORECASE)
+    _BROWSER_PATTERNS = re.compile(r"\b(youtube|browser|website|walk\s*through|web|url|navigate)\b", re.IGNORECASE)
+    _COMPUTER_PATTERNS = re.compile(r"\b(open|launch|click|type|scroll|press|window|desktop|app)\b", re.IGNORECASE)
     _MEMORY_PATTERNS = re.compile(r"\b(what do you remember|recall|my preference|saved memory|what is my name)\b", re.IGNORECASE)
 
     def classify(self, request: str, history: Optional[List[Any]] = None) -> RouteDecision:
@@ -61,7 +64,30 @@ class RequestRouter:
                 confidence=0.99,
             )
 
-        # 2. Simple Memory Query
+        # 2. Browser / YouTube / Web Navigation direct path (§18, §19, §22, §23)
+        if self._BROWSER_PATTERNS.search(clean_lower):
+            is_multi_step = any(word in clean_lower for word in [" and ", " then ", "after that", "workflow", "automate"])
+            if is_multi_step:
+                return RouteDecision(
+                    category=RequestCategory.COMPLEX_TASK,
+                    is_fast_path=False,
+                    target_tool_categories=["BROWSER", "COMPUTER", "GENERAL", "SYSTEM"],
+                    requires_planning=True,
+                    requires_memory=False,
+                    requires_observation=True,
+                    confidence=0.85,
+                )
+            return RouteDecision(
+                category=RequestCategory.BROWSER,
+                is_fast_path=True,
+                target_tool_categories=["BROWSER", "COMPUTER", "GENERAL"],
+                requires_planning=False,
+                requires_memory=False,
+                requires_observation=True,
+                confidence=0.95,
+            )
+
+        # 3. Simple Memory Query
         if self._MEMORY_PATTERNS.search(clean_lower):
             return RouteDecision(
                 category=RequestCategory.MEMORY_QUERY,
@@ -73,7 +99,7 @@ class RequestRouter:
                 confidence=0.95,
             )
 
-        # 3. Direct Single Tool Execution
+        # 4. Direct Single Tool Execution
         for pattern, tool_name in self._SINGLE_TOOL_PATTERNS:
             match = pattern.match(clean)
             if match:
@@ -88,7 +114,7 @@ class RequestRouter:
                     direct_tool=tool_name,
                 )
 
-        # 4. Pure Code Generation / Explanation
+        # 5. Pure Code Generation / Explanation
         if self._CODE_GEN_PATTERN.match(clean) or (self._EXPLAIN_PATTERN.match(clean) and not self._COMPUTER_PATTERNS.search(clean_lower)):
             return RouteDecision(
                 category=RequestCategory.CODE if self._CODE_GEN_PATTERN.match(clean) else RequestCategory.CHAT,
@@ -100,14 +126,13 @@ class RequestRouter:
                 confidence=0.90,
             )
 
-        # 5. Computer Use (GUI / Browser / Desktop)
+        # 6. Computer Use (GUI / Desktop)
         if self._COMPUTER_PATTERNS.search(clean_lower):
-            # Check if multi-step or simple single action
             is_multi_step = any(word in clean_lower for word in [" and ", " then ", "after that", "workflow", "automate"])
             return RouteDecision(
                 category=RequestCategory.COMPLEX_TASK if is_multi_step else RequestCategory.COMPUTER_USE,
                 is_fast_path=not is_multi_step,
-                target_tool_categories=["BROWSER", "COMPUTER", "SYSTEM", "GENERAL"],
+                target_tool_categories=["COMPUTER", "BROWSER", "SYSTEM", "GENERAL"],
                 requires_planning=is_multi_step,
                 requires_memory=False,
                 requires_observation=True,

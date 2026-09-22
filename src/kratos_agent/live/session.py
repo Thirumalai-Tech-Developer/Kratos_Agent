@@ -354,6 +354,12 @@ class LiveSession:
                             self._last_user_transcript = text
                             self._output_transcript_buffer = ""
                             self._task_started_in_turn = False
+
+                            # Cancel any previous voice output and clear buffer on new user speech (§13)
+                            from kratos_agent.output.voice import get_voice_buffer, get_tts_queue
+                            get_voice_buffer().clear()
+                            get_tts_queue().cancel_current()
+
                             if self.status_hub:
                                 self.status_hub.update(
                                     current_state=LiveState.LISTENING,
@@ -372,24 +378,45 @@ class LiveSession:
                     if out_tx and out_tx.text:
                         text = out_tx.text.strip()
                         if text:
-                            logger.info(f"[GEMINI] Voice output: {text}")
+                            logger.info(f"[GEMINI] Voice output chunk: {text}")
                             self._output_transcript_buffer += " " + text
                             if self._turn_complete_event is not None:
                                 self._turn_transcript_chunks.append(text)
                             if self.status_hub:
                                 self.status_hub.update(last_transcript=text)
-                            if self.on_model_transcript:
-                                try:
-                                    self.on_model_transcript(text)
-                                except Exception:
-                                    pass
-                            else:
-                                print(f"\n⚡ [Voice] Kratos: {text}\n", flush=True)
+
+                            # Buffer through VoiceBuffer to emit ONLY complete sentences (§7, §8, §9)
+                            from kratos_agent.output.voice import get_voice_buffer
+                            vb = get_voice_buffer()
+                            vb.append(text)
+                            sentence = vb.flush_sentence()
+                            if sentence:
+                                if self.on_model_transcript:
+                                    try:
+                                        self.on_model_transcript(sentence)
+                                    except Exception:
+                                        pass
+                                else:
+                                    print(f"\n⚡ [Voice] Kratos: {sentence}\n", flush=True)
 
                     # Check Turn Completion
                     if getattr(server_content, "turn_complete", False):
                         if self._turn_complete_event is not None:
                             self._turn_complete_event.set()
+
+                        # Flush any remaining buffered voice sentence
+                        from kratos_agent.output.voice import get_voice_buffer
+                        vb = get_voice_buffer()
+                        remaining_sentence = vb.flush()
+                        if remaining_sentence:
+                            if self.on_model_transcript:
+                                try:
+                                    self.on_model_transcript(remaining_sentence)
+                                except Exception:
+                                    pass
+                            else:
+                                print(f"\n⚡ [Voice] Kratos: {remaining_sentence}\n", flush=True)
+
                         # ── Refusal Intercept Guard ──
                         full_output = self._output_transcript_buffer.strip()
                         if full_output and self._is_refusal(full_output):

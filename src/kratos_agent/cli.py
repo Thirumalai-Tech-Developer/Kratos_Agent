@@ -1488,7 +1488,9 @@ def start_interactive_cli():
         style=prompt_style
     )
     from kratos_agent.live import get_live_runtime
+    from kratos_agent.output.terminal import get_terminal_renderer
     live_runtime = get_live_runtime()
+    terminal_renderer = get_terminal_renderer()
 
     def _on_live_user_speech(text: str) -> None:
         console.print(f"\n[bold green]🎤 [Voice] You:[/bold green] [white]{text}[/white]")
