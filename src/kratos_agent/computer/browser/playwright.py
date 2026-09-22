@@ -4,8 +4,26 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
+from dataclasses import dataclass
 from kratos_agent.ccs.browser.cdp import cdp_client
 from kratos_agent.computer.state import ActionResult
+
+
+@dataclass
+class VideoPlaybackState:
+    """Detailed video playback state (§12, §13)."""
+    video_present: bool
+    paused: bool
+    current_time: float
+    duration: float
+    ready_state: int
+    visible: bool
+    url: str
+    title: str
+
+    @property
+    def is_playing(self) -> bool:
+        return self.video_present and self.visible and not self.paused and self.duration > 0
 
 
 class PlaywrightDriver:
@@ -90,6 +108,166 @@ class PlaywrightDriver:
             return ActionResult(ok=bool(res), action="browser_fill", data={"text": text}, method_used="cdp_dom_fill")
 
         return ActionResult(ok=False, action="browser_fill", detail="Browser not connected")
+
+    def verify_video_playing(self) -> VideoPlaybackState:
+        """Verifies actual video element presence, visibility, and progressing playback (§12, §13)."""
+        empty_state = VideoPlaybackState(
+            video_present=False,
+            paused=True,
+            current_time=0.0,
+            duration=0.0,
+            ready_state=0,
+            visible=False,
+            url="",
+            title="",
+        )
+        if not cdp_client.is_available():
+            return empty_state
+
+        js_check = """(() => {
+            const v = document.querySelector('video');
+            if (!v) return null;
+            const rect = v.getBoundingClientRect();
+            const visible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(v).visibility !== 'hidden';
+            return {
+                video_present: true,
+                paused: v.paused,
+                current_time: v.currentTime || 0,
+                duration: v.duration || 0,
+                ready_state: v.readyState || 0,
+                visible: visible,
+                url: window.location.href,
+                title: document.title
+            };
+        })()"""
+
+        res1 = cdp_client.evaluate(js_check)
+        if not res1 or not isinstance(res1, dict):
+            return empty_state
+
+        state1 = VideoPlaybackState(
+            video_present=bool(res1.get("video_present")),
+            paused=bool(res1.get("paused")),
+            current_time=float(res1.get("current_time", 0.0)),
+            duration=float(res1.get("duration", 0.0)),
+            ready_state=int(res1.get("ready_state", 0)),
+            visible=bool(res1.get("visible")),
+            url=str(res1.get("url", "")),
+            title=str(res1.get("title", "")),
+        )
+
+        # Time-based verification: wait 0.7s and ensure currentTime progresses (§13)
+        if state1.video_present and state1.visible and not state1.paused:
+            time.sleep(0.7)
+            res2 = cdp_client.evaluate(js_check)
+            if res2 and isinstance(res2, dict):
+                t2 = float(res2.get("current_time", 0.0))
+                # Update current_time and verify advance
+                if (t2 - state1.current_time) > 0.05 or t2 > state1.current_time:
+                    return VideoPlaybackState(
+                        video_present=True,
+                        paused=bool(res2.get("paused")),
+                        current_time=t2,
+                        duration=float(res2.get("duration", 0.0)),
+                        ready_state=int(res2.get("ready_state", 0)),
+                        visible=bool(res2.get("visible")),
+                        url=str(res2.get("url", "")),
+                        title=str(res2.get("title", "")),
+                    )
+
+        return state1
+
+    def search_and_play_youtube(self, query: str) -> ActionResult:
+        """Automates YouTube search, result selection, and verified video playback (§11, §12, §13)."""
+        if not cdp_client.is_available():
+            return ActionResult(ok=False, action="youtube_play", detail="Browser not connected via CDP")
+
+        # 1. Fill search input
+        clean_q = query.replace("'", "\\'")
+        js_search = f"""(() => {{
+            const input = document.querySelector('input#search') || document.querySelector('input[name=search_query]');
+            if (input) {{
+                input.focus();
+                input.value = '{clean_q}';
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                const form = input.closest('form');
+                if (form) {{
+                    form.submit();
+                    return true;
+                }}
+                const btn = document.querySelector('button#search-icon-legacy');
+                if (btn) {{
+                    btn.click();
+                    return true;
+                }}
+            }}
+            return false;
+        }})()"""
+        searched = cdp_client.evaluate(js_search)
+        if not searched:
+            # Navigate directly to search URL
+            from urllib.parse import quote_plus
+            cdp_client.navigate(f"https://www.youtube.com/results?search_query={quote_plus(query)}")
+
+        time.sleep(1.5)
+
+        # 2. Select first video result
+        js_click_video = """(() => {
+            const videoLinks = Array.from(document.querySelectorAll('ytd-video-renderer a#video-title, a.yt-simple-endpoint[href*="/watch"]'));
+            for (const link of videoLinks) {
+                if (link.href && link.href.includes('/watch')) {
+                    link.click();
+                    return link.href;
+                }
+            }
+            return null;
+        })()"""
+        video_href = cdp_client.evaluate(js_click_video)
+        time.sleep(2.0)
+
+        # 3. Ensure video starts playing (unpause if needed)
+        js_start_play = """(() => {
+            const v = document.querySelector('video');
+            if (v && v.paused) {
+                v.play();
+                return true;
+            }
+            return Boolean(v);
+        })()"""
+        cdp_client.evaluate(js_start_play)
+
+        # 4. Verify playback with advancing time (§13)
+        v_state = self.verify_video_playing()
+        if v_state.is_playing:
+            return ActionResult(
+                ok=True,
+                action="youtube_play",
+                detail=f"Video playback confirmed: '{v_state.title}' (time: {v_state.current_time:.1f}s)",
+                data={"url": v_state.url, "title": v_state.title, "current_time": v_state.current_time},
+                verified=True,
+            )
+
+        # Retry once (§16)
+        cdp_client.evaluate(js_start_play)
+        time.sleep(1.0)
+        v_state = self.verify_video_playing()
+        if v_state.is_playing:
+            return ActionResult(
+                ok=True,
+                action="youtube_play",
+                detail=f"Video playback confirmed after retry: '{v_state.title}'",
+                data={"url": v_state.url, "title": v_state.title, "current_time": v_state.current_time},
+                verified=True,
+            )
+
+        return ActionResult(
+            ok=False,
+            action="youtube_play",
+            detail="Could not verify that the video is playing.",
+            data={"video_present": v_state.video_present, "paused": v_state.paused},
+            verified=False,
+        )
 
     def dump_interactive_dom(self) -> List[Dict[str, Any]]:
         """Dumps interactive DOM elements (buttons, inputs, links) with bounding rects."""

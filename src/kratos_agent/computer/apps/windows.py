@@ -13,6 +13,34 @@ except ImportError:
     gw = None
 
 
+def _activate_hwnd_win32(hwnd: int) -> bool:
+    """Activates and brings a Win32 window to the foreground, bypassing focus locks (§6, §7)."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    try:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        else:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+
+        fore_hwnd = user32.GetForegroundWindow()
+        fore_thread = user32.GetWindowThreadProcessId(fore_hwnd, None)
+        app_thread = kernel32.GetCurrentThreadId()
+
+        if fore_thread != app_thread:
+            user32.AttachThreadInput(fore_thread, app_thread, True)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            user32.AttachThreadInput(fore_thread, app_thread, False)
+        else:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
+
+
 class WindowManager:
     """Manages application windows (list, focus, move, resize, close)."""
 
@@ -57,31 +85,36 @@ class WindowManager:
         return windows
 
     def focus_window(self, handle: Optional[str] = None, title_regex: Optional[str] = None) -> ActionResult:
-        """Brings a window to the foreground by handle or title regex."""
+        """Brings a window to the foreground by handle or title regex (§6, §7)."""
         target_win = None
 
-        if sys.platform == "win32" and gw:
-            try:
-                all_wins = gw.getAllWindows()
-                if handle:
-                    for w in all_wins:
-                        if str(w._hWnd) == str(handle):
-                            target_win = w
-                            break
-                elif title_regex:
-                    pat = re.compile(title_regex, re.IGNORECASE)
-                    for w in all_wins:
-                        if pat.search(w.title):
-                            target_win = w
-                            break
+        if sys.platform == "win32":
+            if handle and str(handle).isdigit():
+                # Direct hwnd activation
+                ok = _activate_hwnd_win32(int(handle))
+                if ok:
+                    return ActionResult(ok=True, action="window_focus", data={"handle": str(handle)})
 
-                if target_win:
-                    if target_win.isMinimized:
-                        target_win.restore()
-                    target_win.activate()
-                    return ActionResult(ok=True, action="window_focus", data={"handle": str(target_win._hWnd), "title": target_win.title})
-            except Exception as e:
-                return ActionResult(ok=False, action="window_focus", detail=str(e))
+            if gw:
+                try:
+                    all_wins = gw.getAllWindows()
+                    if handle:
+                        for w in all_wins:
+                            if str(w._hWnd) == str(handle):
+                                target_win = w
+                                break
+                    elif title_regex:
+                        pat = re.compile(title_regex, re.IGNORECASE)
+                        for w in all_wins:
+                            if pat.search(w.title):
+                                target_win = w
+                                break
+
+                    if target_win:
+                        _activate_hwnd_win32(int(target_win._hWnd))
+                        return ActionResult(ok=True, action="window_focus", data={"handle": str(target_win._hWnd), "title": target_win.title})
+                except Exception as e:
+                    return ActionResult(ok=False, action="window_focus", detail=str(e))
 
         elif sys.platform == "linux":
             import subprocess

@@ -42,7 +42,18 @@ class KratosBridge:
         visual_context: Optional[str] = None,
         force: bool = False,
     ) -> Dict[str, Any]:
-        """Submits an autonomous engineering task to Kratos runtime."""
+        """Submits an autonomous engineering task to Kratos runtime with echo & duplicate protection (§27, §30)."""
+        from kratos_agent.live.echo_guard import get_echo_guard
+        from kratos_agent.core.task_deduplicator import get_task_deduplicator
+
+        if get_echo_guard().should_suppress_mic():
+            logger.info(f"[LiveBridge] Suppressed echo task: {task_description}")
+            return {"status": "echo_suppressed", "message": "Ignored microphone input during or right after TTS playback."}
+
+        if get_task_deduplicator().is_duplicate(task_description):
+            logger.info(f"[LiveBridge] Suppressed duplicate task: {task_description}")
+            return {"status": "duplicate_suppressed", "message": "Duplicate task received within 3s window."}
+
         with self._lock:
             if self.active_task_id is not None and not force:
                 logger.info("[GEMINI] Task rejected — Kratos is busy")

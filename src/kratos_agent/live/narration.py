@@ -75,28 +75,12 @@ class NarrationManager:
         narrative: Optional[str] = None
         is_priority = False
 
-        if kind in ("understanding.started", "planning.started"):
-            narrative = "I'm inspecting the relevant files and planning the changes."
-        elif kind == "task.started":
+        if kind == "task.started":
             title = payload.get("title", "")
             if title:
                 narrative = f"Starting task: {title[:50]}."
             else:
                 narrative = "Executing the next planned task."
-        elif kind == "tool.started":
-            tool_name = payload.get("name", "")
-            if tool_name in ("read_file", "grep_search", "list_dir", "find_by_name"):
-                narrative = "I'm inspecting the relevant files."
-            elif tool_name in ("edit_file", "write_file", "replace_file"):
-                narrative = "Applying the code modifications now."
-            elif tool_name in ("run_terminal_command", "execute_command"):
-                cmd = str(payload.get("arguments", {}).get("command", ""))
-                if any(w in cmd.lower() for w in ("test", "pytest", "npm test", "cargo test")):
-                    narrative = "Running the test suite to verify."
-                else:
-                    narrative = "Running verification commands."
-        elif kind == "verification.started":
-            narrative = "Running verification checks."
         elif kind == "verification.completed":
             passed = payload.get("passed", True)
             narrative = "Verification passed successfully." if passed else "Verification showed remaining issues."

@@ -118,6 +118,7 @@ TONE:
 - Confident, concise, natural spoken language
 - Never expose JSON, internal state, or chain-of-thought
 - Respond in the same language the user speaks
+- NEVER say "Is there anything else you would like me to help you with?" or ask follow-up questions after confirming a task (§33, §35). State what happened concisely and wait silently.
 """
 
 
@@ -256,6 +257,7 @@ class LiveSession:
         logger.warning(f"[GEMINI] Refusal intercepted: '{refusal_text[:80]}...'")
         logger.info(f"[GEMINI] Auto-routing user request to Kratos Brain: '{last_user_text[:80]}'")
         print(f"\n⚡ [GEMINI] Refusal intercepted — routing to Kratos Brain...", flush=True)
+        self._last_user_transcript = ""
 
         # Submit the original user request to Kratos via the existing bridge
         try:
@@ -300,6 +302,7 @@ class LiveSession:
                             logger.info(f"[GEMINI] Tool call: {call.name}")
                             if call.name in ("start_agent_task", "kratos_task"):
                                 self._task_started_in_turn = True
+                                self._last_user_transcript = ""  # Cleared on tool invocation
                             res = await self.router.handle_tool_call(call.name, call.args or {})
                             # Send tool response back to Gemini
                             fn_resp = types.FunctionResponse(
@@ -325,6 +328,8 @@ class LiveSession:
                         logger.info("[LiveSession] Interruption detected. Clearing audio queue.")
                         self.audio_manager.handle_interruption()
                         self._output_transcript_buffer = ""
+                        from kratos_agent.live.echo_guard import get_echo_guard
+                        get_echo_guard().stop_speaking()
                         if self.status_hub:
                             self.status_hub.update(current_state=LiveState.LISTENING)
 
@@ -336,6 +341,8 @@ class LiveSession:
                         for part in model_turn.parts:
                             inline = getattr(part, "inline_data", None)
                             if inline and inline.data:
+                                from kratos_agent.live.echo_guard import get_echo_guard
+                                get_echo_guard().start_speaking()
                                 try:
                                     self.audio_manager.audio_in_queue.put_nowait(inline.data)
                                 except asyncio.QueueFull:
@@ -401,6 +408,9 @@ class LiveSession:
 
                     # Check Turn Completion
                     if getattr(server_content, "turn_complete", False):
+                        from kratos_agent.live.echo_guard import get_echo_guard
+                        get_echo_guard().stop_speaking()
+
                         if self._turn_complete_event is not None:
                             self._turn_complete_event.set()
 
@@ -427,6 +437,7 @@ class LiveSession:
                             # auto-dispatch to Kratos Brain so the user's task is never dropped!
                             last_req = getattr(self, "_last_user_transcript", "").strip()
                             if last_req and self._is_action_request(last_req):
+                                self._last_user_transcript = ""  # Clear so it is never re-dispatched!
                                 logger.info(f"[GEMINI] Action detected without tool call. Auto-dispatching task: '{last_req[:80]}'")
                                 asyncio.ensure_future(self.router.handle_tool_call("start_agent_task", {"task_description": last_req}))
 
