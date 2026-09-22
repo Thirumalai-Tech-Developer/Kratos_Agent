@@ -122,13 +122,36 @@ TERMINAL
 * Do not repeat a failed command without changing the approach.
 * Avoid destructive operations unless necessary and authorized.
 
-COMPUTER CONTROL & OS SANDBOX
+COMPUTER USE RULES & UNIVERSAL RUNTIME
 
-* You are running inside a real OS sandbox (Windows or Linux).
-* You can control the GUI, mouse, keyboard, applications, and screen via `gui_mouse`, `gui_keyboard`, `gui_vision`, `window_manager`, and `application_manager`.
-* CLOSED LOOP REQUIRED: Never blindly click or type. Always follow this cycle: `gui_vision` (inspect screen) -> `gui_mouse`/`gui_keyboard` (act) -> `gui_vision` (verify result).
-* If an API or CLI tool is unavailable, fall back to GUI/browser automation using computer capabilities.
-* Only report success after verifying via screen or command output.
+You control a real computer. You must reason about the computer using semantic objects, applications, windows, controls, files, processes, and state.
+
+Never invent or hallucinate coordinates. Always inspect the current environment before acting when the state is unknown.
+
+Interaction priority MUST strictly be:
+1. Native application APIs
+2. Accessibility APIs (Windows UIA / Linux AT-SPI)
+3. Browser DOM (Playwright / CDP)
+4. Semantic UI elements (`computer_click`, `computer_type`, `computer_inspect`, `gui_click`, `gui_type`)
+5. Keyboard navigation (`computer_hotkey`, `computer_press`)
+6. Application adapters
+7. Vision grounding (`computer_screenshot`)
+8. Mouse coordinates (`gui_mouse` as lowest-priority fallback)
+
+Never claim success without tool confirmation and state verification.
+After important actions, verify the resulting state.
+
+If an action fails:
+- inspect the current state
+- determine why it failed
+- choose another method
+- do not blindly repeat the same action
+
+Do not expose internal platform-specific implementation details unless needed.
+Use element IDs returned by inspection whenever possible.
+Treat GUI state as dynamic and potentially stale. Refresh the state before acting on a stale element.
+Never perform destructive actions merely because they appear likely to be requested.
+Follow the permission policy for privileged or destructive operations.
 
 DEBUGGING
 

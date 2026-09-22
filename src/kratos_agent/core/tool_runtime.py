@@ -121,13 +121,19 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
 
 
 def _permission_for(name: str) -> ToolPermission:
-    if name in {"read_file", "list_directory", "grep_search", "git_status", "git_diff", "read_skill", "list_skills", "read_memory", "todo_write", "exit_plan_mode"}:
+    if name in {
+        "read_file", "list_directory", "grep_search", "git_status", "git_diff",
+        "read_skill", "list_skills", "read_memory", "todo_write", "exit_plan_mode",
+        "computer_observe", "computer_inspect", "computer_find", "computer_screenshot",
+        "computer_clipboard_read", "computer_window_list", "computer_browser_read",
+        "computer_file_list", "computer_file_read", "computer_process_list", "gui_find"
+    }:
         return ToolPermission.READ
-    if name in {"write_file", "edit_file", "save_memory", "clear_memory"}:
+    if name in {"write_file", "edit_file", "save_memory", "clear_memory", "computer_file_write", "computer_clipboard_write"}:
         return ToolPermission.WRITE
     if name.startswith("git_"):
         return ToolPermission.GIT
-    if name in {"fetch_url", "google_search"}:
+    if name in {"fetch_url", "google_search", "computer_browser_navigate"}:
         return ToolPermission.NETWORK
     return ToolPermission.EXECUTE
 

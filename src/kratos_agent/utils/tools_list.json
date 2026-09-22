@@ -3223,6 +3223,548 @@
                     "handle"
                 ]
             }
+        },
+        {
+            "name": "computer_observe",
+            "description": "Captures a complete, compact observation of the computer environment (windows, apps, interactive controls).",
+            "func_name": "computer_observe",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_interactive": {
+                        "type": "boolean",
+                        "description": "Whether to gather interactive GUI controls (default true)"
+                    },
+                    "max_elements": {
+                        "type": "integer",
+                        "description": "Maximum number of interactive controls to return (default 100)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_inspect",
+            "description": "Inspects the current UI to find controls matching semantic criteria without acting on them.",
+            "func_name": "computer_inspect",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text, name, or label to search for"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "UI role (e.g. 'button', 'edit', 'link')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_find",
+            "description": "Finds a specific UI control by label, text, or accessibility name.",
+            "func_name": "computer_find",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text, name, or label to search for"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "UI role (e.g. 'button', 'edit', 'link')"
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "computer_click",
+            "description": "Clicks a semantic UI element (button, link, tab, checkbox) by name or role without needing coordinates.",
+            "func_name": "computer_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Accessible name or label of the control"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role (button, checkbox, link, tab)"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Element ID from a previous inspection"
+                    },
+                    "button": {
+                        "type": "string",
+                        "description": "Mouse button: 'left', 'right', 'middle' (default 'left')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_type",
+            "description": "Enters text into an input field, textbox, or active editor.",
+            "func_name": "computer_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Target input field name or placeholder"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Target role (e.g. 'edit', 'textbox')"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Target element ID"
+                    }
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "computer_press",
+            "description": "Presses a single key (e.g. 'enter', 'escape', 'tab', 'backspace').",
+            "func_name": "computer_press",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Key to press"
+                    }
+                },
+                "required": ["key"]
+            }
+        },
+        {
+            "name": "computer_hotkey",
+            "description": "Executes a keyboard hotkey combination (e.g. 'ctrl+s', 'alt+tab', 'ctrl+shift+p').",
+            "func_name": "computer_hotkey",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "Key combination separated by '+' (e.g. 'ctrl+c')"
+                    }
+                },
+                "required": ["keys"]
+            }
+        },
+        {
+            "name": "computer_scroll",
+            "description": "Scrolls vertically (dy) or horizontally (dx). Positive dy scrolls up, negative scrolls down.",
+            "func_name": "computer_scroll",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dy": {
+                        "type": "integer",
+                        "description": "Vertical scroll amount"
+                    },
+                    "dx": {
+                        "type": "integer",
+                        "description": "Horizontal scroll amount"
+                    }
+                },
+                "required": ["dy"]
+            }
+        },
+        {
+            "name": "computer_focus",
+            "description": "Brings a window into focus by title or handle.",
+            "func_name": "computer_focus",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window_title": {
+                        "type": "string",
+                        "description": "Title or title regex of the window to focus"
+                    },
+                    "window_id": {
+                        "type": "string",
+                        "description": "Window handle/ID"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_launch",
+            "description": "Launches an application, executable, or URI.",
+            "func_name": "computer_launch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Executable name, command, or file path (e.g. 'notepad', 'calc', 'chrome')"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional command line arguments"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "computer_close",
+            "description": "Closes an open window.",
+            "func_name": "computer_close",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window_id": {
+                        "type": "string",
+                        "description": "Window handle/ID"
+                    },
+                    "window_title": {
+                        "type": "string",
+                        "description": "Window title"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_window_list",
+            "description": "Lists all open windows with their titles and IDs.",
+            "func_name": "computer_window_list",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "computer_window_focus",
+            "description": "Focuses a window by title or handle.",
+            "func_name": "computer_window_focus",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Window title or handle"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "computer_screenshot",
+            "description": "Captures a screenshot of the display.",
+            "func_name": "computer_screenshot",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "computer_clipboard_read",
+            "description": "Reads current text from the clipboard.",
+            "func_name": "computer_clipboard_read",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "computer_clipboard_write",
+            "description": "Copies text to the clipboard.",
+            "func_name": "computer_clipboard_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to write to clipboard"
+                    }
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "computer_browser_navigate",
+            "description": "Navigates the browser: goto URL, reload, back, or forward.",
+            "func_name": "computer_browser_navigate",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to navigate to"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Navigation action: 'goto', 'reload', 'back', 'forward' (default 'goto')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_read",
+            "description": "Reads visible text or HTML content from the browser page.",
+            "func_name": "computer_browser_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "Optional CSS selector to read"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Read mode: 'text' or 'html' (default 'text')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_click",
+            "description": "Clicks a web element semantically by role/name or CSS selector.",
+            "func_name": "computer_browser_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Role (e.g. 'button', 'link')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Element text or label"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_type",
+            "description": "Types text into an input or textarea on the active web page.",
+            "func_name": "computer_browser_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Role (e.g. 'textbox')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Input name or placeholder"
+                    }
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "computer_file_list",
+            "description": "Lists files and folders with size and modification timestamp.",
+            "func_name": "computer_file_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to inspect (default '.')"
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to list recursively"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_file_read",
+            "description": "Reads text content from a file.",
+            "func_name": "computer_file_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file"
+                    }
+                },
+                "required": ["path"]
+            }
+        },
+        {
+            "name": "computer_file_write",
+            "description": "Writes text content to a file.",
+            "func_name": "computer_file_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text content"
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        },
+        {
+            "name": "computer_file_move",
+            "description": "Moves or renames a file or directory.",
+            "func_name": "computer_file_move",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "Source path"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "Destination path"
+                    }
+                },
+                "required": ["src", "dst"]
+            }
+        },
+        {
+            "name": "computer_file_copy",
+            "description": "Copies a file or directory.",
+            "func_name": "computer_file_copy",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "Source path"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "Destination path"
+                    }
+                },
+                "required": ["src", "dst"]
+            }
+        },
+        {
+            "name": "computer_file_delete",
+            "description": "Deletes a file or directory.",
+            "func_name": "computer_file_delete",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to delete"
+                    }
+                },
+                "required": ["path"]
+            }
+        },
+        {
+            "name": "computer_process_list",
+            "description": "Lists running processes with CPU and memory usage.",
+            "func_name": "computer_process_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional name filter"
+                    }
+                }
+            }
+        },
+        {
+            "name": "gui_find",
+            "description": "Finds a UI element matching query and/or role.",
+            "func_name": "gui_find",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Element name or label"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "gui_click",
+            "description": "Clicks a UI element semantically.",
+            "func_name": "gui_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Control name"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    },
+                    "element_id": {
+                        "type": "string",
+                        "description": "Element ID"
+                    }
+                }
+            }
+        },
+        {
+            "name": "gui_type",
+            "description": "Types text into a UI element semantically.",
+            "func_name": "gui_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Control name"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    },
+                    "element_id": {
+                        "type": "string",
+                        "description": "Element ID"
+                    }
+                },
+                "required": ["text"]
+            }
         }
     ]
-}
+}
