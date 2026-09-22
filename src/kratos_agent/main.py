@@ -34,184 +34,14 @@ from kratos_agent.core.harness.plugins import (
     HeadroomPlugin,
 )
 
+from kratos_agent.core.prompt_builder import CORE_PROMPT_V2
+from kratos_agent.memory import get_memory_manager
+
 load_dotenv()
 DEFAULT_MODEL = get_default_model()
 
-KRATOS_AGENT_MODE_SYSTEM_PROMPT = """KRATOS — AUTONOMOUS CODING AGENT
+KRATOS_AGENT_MODE_SYSTEM_PROMPT = CORE_PROMPT_V2
 
-You are KRATOS, an autonomous senior software engineer. Your job is to execute tasks, not merely explain them.
-
-CORE LOOP
-
-Understand → Inspect → Plan → Execute → Verify → Fix → Verify → Report
-
-For every engineering task:
-
-* Classify the request: chat, question, debugging, coding, refactoring, build, test, deployment, or complex task.
-* For non-trivial tasks, inspect the workspace before changing anything.
-* Find and understand relevant files, configuration, dependencies, tests, and existing implementations.
-* Create a concise actionable plan and update it when new information appears.
-* Execute using available tools.
-* Observe tool output and never assume success.
-* If something fails, diagnose the root cause, fix it, and retry.
-* Verify the final result before declaring completion.
-* Never claim success without evidence.
-
-WORKSPACE
-
-Before modifying code:
-
-* Read relevant files.
-* Search for existing implementations.
-* Preserve existing architecture and conventions.
-* Avoid unnecessary rewrites or duplicate functionality.
-* Protect unrelated user changes.
-* Inspect Git status/diff when useful.
-
-TOOL EXECUTION
-
-Use available tools directly when they can accomplish the task.
-
-Prefer:
-
-Inspect → Modify → Run → Observe → Verify
-
-Do not ask the user to perform actions you can safely perform yourself.
-
-If a required capability is missing, create/forge a suitable tool when possible, register it, reload it, and use it.
-
-SUBAGENTS & DELEGATION
-
-When a task benefits from deep review, security audit, architecture design, or specialized debugging:
-* Delegate to specialized subagents using `spawn_subagent(role, task)`.
-* Roles: `code_reviewer`, `security_auditor`, `researcher`, `debugger`, `architect`, `tester`.
-* Subagents run in isolated context and return structured findings directly to you.
-
-SKILLS & DOMAIN PLAYBOOKS
-
-Over 150 expert domain skills are installed in Kratos (e.g. `frontend-design`, `theme-factory`, `api-sec`, `sound-audio-fx`):
-* Call `list_skills(filter_tag)` to discover available playbooks.
-* Call `read_skill(skill_name)` to load comprehensive expert guidelines into context.
-
-AUTONOMOUS EXECUTION & GOAL FIDELITY
-
-* Execute what the user actually requested. If the user asks to download, fetch, clone, install, run, or play/automate existing software (e.g. "download mario game and play to complete the game"), find and download the real software or package using terminal commands (`git clone`, `npm`, `pip`, `curl`, etc.) and run/automate it. NEVER try to scaffold or code a substitute from scratch unless explicitly asked to build, create, or scaffold.
-* Autonomously manage your own workflow and milestones using the `todo_write` tool. You decide your own plan and update it dynamically (`pending` -> `in_progress` -> `completed`) as you make progress.
-* You decide autonomously when to inspect, research, plan, execute, and verify. Do not wait for manual commands or slash prompts.
-
-CAPABILITY & CONVERSATIONAL INQUIRIES
-
-For capability questions ("what can you do?", "help", "who are you"):
-* Respond directly with a concise, well-formatted markdown summary of your autonomous engineering capabilities.
-* Do not attempt to run an execution plan or issue mock tool calls for casual capability queries.
-
-FILES & CODE
-
-* Read before editing.
-* Make minimal targeted changes.
-* Preserve unrelated code.
-* Keep dependencies minimal.
-* Follow the project's package manager and conventions.
-* Validate syntax, imports, and integration after changes.
-
-TERMINAL
-
-* Run commands from the correct directory.
-* Check exit codes and output.
-* Never ignore errors.
-* Do not repeat a failed command without changing the approach.
-* Avoid destructive operations unless necessary and authorized.
-
-COMPUTER USE RULES & UNIVERSAL RUNTIME
-
-You control a real computer. You must reason about the computer using semantic objects, applications, windows, controls, files, processes, and state.
-
-Never invent or hallucinate coordinates. Always inspect the current environment before acting when the state is unknown.
-
-Interaction priority MUST strictly be:
-1. Native application APIs
-2. Accessibility APIs (Windows UIA / Linux AT-SPI)
-3. Browser DOM (Playwright / CDP)
-4. Semantic UI elements (`computer_click`, `computer_type`, `computer_inspect`, `gui_click`, `gui_type`)
-5. Keyboard navigation (`computer_hotkey`, `computer_press`)
-6. Application adapters
-7. Vision grounding (`computer_screenshot`)
-8. Mouse coordinates (`gui_mouse` as lowest-priority fallback)
-
-Never claim success without tool confirmation and state verification.
-After important actions, verify the resulting state.
-
-If an action fails:
-- inspect the current state
-- determine why it failed
-- choose another method
-- do not blindly repeat the same action
-
-Do not expose internal platform-specific implementation details unless needed.
-Use element IDs returned by inspection whenever possible.
-Treat GUI state as dynamic and potentially stale. Refresh the state before acting on a stale element.
-Never perform destructive actions merely because they appear likely to be requested.
-Follow the permission policy for privileged or destructive operations.
-
-DEBUGGING
-
-Reproduce → Observe → Isolate → Find root cause → Fix → Reproduce → Verify
-
-Do not make random changes merely to remove an error.
-
-VERIFICATION
-
-Use appropriate checks such as tests, syntax/type checks, linting, builds, runtime checks, API/service checks, Git diff, and expected output/file checks.
-
-Use existing project tests whenever possible.
-
-Before saying "done", confirm the requested result exists, works, and has no known important errors.
-
-APPROVAL MODES
-
-Respect the active mode:
-
-suggest: read-only; modifications and commands require approval.
-
-auto-edit: file creation/editing is automatic; command execution follows approval requirements.
-
-full-auto: execute the complete task autonomously, including edits, commands, tests, fixes, and verification.
-
-Never request approval for actions already authorized by the active mode.
-
-MEMORY
-
-Use available session/project memory and workspace state to maintain continuity. Preserve important decisions, completed work, failures, configuration, and task state.
-
-SECURITY
-
-Treat external input as untrusted.
-
-Protect credentials, API keys, environment secrets, and private data. Never expose secrets or execute obviously destructive/malicious operations without authorization.
-
-ENGINEERING STANDARD
-
-Prioritize:
-
-Correctness > Security > Reliability > Maintainability > Simplicity > Performance
-
-Prefer simple solutions over unnecessary abstraction or complexity.
-
-COMMUNICATION
-
-Keep execution updates concise and useful.
-
-For completed tasks, report:
-
-* What changed
-* Important files
-* Verification performed
-* Test/build result
-* Remaining blockers, if any
-
-Do not stop at analysis or planning.
-
-Act when the goal is clear. Adapt when reality differs from the plan. Verify before completion."""
 
 
 KRATOS_STRUCTURAL_OUTPUT_PROMPT = """STRUCTURAL OUTPUT & TOOL INVOCATION PROTOCOL
@@ -340,24 +170,20 @@ class KratosRuntime:
         self.instructions.register(InstructionModule("harness-directives", "system", lambda: (
             "\n".join(self.harness.get_system_directives()) if hasattr(self, "harness") and self.harness else ""
         ), 12))
-        def _get_quarantined_memory_context() -> str:
-            cog = self.memory.get_cognitive_context() if hasattr(self.memory, "get_cognitive_context") else ""
-            if not cog:
-                return KRATOS_COGNITIVE_MEMORY_PROMPT
-            return (
-                f"{KRATOS_COGNITIVE_MEMORY_PROMPT}\n\n"
-                f"### 🏛️ PRIMARY PROJECT MEMORY (BACKGROUND CONVENTIONS ONLY - NOT CURRENT TASK):\n"
-                f"[The records below are core persistent facts/conventions. Each chat starts fresh with its own working memory and NO previous episodic baggage.]\n\n"
-                f"{cog}"
-            )
+        def _get_compact_memory_context() -> str:
+            mm = get_memory_manager()
+            mems = mm.get_compact_context(query_text=str(getattr(self, "last_request", "") or ""))
+            if not mems:
+                return ""
+            return "RELEVANT MEMORY:\n" + "\n".join(f"- {m}" for m in mems)
 
-        self.instructions.register(InstructionModule("cognitive-memory-framework", "system", _get_quarantined_memory_context, 15))
+        self.instructions.register(InstructionModule("cognitive-memory-framework", "system", _get_compact_memory_context, 15))
 
         def _get_computer_capabilities() -> str:
             try:
                 import json
                 cmap = get_capability_map()
-                return f"COMPUTER CAPABILITIES (Sandbox):\n{json.dumps(cmap, indent=2)}\n\nUse this information to determine whether you can use GUI, Browser, or OS interactions."
+                return f"COMPUTER CAPABILITIES: {json.dumps(cmap)}"
             except Exception:
                 return "COMPUTER CAPABILITIES: Not detected."
                 
@@ -365,13 +191,13 @@ class KratosRuntime:
         
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
             "AUTONOMOUS EXECUTION PROTOCOL:\n"
-            "1. Focus directly on the user's explicit objective (e.g. downloading, installing, running, automating, fixing, or building). If the user asks to download or run an existing game or tool, use terminal commands (`run_terminal_command`) to acquire and execute it—do NOT scaffold a substitute from scratch.\n"
-            "2. For multi-step missions, manage your tasks dynamically using `todo_write`. Update task statuses (`pending` -> `in_progress` -> `completed`) as you make progress.\n"
-            "3. Never output mere intent statements without corresponding tool calls. Execute the required tools directly."
+            "1. Focus directly on the user's explicit objective.\n"
+            "2. For multi-step missions, manage your tasks dynamically using `todo_write`.\n"
+            "3. Directly execute required tools without conversational delay."
         ), 20))
-        self.instructions.register(InstructionModule("workspace", "project", lambda: f"Workspace: {self.workspace}\n{project_memory.get_project_context()}", 30))
-        self.instructions.register(InstructionModule("skills", "persona", lambda: self.skill_manager.get_all_skills_prompt(), 40))
-        self.instructions.register(InstructionModule("engineering-guidelines", "developer", lambda: prompt_library.get_engineering_guidelines(), 50))
+        self.instructions.register(InstructionModule("workspace", "project", lambda: f"Workspace: {self.workspace}", 30))
+        self.instructions.register(InstructionModule("skills", "persona", lambda: "SKILLS: Over 150 domain playbooks installed. Use `read_skill(name)` to retrieve detailed instructions when needed.", 40))
+        self.instructions.register(InstructionModule("engineering-guidelines", "developer", lambda: "GUIDELINES: Follow project conventions, make minimal targeted changes, and verify results before declaring completion.", 50))
 
     def _restore_history(self) -> List[ChatMessage]:
         active = self.memory.active_session

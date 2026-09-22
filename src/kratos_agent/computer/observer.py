@@ -11,43 +11,66 @@ from kratos_agent.computer.apps.focus import get_active_window
 from kratos_agent.computer.apps.processes import get_process_manager
 from kratos_agent.computer.filesystem.clipboard import get_clipboard_engine
 from kratos_agent.computer.browser.manager import get_browser_manager
+from kratos_agent.computer.state_cache import get_state_cache, StateCache
 
 
 class ComputerObserver:
-    """Continuously observes the computer environment and builds compact states."""
+    """Continuously observes the computer environment and builds compact states with state caching."""
 
     def __init__(self) -> None:
         self._generation: int = 1
         self._last_state: Optional[ComputerState] = None
+        self._state_cache: StateCache = get_state_cache()
 
     def observe(
         self,
         include_interactive: bool = True,
         max_elements: int = 150,
+        force_refresh: bool = False,
+        targeted_query: Optional[str] = None,
     ) -> ComputerState:
         """Captures a complete, compact observation of the computer environment."""
         start = time.time()
-        self._generation += 1
 
-        # 1. OS & Window State
+        # 1. OS & Window State (fast: ~5ms)
         os_platform = platform.system().lower()
         active_win = get_active_window()
         active_dict = active_win.to_dict() if active_win else None
         all_windows = [w.to_dict() for w in get_window_manager().list_windows()]
 
-        # 2. Running Applications (filtered to GUI apps / processes)
+        # 2. Browser State (fast: ~2ms)
+        browser_st = get_browser_manager().get_state()
+        browser_url = browser_st.get("url")
+
+        # 3. Check quick hash against StateCache to eliminate redundant inspections
+        active_title = (active_dict or {}).get("title", "")
+        quick_hash = self._state_cache.compute_quick_hash(
+            active_window_title=active_title,
+            window_count=len(all_windows),
+            browser_url=browser_url,
+        )
+
+        if not force_refresh and not targeted_query and self._state_cache.is_valid(quick_hash):
+            cached = self._state_cache.last_state
+            if cached is not None:
+                self._state_cache.cache_hits += 1
+                return cached
+
+        self._generation += 1
+
+        # 4. Running Applications (filtered to GUI apps / processes)
         apps = get_process_manager().list_processes(limit=30)
 
-        # 3. Clipboard (first 200 chars)
+        # 5. Clipboard (first 200 chars)
         clip_text = get_clipboard_engine().read()
 
-        # 4. Browser State
-        browser_st = get_browser_manager().get_state()
-
-        # 5. Interactive Elements (from A11y or DOM)
+        # 6. Interactive Elements (from A11y or DOM)
         interactive_elements: List[Dict[str, Any]] = []
         if include_interactive:
-            interactive_elements = self._gather_interactive_elements(max_elements=max_elements)
+            interactive_elements = self._gather_interactive_elements(
+                max_elements=max_elements,
+                targeted_query=targeted_query,
+            )
 
         state = ComputerState(
             platform=os_platform,
@@ -65,9 +88,19 @@ class ComputerObserver:
             timestamp=start,
         )
         self._last_state = state
+        self._state_cache.last_state = state
+        self._state_cache.last_observation_time = time.time()
+        self._state_cache.ui_tree_hash = quick_hash
+        self._state_cache.generation = self._generation
+        self._state_cache.active_window = active_dict
+        self._state_cache.cache_misses += 1
         return state
 
-    def _gather_interactive_elements(self, max_elements: int = 150) -> List[Dict[str, Any]]:
+    def _gather_interactive_elements(
+        self,
+        max_elements: int = 150,
+        targeted_query: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Gathers interactive elements from available backends (A11y or DOM)."""
         elements: List[Dict[str, Any]] = []
 
@@ -77,7 +110,10 @@ class ComputerObserver:
             from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
             pb = PlaywrightBackend()
             if pb.is_available():
-                dom_elems = pb.dump_tree(max_nodes=max_elements)
+                if targeted_query:
+                    dom_elems = pb.find_elements(query=targeted_query, limit=max_elements)
+                else:
+                    dom_elems = pb.dump_tree(max_nodes=max_elements)
                 elements.extend([e.to_dict() for e in dom_elems])
                 if len(elements) >= max_elements:
                     return elements[:max_elements]
@@ -87,7 +123,10 @@ class ComputerObserver:
             from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
             uia = WindowsUIABackend()
             if uia.is_available():
-                uia_elems = uia.dump_tree(max_nodes=max_elements - len(elements))
+                if targeted_query:
+                    uia_elems = uia.find_elements(query=targeted_query, limit=max_elements - len(elements))
+                else:
+                    uia_elems = uia.dump_tree(max_nodes=max_elements - len(elements))
                 elements.extend([e.to_dict() for e in uia_elems])
 
         return elements[:max_elements]

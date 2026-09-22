@@ -61,11 +61,25 @@ def detect_content_type(text: str) -> str:
     return "text"
 
 
+CONTEXT_BUDGET: Dict[str, int] = {
+    "system": 2500,
+    "memory": 1200,
+    "state": 2000,
+    "tools": 2500,
+    "conversation": 4000,
+}
+
+
 @dataclass
 class ContextBudget:
     max_input_tokens: int = 100_000
     reserve_output_tokens: int = 8_000
     max_tool_result_chars: int = 12_000
+    system_tokens: int = 2500
+    memory_tokens: int = 1200
+    state_tokens: int = 2000
+    tools_tokens: int = 2500
+    conversation_tokens: int = 4000
 
 
 class ContextBuilder:

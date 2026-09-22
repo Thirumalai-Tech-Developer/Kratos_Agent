@@ -21,6 +21,37 @@ class RegisteredTool:
     handler: Callable[..., str]
 
 
+from enum import Enum
+
+
+class ToolCategory(str, Enum):
+    GENERAL = "GENERAL"
+    CODE = "CODE"
+    BROWSER = "BROWSER"
+    COMPUTER = "COMPUTER"
+    FILES = "FILES"
+    SYSTEM = "SYSTEM"
+    MEMORY = "MEMORY"
+
+
+def categorize_tool(name: str) -> ToolCategory:
+    """Classifies a tool into one of the 7 core categories."""
+    n = name.lower()
+    if any(k in n for k in ("browser", "playwright", "fetch_url", "google_search", "web_")):
+        return ToolCategory.BROWSER
+    if any(k in n for k in ("gui_", "mouse_", "window_", "computer_click", "computer_type", "computer_press", "computer_find", "computer_observe", "computer_inspect", "computer_launch_app")):
+        return ToolCategory.COMPUTER
+    if any(k in n for k in ("file", "directory", "grep", "read_file", "write_file", "edit_file")):
+        return ToolCategory.FILES
+    if any(k in n for k in ("terminal", "command", "git_", "test", "pytest", "code", "python", "compile")):
+        return ToolCategory.CODE
+    if any(k in n for k in ("memory", "recall", "remember", "workflow")):
+        return ToolCategory.MEMORY
+    if any(k in n for k in ("process", "clipboard", "system", "device", "audio", "camera")):
+        return ToolCategory.SYSTEM
+    return ToolCategory.GENERAL
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: Dict[str, RegisteredTool] = {}
@@ -28,7 +59,46 @@ class ToolRegistry:
     def register(self, spec: ToolSpec, handler: Callable[..., str]) -> None:
         self._tools[spec.name] = RegisteredTool(spec=spec, handler=handler)
 
-    def schemas(self) -> List[Dict[str, Any]]:
+    def get_tools(self, context: Optional[Any] = None, categories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Dynamically loads and returns only relevant tool schemas for the given context."""
+        selected_cats = set()
+        if categories:
+            selected_cats.update(c.upper() for c in categories)
+
+        if context:
+            ctx_str = str(context).lower()
+            if any(w in ctx_str for w in ("browser", "chrome", "web", "url", "navigate", "youtube")):
+                selected_cats.add(ToolCategory.BROWSER.value)
+                selected_cats.add(ToolCategory.COMPUTER.value)
+            if any(w in ctx_str for w in ("click", "type", "press", "window", "gui", "desktop", "app", "button")):
+                selected_cats.add(ToolCategory.COMPUTER.value)
+                selected_cats.add(ToolCategory.SYSTEM.value)
+            if any(w in ctx_str for w in ("file", "read", "write", "edit", "directory", "grep")):
+                selected_cats.add(ToolCategory.FILES.value)
+                selected_cats.add(ToolCategory.CODE.value)
+            if any(w in ctx_str for w in ("terminal", "command", "git", "run", "test", "pytest")):
+                selected_cats.add(ToolCategory.CODE.value)
+                selected_cats.add(ToolCategory.FILES.value)
+                selected_cats.add(ToolCategory.SYSTEM.value)
+            if any(w in ctx_str for w in ("memory", "recall", "remember", "preference", "workflow")):
+                selected_cats.add(ToolCategory.MEMORY.value)
+
+        # Always include GENERAL category
+        selected_cats.add(ToolCategory.GENERAL.value)
+
+        results = []
+        for item in self._tools.values():
+            cat = categorize_tool(item.spec.name).value
+            if not categories and not context:
+                # No filter provided, return all
+                results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
+            elif cat in selected_cats:
+                results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
+        return results
+
+    def schemas(self, categories: Optional[List[str]] = None, context: Optional[Any] = None) -> List[Dict[str, Any]]:
+        if categories or context:
+            return self.get_tools(context=context, categories=categories)
         return [
             {"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source}
             for item in self._tools.values()

@@ -30,6 +30,17 @@ from .runtime_contracts import (
 from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
+from kratos_agent.performance.router import get_request_router, RequestCategory
+from kratos_agent.performance.profiler import get_active_profiler, reset_active_profiler
+from kratos_agent.core.structured_action import (
+    AgentAction,
+    TaskResult,
+    TaskStatus,
+    ActionStateMachine,
+    ActionState,
+    CachedPlan,
+)
+
 
 
 # Tools that are read-only and have zero side effects on filesystem or workspace state.
@@ -576,6 +587,9 @@ class AgentLoop:
         self.workspace_tracker.reset()
         self.last_verification = None
 
+        profiler = reset_active_profiler()
+        router = get_request_router()
+
         # 1. Identify User Prompt & Intent
         user_query = ""
         for m in reversed(history):
@@ -583,8 +597,14 @@ class AgentLoop:
                 user_query = m.content
                 break
 
+        with profiler.measure("route"):
+            route_decision = router.classify(user_query, history)
+
         is_continue = user_query.strip().lower() in ("continue", "resume", "/continue")
-        intent = IntentKind.CODING_TASK if is_continue else classify_intent(user_query, history)
+        if route_decision.is_fast_path and not route_decision.requires_planning:
+            intent = IntentKind.CHAT if route_decision.category in (RequestCategory.CHAT, RequestCategory.CODE, RequestCategory.TOOL) else IntentKind.QUESTION
+        else:
+            intent = IntentKind.CODING_TASK if is_continue else classify_intent(user_query, history)
 
         # Initialize or maintain stable AgentRunState across turns and model calls
         target_dir, deliverables = _extract_target_dir_and_deliverables(user_query, self.workspace)
@@ -661,13 +681,17 @@ class AgentLoop:
                     self.emit(RuntimeEvent(EventKind.AGENT_PAUSED, {"plan": self.current_plan.to_dict()}, turn_id))
                 message = "Agent execution was interrupted."
                 self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": "cancelled", "plan": self.current_plan.to_dict() if self.current_plan else None}, turn_id))
+                profiler.finish()
                 return message, history
 
-            # Assemble Context & Request with active run_state
+            # Assemble Context & Request with active run_state and dynamic tool filtering
             built = self.context.assemble(
                 self.instructions.build(),
                 history,
-                self.tools.schemas(),
+                self.tools.schemas(
+                    context=user_query,
+                    categories=route_decision.target_tool_categories if route_decision.target_tool_categories else None,
+                ),
                 {"cwd": str(self.workspace), "platform": "windows"},
                 run_state=self.current_run,
             )
@@ -681,19 +705,21 @@ class AgentLoop:
                 self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {"chunk": chunk}, turn_id))
 
             try:
-                try:
-                    response = self.model.complete(request, on_chunk=_handle_chunk)
-                except TypeError as type_err:
-                    if "unexpected keyword argument 'on_chunk'" in str(type_err) or "got an unexpected keyword" in str(type_err):
-                        response = self.model.complete(request)
-                    else:
-                        raise
+                with profiler.measure("llm"):
+                    try:
+                        response = self.model.complete(request, on_chunk=_handle_chunk)
+                    except TypeError as type_err:
+                        if "unexpected keyword argument 'on_chunk'" in str(type_err) or "got an unexpected keyword" in str(type_err):
+                            response = self.model.complete(request)
+                        else:
+                            raise
             except Exception as exc:
                 if self.current_plan:
                     active = self.current_plan.get_active_task()
                     if active:
                         active.fail(str(exc))
                 self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": f"{type(exc).__name__}: {exc}"}, turn_id))
+                profiler.finish()
                 return f"Model request failed: {exc}", history
 
             self.emit(RuntimeEvent(
@@ -877,6 +903,7 @@ class AgentLoop:
                 final = final_text or "Task execution finished."
                 history.append(ChatMessage(role="assistant", content=final))
                 self.emit(RuntimeEvent(EventKind.TURN_COMPLETED, {"steps": step + 1, "final": final}, turn_id))
+                profiler.finish()
                 return final, history
 
             # Assistant Message with Tool Calls
@@ -901,6 +928,7 @@ class AgentLoop:
                         self.emit(RuntimeEvent(EventKind.AGENT_PAUSED, {"plan": self.current_plan.to_dict()}, turn_id))
                     message = "Agent execution was interrupted."
                     self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": "cancelled", "plan": self.current_plan.to_dict() if self.current_plan else None}, turn_id))
+                    profiler.finish()
                     return message, history
 
                 # Determine if wave can execute concurrently
@@ -946,13 +974,14 @@ class AgentLoop:
                         self.emit(RuntimeEvent(EventKind.COMMAND_STARTED, {"command": str(call.arguments.get("command", ""))}, turn_id))
 
                 # Tool Execution: Parallel (concurrent worker pool) or Sequential
-                if use_parallel:
-                    max_workers = min(len(wave), get_max_parallel_workers())
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        futures = [executor.submit(self._execute_tool_call_worker, c, allow_tool) for c in wave]
-                        results = [f.result() for f in futures]
-                else:
-                    results = [self._execute_tool_call_worker(c, allow_tool) for c in wave]
+                with profiler.measure("tool"):
+                    if use_parallel:
+                        max_workers = min(len(wave), get_max_parallel_workers())
+                        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            futures = [executor.submit(self._execute_tool_call_worker, c, allow_tool) for c in wave]
+                            results = [f.result() for f in futures]
+                    else:
+                        results = [self._execute_tool_call_worker(c, allow_tool) for c in wave]
 
                 # Post-execution: Process results in original wave order
                 for call, result in zip(wave, results):

@@ -20,16 +20,32 @@ class ComputerManager:
         self.verifier = get_verifier()
         self.planner = ComputerPlanner()
 
-    def observe(self, include_interactive: bool = True, max_elements: int = 150) -> ComputerState:
-        """Captures the current state of the computer environment."""
-        return self.observer.observe(include_interactive=include_interactive, max_elements=max_elements)
+    def observe(
+        self,
+        include_interactive: bool = True,
+        max_elements: int = 150,
+        force_refresh: bool = False,
+        targeted_query: Optional[str] = None,
+    ) -> ComputerState:
+        """Captures the current state of the computer environment with state caching."""
+        return self.observer.observe(
+            include_interactive=include_interactive,
+            max_elements=max_elements,
+            force_refresh=force_refresh,
+            targeted_query=targeted_query,
+        )
 
     def execute_action(self, action: ComputerAction) -> ActionResult:
         """Executes a single computer action with before/after state verification."""
         before = self.observe(include_interactive=False)
         result = self.executor.execute(action)
-        time.sleep(0.2)
-        after = self.observe(include_interactive=False)
+
+        # Invalidate cache for mutating actions
+        from kratos_agent.computer.state_cache import get_state_cache
+        get_state_cache().invalidate()
+
+        time.sleep(0.1)
+        after = self.observe(include_interactive=False, force_refresh=True)
 
         # Verify action
         verified, detail = self.verifier.verify_action(
