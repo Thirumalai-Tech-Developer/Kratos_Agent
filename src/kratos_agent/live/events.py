@@ -10,15 +10,20 @@ from enum import Enum
 
 
 class LiveState(str, Enum):
-    """Dynamic connection and interaction states for the floating avatar & UI."""
+    """Explicit Gemini Live connection and interaction state machine (§14, §15)."""
+    DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     CONNECTED = "connected"
+    DEGRADED = "degraded"
+    RECONNECTING = "reconnecting"
+    FAILED = "failed"
+    STOPPING = "stopping"
+    # Interaction sub-states
     LISTENING = "listening"
     THINKING = "thinking"
     EXECUTING = "executing"
     SPEAKING = "speaking"
     ERROR = "error"
-    RECONNECTING = "reconnecting"
     IDLE = "idle"
 
 
@@ -34,7 +39,7 @@ class ComponentHealth(str, Enum):
 
 @dataclass
 class LiveStatus:
-    """Central status of the Live multimodal subsystem."""
+    """Central status of the Live multimodal subsystem (§13, §14, §15)."""
     gemini_connected: bool = False
     microphone_active: bool = False
     speaker_active: bool = False
@@ -44,11 +49,15 @@ class LiveStatus:
     active_session_id: Optional[str] = None
     muted: bool = False
     video_mode: str = "camera"
-    current_state: LiveState = LiveState.CONNECTING
+    current_state: LiveState = LiveState.DISCONNECTED
     last_transcript: str = ""
     last_error: Optional[str] = None
     microphone_health: str = "offline"
     screen_health: str = "offline"
+    camera_health: str = "offline"
+    speaker_health: str = "offline"
+    live_health: str = "disconnected"
+    last_heartbeat: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -67,6 +76,10 @@ class LiveStatus:
             "last_error": self.last_error,
             "microphone_health": self.microphone_health,
             "screen_health": self.screen_health,
+            "camera_health": self.camera_health,
+            "speaker_health": self.speaker_health,
+            "live_health": self.live_health,
+            "last_heartbeat": self.last_heartbeat,
             "updated_at": self.updated_at,
         }
 

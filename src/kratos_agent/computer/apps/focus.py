@@ -45,11 +45,84 @@ def set_focus(target: str) -> bool:
     return res.ok
 
 
+def get_current_foreground_hwnd() -> Optional[int]:
+    """Returns the actual physical foreground window HWND (§7)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            return int(hwnd) if hwnd else None
+        except Exception:
+            pass
+    active = get_active_window()
+    if active and str(active.id).isdigit():
+        return int(active.id)
+    return None
+
+
+def recover_foreground(expected_hwnd: int | str) -> bool:
+    """Attempts aggressive recovery of stolen focus to the expected window (§7)."""
+    target_id = str(expected_hwnd)
+    target_int = int(expected_hwnd) if target_id.isdigit() else None
+    wm = get_window_manager()
+    
+    # 1. Standard focus call
+    wm.focus_window(handle=target_id)
+    actual_hwnd = get_current_foreground_hwnd()
+    if target_int is not None and actual_hwnd == target_int:
+        return True
+
+    # 2. Win32 force restore/activate if minimized or behind
+    if sys.platform == "win32" and target_int is not None:
+        try:
+            from kratos_agent.computer.apps.windows import _activate_hwnd_win32
+            _activate_hwnd_win32(target_int)
+            actual_hwnd = get_current_foreground_hwnd()
+            if actual_hwnd == target_int:
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def ensure_task_window_foreground(
+    expected_hwnd: int | str,
+    max_retries: int = 3,
+) -> bool:
+    """Verifies that the expected window is actively foregrounded; recovers if focus was stolen (§7)."""
+    target_id = str(expected_hwnd)
+    target_int = int(expected_hwnd) if target_id.isdigit() else None
+    if target_int is None:
+        return True
+
+    import time
+    for attempt in range(1, max_retries + 1):
+        actual_hwnd = get_current_foreground_hwnd()
+        if actual_hwnd == target_int:
+            print(f"[FOREGROUND]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nFocused: True")
+            return True
+
+        # Focus stolen by Antigravity, terminal, or another app — recover
+        print(f"[FOREGROUND_STEAL_DETECTED]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nAttempting recovery ({attempt}/{max_retries})...")
+        recovered = recover_foreground(target_int)
+        actual_hwnd = get_current_foreground_hwnd()
+        if recovered or (actual_hwnd == target_int):
+            print(f"[FOREGROUND]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nFocused: True")
+            return True
+
+        time.sleep(0.15 * attempt)
+
+    actual_hwnd = get_current_foreground_hwnd()
+    print(f"[FOREGROUND]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nFocused: False")
+    return False
+
+
 def focus_window(
     window_handle: int | str,
     policy: FocusPolicy = FocusPolicy.FOCUS_TARGET,
 ) -> bool:
-    """Brings a window to the foreground and verifies active focus with up to 3 bounded attempts (§14, §16, §61)."""
+    """Brings a window to the foreground and verifies active focus with up to 3 bounded attempts (§7, §14, §16, §61)."""
     global _previous_foreground_handle
     if policy == FocusPolicy.KEEP_CURRENT:
         return True
@@ -60,36 +133,9 @@ def focus_window(
         _previous_foreground_handle = str(current_active.id)
 
     target_id = str(window_handle)
-    target_int = int(window_handle) if target_id.isdigit() else None
     wm = get_window_manager()
-
-    import time
-    actual_hwnd = None
-    for attempt in range(1, 4):
-        wm.focus_window(handle=target_id)
-
-        # Direct Win32 / active window verification
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                actual_hwnd = ctypes.windll.user32.GetForegroundWindow()
-            except Exception:
-                active = get_active_window()
-                actual_hwnd = int(active.id) if (active and str(active.id).isdigit()) else None
-        else:
-            active = get_active_window()
-            actual_hwnd = int(active.id) if (active and str(active.id).isdigit()) else None
-
-        focused = (actual_hwnd == target_int) if target_int is not None else False
-        if focused:
-            print(f"[FOREGROUND]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nFocused: True")
-            return True
-
-        if attempt < 3:
-            time.sleep(0.1 * attempt)
-
-    print(f"[FOREGROUND]\nExpected HWND: {target_id}\nActual HWND: {actual_hwnd}\nFocused: False")
-    return False
+    wm.focus_window(handle=target_id)
+    return ensure_task_window_foreground(target_id)
 
 
 def restore_previous_window() -> bool:

@@ -125,4 +125,46 @@ def parse_media_intent(text: str) -> Dict[str, Any]:
                 ],
             }
 
+    # 9. WhatsApp Web intent detection (§10, §46)
+    if "whatsapp" in stripped:
+        return {
+            "intent": "open_whatsapp",
+            "platform": "whatsapp",
+            "query": stripped,
+            "raw": text,
+            "actions": [{"type": "open", "target": "https://web.whatsapp.com"}],
+        }
+
     return {"intent": "unknown", "platform": "unknown", "query": raw, "raw": text}
+
+
+def should_reuse_browser_context(prev_task_target: Any, current_intent: Dict[str, Any]) -> bool:
+    """Enforces Section 10: Determines whether the previous browser task and new command belong to the same context.
+    
+    Examples:
+    - Previous: YouTube, New: YouTube -> True (Reuse same tab PAGE-42)
+    - Previous: YouTube, New: WhatsApp -> False (Different app/context: spin up new task context)
+    """
+    if not prev_task_target:
+        return False
+    if getattr(prev_task_target, "is_closed", None) and prev_task_target.is_closed():
+        return False
+    if not getattr(prev_task_target, "locked", False):
+        return False
+
+    prev_url = (getattr(prev_task_target, "current_url", "") or getattr(prev_task_target, "initial_url", "") or "").lower()
+    curr_platform = current_intent.get("platform", "unknown")
+    curr_intent = current_intent.get("intent", "unknown")
+
+    # If new command is for YouTube and previous task tab was on YouTube -> reuse tab
+    if curr_platform == "youtube" or curr_intent in ("play_video", "search_video", "pause_video", "resume_video", "standby"):
+        if "youtube.com" in prev_url or getattr(prev_task_target, "tab_id", None):
+            return True
+        return False
+
+    # If new command is WhatsApp or another distinct application, do NOT reuse YouTube tab state
+    if curr_platform == "whatsapp":
+        return "web.whatsapp.com" in prev_url
+
+    # By default, do not blindly reuse
+    return False

@@ -8,14 +8,21 @@ from typing import Any, Dict, Optional, Set
 
 
 class BrowserTaskState(str, Enum):
+    BROWSER_ATTACHING = "browser_attaching"
     RESOLVING_TARGET = "resolving_target"
+    WINDOW_READY = "window_ready"
     TARGET_READY = "target_ready"
+    TAB_READY = "tab_ready"
     NAVIGATING = "navigating"
+    PAGE_LOADING = "page_loading"
     PAGE_READY = "page_ready"
     SEARCHING = "searching"
     RESULT_SELECTED = "result_selected"
     PLAY_REQUESTED = "play_requested"
+    ACTION_EXECUTING = "action_executing"
+    ACTION_VERIFICATION = "action_verification"
     VERIFYING = "verifying"
+    TASK_FINAL_VERIFICATION = "task_final_verification"
     COMPLETED = "completed"
     FAILED = "failed"
 

@@ -527,32 +527,48 @@ class LiveSession:
         text = text.strip(' :-=|')
         return text
 
+    def is_healthy(self) -> bool:
+        """Verifies that the session, receive loop, and heartbeat are actively operational (§15)."""
+        if not self.is_running or self.session is None:
+            return False
+        recv_task = next((t for t in self._tasks if t.get_name() == "kratos-live-recv"), None)
+        if recv_task is None or recv_task.done():
+            return False
+        last_hb = getattr(self, "_last_heartbeat", 0.0)
+        if last_hb > 0 and (time.time() - last_hb > 90.0):
+            return False
+        return True
+
     async def run_connection_loop(self) -> None:
-        """Manages the connection with retry backoff."""
+        """Manages the connection with retry backoff and explicit state machine transitions (§14, §15)."""
         self.is_running = True
+        self._last_heartbeat = time.time()
         client = genai.Client(api_key=self.config.api_key)
         connect_config = self._build_connect_config()
 
-        retry_delay = 1.0
-        max_retry_delay = 30.0
+        BACKOFF_DELAYS = [1.0, 2.0, 4.0, 8.0, 15.0]
+        backoff_idx = 0
 
         while self.is_running:
             try:
                 logger.info(f"[LiveSession] Connecting to Gemini Live ({self.config.model})...")
                 if self.status_hub:
-                    self.status_hub.update(current_state=LiveState.CONNECTING)
+                    self.status_hub.update(current_state=LiveState.CONNECTING, live_health="connecting")
                 async with client.aio.live.connect(
                     model=self.config.model,
                     config=connect_config,
                 ) as session:
                     self.session = session
-                    retry_delay = 1.0
+                    backoff_idx = 0
+                    self._last_heartbeat = time.time()
                     logger.info("[LiveSession] Gemini Live session connected.")
                     if self.status_hub:
                         self.status_hub.update(
                             gemini_connected=True,
+                            live_health="online",
+                            last_heartbeat=self._last_heartbeat,
                             last_error=None,
-                            current_state=LiveState.EXECUTING if self.status_hub.status.active_task_id else LiveState.IDLE,
+                            current_state=LiveState.CONNECTED,
                         )
 
                     send_task = asyncio.create_task(self.send_realtime(), name="kratos-live-send")
@@ -573,6 +589,19 @@ class LiveSession:
             except Exception as e:
                 err_str = str(e)
                 now = time.time()
+
+                # Detect 1006 abnormal closure (§14)
+                is_abnormal_closure = "1006" in err_str or "abnormal" in err_str.lower()
+                if is_abnormal_closure:
+                    logger.warning("[LiveSession] Detected 1006 abnormal closure. Transitioning to DEGRADED state...")
+                    if self.status_hub:
+                        self.status_hub.update(
+                            gemini_connected=False,
+                            current_state=LiveState.DEGRADED,
+                            live_health="degraded",
+                            last_error="1006 abnormal closure detected",
+                        )
+
                 # Throttle repeated network/DNS errors to once every 60s
                 if err_str != self._last_logged_error or (now - self._last_logged_error_time) > 60.0:
                     if "getaddrinfo failed" in err_str:
@@ -584,25 +613,30 @@ class LiveSession:
                 else:
                     logger.debug(f"[LiveSession] Reconnect attempt failed: {e}")
 
+                retry_delay = BACKOFF_DELAYS[min(backoff_idx, len(BACKOFF_DELAYS) - 1)]
+                backoff_idx = min(backoff_idx + 1, len(BACKOFF_DELAYS) - 1)
+
                 if self.status_hub:
                     self.status_hub.update(
                         gemini_connected=False,
                         last_error=err_str,
                         current_state=LiveState.RECONNECTING,
+                        live_health="reconnecting",
                     )
                 if not self.is_running:
                     break
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 1.5, max_retry_delay)
             finally:
                 self.session = None
-                if self.status_hub:
-                    self.status_hub.update(gemini_connected=False)
+                if self.status_hub and not self.is_running:
+                    self.status_hub.update(gemini_connected=False, current_state=LiveState.DISCONNECTED, live_health="offline")
 
 
     async def stop(self) -> None:
-        """Stops the session and cancels all associated tasks."""
+        """Stops the session and cancels all associated tasks (§38)."""
         self.is_running = False
+        if self.status_hub:
+            self.status_hub.update(current_state=LiveState.STOPPING)
         for t in self._tasks:
             if not t.done():
                 t.cancel()
@@ -611,4 +645,4 @@ class LiveSession:
         self._tasks.clear()
         self.session = None
         if self.status_hub:
-            self.status_hub.update(gemini_connected=False)
+            self.status_hub.update(gemini_connected=False, current_state=LiveState.DISCONNECTED, live_health="offline")

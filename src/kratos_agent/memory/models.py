@@ -18,17 +18,32 @@ class MemoryScope(str, Enum):
 
 
 class MemoryLayer(str, Enum):
+    """Hierarchical memory layers (§30)."""
     WORKING = "WORKING"
+    TASK = "TASK"
+    SESSION = "SESSION"
+    LONG_TERM = "LONG_TERM"
+    TOOL = "TOOL"
+    ERROR = "ERROR"
+    # Backwards-compatible aliases
     EPISODIC = "EPISODIC"
     SEMANTIC = "SEMANTIC"
     PROCEDURAL = "PROCEDURAL"
     APPLICATION = "APPLICATION"
-    ERROR = "ERROR"
+
+
+class MemoryPriority(int, Enum):
+    """Observation priority ladder (§33)."""
+    CURRENT_OBSERVATION = 5
+    CURRENT_TASK_STATE = 4
+    RECENT_VERIFIED_MEMORY = 3
+    LONG_TERM_MEMORY = 2
+    MODEL_ASSUMPTION = 1
 
 
 @dataclass
 class MemoryRecord:
-    """Represents a discrete memory unit across any layer and scope."""
+    """Represents a discrete memory unit across any layer and scope (§30, §32)."""
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     layer: MemoryLayer = MemoryLayer.SEMANTIC
     scope: MemoryScope = MemoryScope.GLOBAL
@@ -37,6 +52,8 @@ class MemoryRecord:
     importance: float = 0.5
     confidence: float = 0.8
     recency: float = field(default_factory=time.time)
+    created_at: float = field(default_factory=time.time)
+    last_used: float = field(default_factory=time.time)
     frequency: int = 1
     utility: float = 0.5
     source: str = "agent"

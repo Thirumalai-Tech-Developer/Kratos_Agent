@@ -154,7 +154,9 @@ RULES:
 1. Each task MUST be specific, concrete, and directly relevant to the user's exact request.
 2. Do NOT output generic, vague placeholder tasks.
 3. Match tasks directly to the user's explicit objective:
-   - If the user asks to download, fetch, clone, run, or play/automate existing software (e.g. games, tools, repos), plan to acquire/download, set up dependencies, execute/play/automate, and verify. NEVER force scaffolding or coding from scratch when asked to download, run, or play.
+   - If the user asks to download, install, locate, or fetch existing software (e.g. games, tools, desktop apps, packages), plan to: (1) search the web to identify official/legitimate sources, (2) open and inspect the source page, (3) locate the genuine Windows/Linux download link, (4) perform the download, and (5) physically verify that the file exists on the filesystem.
+   - NEVER immediately refuse a download request merely because the title is copyrighted or commercial. Search for official releases, legal open-source remakes/ports, or legitimate distributors first. Only if no legitimate source exists, truthfully report that. NEVER fabricate downloads or invent links.
+   - If the user asks to find, search, compare, locate, or open a website, ALWAYS plan to use web/browser tools rather than answering from stale memory.
    - If the user asks to build, create, or scaffold a project, sequence tasks through architecture, core implementation, features/styling, and verification.
    - If the user asks to debug, fix, or refactor, sequence tasks through reproduction/diagnosis, root-cause fix, and test verification.
 4. Each task should specify its appropriate `verification` type:
@@ -162,6 +164,7 @@ RULES:
    - "build": Syntax check, compilation, or build verification (e.g. vite build, cargo check, tsc).
    - "tests": Unit/integration test suites or runtime execution checks.
    - "browser": Dedicated frontend browser UI verification (ONLY for Web UI projects on dedicated verification tasks).
+   - "file": File existence and size verification on disk (for download, export, and generation tasks).
 5. Keep the total number of tasks between 3 and 6 milestones.
 6. Return ONLY a valid JSON object matching this schema:
 {

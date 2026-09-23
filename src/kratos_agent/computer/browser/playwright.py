@@ -28,7 +28,7 @@ class VideoPlaybackState:
 
 @dataclass
 class BrowserActionResult:
-    """Structured result of browser operations with state machine transitions (§17)."""
+    """Structured result of browser operations with state machine transitions (§4, §12, §17)."""
     operation: str
     executed: bool
     verified: bool
@@ -36,10 +36,25 @@ class BrowserActionResult:
     evidence: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     detail: str = ""
+    terminal: bool = False
+    retryable: bool = False
+    changed_state: bool = False
+    observation: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.observation:
+            self.observation = self.detail
+        # An action is terminal if explicitly set or if it represents final verified playback
+        if not self.terminal and self.state in SUCCESS_STATES and self.verified:
+            self.terminal = True
 
     @property
     def ok(self) -> bool:
         return self.executed and self.verified
+
+    @property
+    def success(self) -> bool:
+        return self.executed and (self.verified or not self.error)
 
     @property
     def task_success(self) -> bool:
@@ -50,6 +65,11 @@ class BrowserActionResult:
             "operation": self.operation,
             "executed": self.executed,
             "verified": self.verified,
+            "success": self.success,
+            "terminal": self.terminal,
+            "retryable": self.retryable,
+            "changed_state": self.changed_state,
+            "observation": self.observation,
             "state": self.state,
             "evidence": self.evidence,
             "error": self.error,

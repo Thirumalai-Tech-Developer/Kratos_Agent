@@ -7,25 +7,67 @@ from typing import Any, Dict, List, Optional, Tuple
 
 @dataclass
 class ActionResult:
-    """Result of an action executed by the computer engine."""
-    ok: bool
-    action: str
+    """Result of an action executed by the computer engine (§4)."""
+    ok: bool = True
+    action: str = ""
     detail: str = ""
     data: Optional[Dict[str, Any]] = None
     duration_ms: int = 0
     screenshot_ref: Optional[str] = None
     verified: bool = False
     method_used: str = "unknown"
+    success: bool = True
+    terminal: bool = False
+    retryable: bool = False
+    changed_state: bool = False
+    observation: str = ""
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Synchronize success and ok
+        if not self.ok:
+            self.success = False
+        elif not self.success:
+            self.ok = False
+        else:
+            self.ok = True
+            self.success = True
+
+        # Synchronize error and detail
+        if self.error and not self.detail:
+            self.detail = self.error
+        elif self.detail and not self.error and not self.ok:
+            self.error = self.detail
+
+        # Synchronize observation and detail
+        if self.observation and not self.detail:
+            self.detail = self.observation
+        elif self.detail and not self.observation:
+            self.observation = self.detail
+
+        # Synchronize metadata and data
+        if self.data and not self.metadata:
+            self.metadata = dict(self.data)
+        elif self.metadata and self.data is None:
+            self.data = dict(self.metadata)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ok": self.ok,
+            "success": self.success,
             "action": self.action,
             "detail": self.detail,
+            "observation": self.observation,
+            "verified": self.verified,
+            "terminal": self.terminal,
+            "retryable": self.retryable,
+            "changed_state": self.changed_state,
+            "error": self.error,
             "data": self.data,
+            "metadata": self.metadata,
             "duration_ms": self.duration_ms,
             "screenshot_ref": self.screenshot_ref,
-            "verified": self.verified,
             "method_used": self.method_used,
         }
 

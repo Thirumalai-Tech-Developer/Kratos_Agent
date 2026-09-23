@@ -1,7 +1,8 @@
 """Active computer browser target tracking and session persistence."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 
@@ -37,17 +38,43 @@ class BrowserTarget:
 
 
 @dataclass
-class BrowserTaskTarget:
-    """Represents a locked browser tab dedicated to an active browser task (§4, §5, §15)."""
-    window_handle: Optional[int] = None
-    browser_pid: Optional[int] = None
+class BrowserTaskContext:
+    """Explicit browser task context tracking process, window, and locked tab ownership (§6)."""
+    task_id: str = ""
+    pid: Optional[int] = None
+    hwnd: Optional[int] = None
+    tab_id: Optional[str] = None
+    url: Optional[str] = None
+    title: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
+    last_activity: float = field(default_factory=time.time)
+    locked: bool = False
+    completed: bool = False
     page: Optional[object] = None
     page_id: Optional[str] = None
-    tab_id: Optional[str] = None
     initial_url: Optional[str] = None
+    window_handle: Optional[int] = None
+    browser_pid: Optional[int] = None
     current_url: Optional[str] = None
-    task_id: Optional[str] = None
-    locked: bool = False
+
+    def __post_init__(self) -> None:
+        if self.window_handle is not None and self.hwnd is None:
+            self.hwnd = self.window_handle
+        elif self.hwnd is not None and self.window_handle is None:
+            self.window_handle = self.hwnd
+
+        if self.browser_pid is not None and self.pid is None:
+            self.pid = self.browser_pid
+        elif self.pid is not None and self.browser_pid is None:
+            self.browser_pid = self.pid
+
+        if self.current_url is not None and self.url is None:
+            self.url = self.current_url
+        elif self.url is not None and self.current_url is None:
+            self.current_url = self.url
+
+    def touch(self) -> None:
+        self.last_activity = time.time()
 
     def is_closed(self) -> bool:
         if self.page is not None:
@@ -57,15 +84,26 @@ class BrowserTaskTarget:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "window_handle": self.window_handle,
-            "browser_pid": self.browser_pid,
-            "page_id": self.page_id,
-            "tab_id": self.tab_id,
-            "initial_url": self.initial_url,
-            "current_url": self.current_url,
             "task_id": self.task_id,
+            "pid": self.pid,
+            "hwnd": self.hwnd,
+            "tab_id": self.tab_id,
+            "url": self.url,
+            "title": self.title,
+            "created_at": self.created_at,
+            "last_activity": self.last_activity,
             "locked": self.locked,
+            "completed": self.completed,
+            "page_id": self.page_id,
+            "initial_url": self.initial_url,
+            "window_handle": self.hwnd,
+            "browser_pid": self.pid,
+            "current_url": self.url,
         }
+
+
+# Fully compatible alias
+BrowserTaskTarget = BrowserTaskContext
 
 
 class BrowserTaskError(Exception):

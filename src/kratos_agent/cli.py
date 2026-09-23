@@ -1566,7 +1566,24 @@ def start_interactive_cli():
 
             if user_input.lower().startswith("/vision"):
                 parts = user_input.split(maxsplit=1)
-                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                arg_raw = parts[1].strip() if len(parts) > 1 else ""
+                if not arg_raw:
+                    st = live_runtime.get_status()
+                    console.print(f"\n[bold gold1]👁 Vision mode:[/bold gold1] [bold cyan]{st.video_mode.upper()}[/bold cyan] (camera: {st.camera_active}, screen: {st.screen_active})")
+                    console.print("[dim]Usage: /vision camera | /vision screen | /vision both | /vision off[/dim]\n")
+                    continue
+
+                arg_words = arg_raw.split()
+                mode_candidate = arg_words[0].lower()
+                valid_modes = {"camera", "cam", "screen", "desktop", "both", "all", "off", "none", "disable"}
+
+                if mode_candidate not in valid_modes or len(arg_words) > 1:
+                    bad_mode = mode_candidate if mode_candidate not in valid_modes else arg_raw
+                    console.print(f"\n[bold red]Invalid /vision mode: {bad_mode}[/bold red]")
+                    console.print("Usage: /vision camera | /vision screen | /vision both | /vision off\n")
+                    continue
+
+                arg = mode_candidate
                 import asyncio
                 if arg in ("camera", "cam"):
                     if live_runtime._loop and live_runtime._loop.is_running():
@@ -1611,11 +1628,6 @@ def start_interactive_cli():
                     if live_runtime._loop and live_runtime._loop.is_running():
                         asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("none"), live_runtime._loop)
                     console.print("\n[bold yellow]👁 Vision capture disabled.[/bold yellow]\n")
-                else:
-                    st = live_runtime.get_status()
-                    console.print(f"\n[bold gold1]👁 Vision mode:[/bold gold1] [bold cyan]{st.video_mode.upper()}[/bold cyan] (camera: {st.camera_active}, screen: {st.screen_active})")
-                    console.print("[dim]Usage: /vision camera | /vision screen | /vision both | /vision off[/dim]\n")
-                continue
 
             if user_input.lower().startswith("/avatar"):
                 parts = user_input.split(maxsplit=1)
@@ -2038,8 +2050,26 @@ def start_interactive_cli():
                     messages.append({"role": "assistant", "content": f"Failed to navigate to {clean_q}: {b_res.detail}"})
                 continue
 
-            # 2. Semantic Media Intent Parsing & Physical Verification (§12, §13, §14, §15, §19, §21, §24)
-            from kratos_agent.computer.browser.intent import parse_media_intent
+            # 2. Generic Desktop Application Launch Fast Path (§18, §23, §35)
+            from kratos_agent.computer.apps.launcher import get_launcher
+            resolved_app = get_launcher().resolve_application(clean_q)
+            if resolved_app and not clean_lower.startswith(("open youtube", "go to youtube", "play ", "search ")):
+                _, _, display_name = resolved_app
+                console.print(f"\n[bold cyan]⚡ [AppFastPath] Opening {display_name}...[/bold cyan]")
+                a_res = get_launcher().launch_and_verify(clean_q)
+                if a_res.ok and a_res.verified:
+                    console.print(f"[bold green]✓ Done — {display_name} is open and focused in the foreground.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": f"Done — {display_name} is open and focused in the foreground."})
+                elif a_res.ok:
+                    console.print(f"[bold green]✓ {a_res.observation or display_name + ' opened.'}[/bold green]\n")
+                    messages.append({"role": "assistant", "content": a_res.observation or f"{display_name} opened."})
+                else:
+                    console.print(f"[bold red]⚠️ Could not launch {display_name}: {a_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"Could not launch {display_name}: {a_res.detail}"})
+                continue
+
+            # 3. Semantic Media Intent Parsing & Physical Verification (§10, §12, §13, §14, §15, §19, §21, §24)
+            from kratos_agent.computer.browser.intent import parse_media_intent, should_reuse_browser_context
             from kratos_agent.computer.browser.playwright import PlaywrightDriver, can_report_success
             from kratos_agent.computer.browser.target import get_target_manager
             from kratos_agent.computer.browser.manager import get_browser_manager
@@ -2051,10 +2081,13 @@ def start_interactive_cli():
             # Open YouTube
             if intent_type == "open_youtube":
                 prev_task = get_target_manager().get_active_task_target()
+                reuse_target = should_reuse_browser_context(prev_task, m_intent)
+                if not reuse_target and prev_task is not None:
+                    get_target_manager().clear_task_target()
                 prev_state = prev_task.tab_id if prev_task else "None"
-                print(f"[CONTINUATION]\nTask: open youtube\nPrevious state: {prev_state}\nNew command: open youtube\nReuse target: True")
+                print(f"[CONTINUATION]\nTask: open youtube\nPrevious state: {prev_state}\nNew command: open youtube\nReuse target: {reuse_target}")
                 console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Opening YouTube...[/bold cyan]")
-                if not (prev_task and prev_task.locked and not prev_task.is_closed()):
+                if not reuse_target:
                     get_browser_manager().initialize_browser_task(initial_url="https://www.youtube.com")
                 b_res = get_browser_manager().open_url("https://www.youtube.com")
                 if b_res.ok:
@@ -2065,13 +2098,36 @@ def start_interactive_cli():
                     messages.append({"role": "assistant", "content": f"YouTube could not be opened: {b_res.detail}"})
                 continue
 
+            # Open WhatsApp Web (§10, §46)
+            if intent_type == "open_whatsapp":
+                prev_task = get_target_manager().get_active_task_target()
+                reuse_target = should_reuse_browser_context(prev_task, m_intent)
+                if not reuse_target and prev_task is not None:
+                    get_target_manager().clear_task_target()
+                prev_state = prev_task.tab_id if prev_task else "None"
+                print(f"[CONTINUATION]\nTask: open whatsapp\nPrevious state: {prev_state}\nNew command: open whatsapp\nReuse target: {reuse_target}")
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Opening WhatsApp Web in current Chrome window...[/bold cyan]")
+                if not reuse_target:
+                    get_browser_manager().initialize_browser_task(initial_url="https://web.whatsapp.com")
+                b_res = get_browser_manager().open_url("https://web.whatsapp.com")
+                if b_res.ok:
+                    console.print(f"[bold green]✓ Done — WhatsApp Web is open.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": "Done — WhatsApp Web is open."})
+                else:
+                    console.print(f"[bold red]⚠️ WhatsApp Web could not be opened: {b_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"WhatsApp Web could not be opened: {b_res.detail}"})
+                continue
+
             # Search Video (State: SEARCH_RESULTS, NOT VIDEO_PLAYING)
             if intent_type == "search_video":
                 from urllib.parse import quote_plus
                 search_url = f"https://www.youtube.com/results?search_query={quote_plus(intent_query)}"
                 prev_task = get_target_manager().get_active_task_target()
+                reuse_target = should_reuse_browser_context(prev_task, m_intent)
+                if not reuse_target and prev_task is not None:
+                    get_target_manager().clear_task_target()
                 prev_state = prev_task.tab_id if prev_task else "None"
-                print(f"[CONTINUATION]\nTask: search {intent_query}\nPrevious state: {prev_state}\nNew command: search {intent_query}\nReuse target: True")
+                print(f"[CONTINUATION]\nTask: search {intent_query}\nPrevious state: {prev_state}\nNew command: search {intent_query}\nReuse target: {reuse_target}")
                 console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Searching YouTube for '{intent_query}'...[/bold cyan]")
                 b_res = get_browser_manager().open_url(search_url)
                 if b_res.ok:
@@ -2090,8 +2146,11 @@ def start_interactive_cli():
             if intent_type in ("compound_browser_task", "play_video"):
                 prev_task = get_target_manager().get_active_task_target()
                 prev_target = get_target_manager().get_active_target()
+                reuse_target = should_reuse_browser_context(prev_task, m_intent)
+                if not reuse_target and prev_task is not None:
+                    get_target_manager().clear_task_target()
                 prev_state = prev_task.tab_id if prev_task else (prev_target.url if prev_target else "None")
-                print(f"[CONTINUATION]\nTask: play {intent_query}\nPrevious state: {prev_state}\nNew command: play {intent_query}\nReuse target: True")
+                print(f"[CONTINUATION]\nTask: play {intent_query}\nPrevious state: {prev_state}\nNew command: play {intent_query}\nReuse target: {reuse_target}")
                 console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Playing {intent_query} in current Chrome window...[/bold cyan]")
                 drv = PlaywrightDriver()
                 p_res = drv.search_and_play_youtube(intent_query)
@@ -2257,6 +2316,12 @@ def start_interactive_cli():
                 console.print()
 
         except (KeyboardInterrupt, EOFError):
+            try:
+                from kratos_agent.output.voice import get_tts_queue, get_voice_buffer
+                get_tts_queue().cancel_current()
+                get_voice_buffer().clear()
+            except Exception:
+                pass
             live_runtime.stop_background()
             _tui.cancel()
             console.print("\n[bold red]Kratos departs. Strength and honor.[/bold red]\n")

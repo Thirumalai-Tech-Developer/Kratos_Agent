@@ -12,8 +12,29 @@ MAX_TTS_CHARS = 240
 SENTENCE_END_PATTERN = re.compile(r"[\.!\?\n]")
 
 
+REASONING_PATTERNS = [
+    re.compile(r"(?i)\bi'?m (looking into|checking|starting|running|confirming|currently|thinking|planning|inspecting)\b"),
+    re.compile(r"(?i)\bi am (looking into|checking|starting|running|confirming|currently|thinking|planning|inspecting)\b"),
+    re.compile(r"(?i)\bmy reasoning is\b"),
+    re.compile(r"(?i)\bi decided to\b"),
+    re.compile(r"(?i)\bchecking relevant files\b"),
+    re.compile(r"(?i)\blet me check\b"),
+    re.compile(r"(?i)\blet me look\b"),
+    re.compile(r"(?i)\blet me inspect\b"),
+    re.compile(r"(?i)\blet me think\b"),
+]
+
+
+def is_internal_reasoning(text: str) -> bool:
+    """Detects whether text is an internal monologue/planning chunk that should NOT be spoken (§24, §43)."""
+    if not text:
+        return True
+    t = text.strip()
+    return any(p.search(t) for p in REASONING_PATTERNS)
+
+
 class VoiceBuffer:
-    """Buffers text chunks until a complete sentence or clause boundary is reached (§8, §9, §10, §11)."""
+    """Buffers text chunks until a complete sentence or clause boundary is reached, filtering internal reasoning (§24, §43)."""
 
     def __init__(self, min_chars: int = MIN_TTS_CHARS, max_chars: int = MAX_TTS_CHARS) -> None:
         self.min_chars = min_chars
@@ -29,18 +50,20 @@ class VoiceBuffer:
             self._buffer += text
 
     def flush_sentence(self) -> Optional[str]:
-        """Flushes a complete sentence if one exists and meets length thresholds."""
+        """Flushes a complete sentence if one exists and passes internal reasoning filter."""
         if not self._buffer:
             return None
 
         # Check for sentence boundaries
-        match = SENTENCE_END_PATTERN.search(self._buffer)
-        if match:
+        for match in SENTENCE_END_PATTERN.finditer(self._buffer):
             split_idx = match.end()
             sentence = self._buffer[:split_idx].strip()
             # If the sentence meets min_chars or buffer has reached max_chars
             if len(sentence) >= self.min_chars or len(self._buffer) >= self.max_chars:
                 self._buffer = self._buffer[split_idx:].strip()
+                if is_internal_reasoning(sentence):
+                    logger.debug(f"[VoiceBuffer] Filtered internal reasoning: '{sentence}'")
+                    return None
                 return sentence
 
         # If buffer exceeds max_chars without punctuation, split at nearest whitespace
@@ -49,19 +72,25 @@ class VoiceBuffer:
             if space_idx > 0:
                 sentence = self._buffer[:space_idx].strip()
                 self._buffer = self._buffer[space_idx:].strip()
+                if is_internal_reasoning(sentence):
+                    return None
                 return sentence
             else:
                 sentence = self._buffer[:self.max_chars].strip()
                 self._buffer = self._buffer[self.max_chars:].strip()
+                if is_internal_reasoning(sentence):
+                    return None
                 return sentence
 
         return None
 
     def flush(self) -> Optional[str]:
-        """Flushes all remaining text in the buffer."""
+        """Flushes all remaining text in the buffer, filtering internal reasoning."""
         remaining = self._buffer.strip()
         self._buffer = ""
-        return remaining if remaining else None
+        if remaining and not is_internal_reasoning(remaining):
+            return remaining
+        return None
 
     def clear(self) -> None:
         self._buffer = ""

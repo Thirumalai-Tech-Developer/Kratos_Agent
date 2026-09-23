@@ -14,10 +14,17 @@ from typing import Any, Dict, List, Optional, Union
 
 class AgentState(str, Enum):
     IDLE = "idle"
+    CREATED = "created"
+    UNDERSTANDING = "understanding"
     ANALYZING = "analyzing"
     PLANNING = "planning"
     EXECUTING = "executing"
+    OBSERVING = "observing"
     VERIFYING = "verifying"
+    RECOVERING = "recovering"
+    WAITING = "waiting"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
@@ -26,10 +33,17 @@ class AgentState(str, Enum):
     def badge(self) -> str:
         return {
             AgentState.IDLE: "[dim]IDLE[/dim]",
+            AgentState.CREATED: "[dim cyan]CREATED[/dim cyan]",
+            AgentState.UNDERSTANDING: "[bold cyan]UNDERSTANDING[/bold cyan]",
             AgentState.ANALYZING: "[bold cyan]ANALYZING[/bold cyan]",
             AgentState.PLANNING: "[bold gold1]PLANNING[/bold gold1]",
             AgentState.EXECUTING: "[bold green]EXECUTING[/bold green]",
+            AgentState.OBSERVING: "[bold blue]OBSERVING[/bold blue]",
             AgentState.VERIFYING: "[bold magenta]VERIFYING[/bold magenta]",
+            AgentState.RECOVERING: "[bold yellow]RECOVERING[/bold yellow]",
+            AgentState.WAITING: "[dim yellow]WAITING[/dim yellow]",
+            AgentState.PAUSED: "[dim white]PAUSED[/dim white]",
+            AgentState.CANCELLED: "[bold yellow]CANCELLED[/bold yellow]",
             AgentState.COMPLETED: "[bold green]COMPLETED[/bold green]",
             AgentState.FAILED: "[bold red]FAILED[/bold red]",
             AgentState.INTERRUPTED: "[bold yellow]INTERRUPTED[/bold yellow]",
@@ -38,7 +52,17 @@ class AgentState(str, Enum):
 
 class TaskState(str, Enum):
     PENDING = "pending"
+    CREATED = "created"
+    UNDERSTANDING = "understanding"
+    PLANNING = "planning"
     RUNNING = "running"
+    EXECUTING = "executing"
+    OBSERVING = "observing"
+    VERIFYING = "verifying"
+    RECOVERING = "recovering"
+    WAITING = "waiting"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -48,7 +72,17 @@ class TaskState(str, Enum):
     def glyph(self) -> str:
         return {
             TaskState.PENDING: "☐",
+            TaskState.CREATED: "☐",
+            TaskState.UNDERSTANDING: "🔍",
+            TaskState.PLANNING: "📝",
             TaskState.RUNNING: "⠋",
+            TaskState.EXECUTING: "⚡",
+            TaskState.OBSERVING: "👁",
+            TaskState.VERIFYING: "🔍",
+            TaskState.RECOVERING: "🔄",
+            TaskState.WAITING: "⏳",
+            TaskState.PAUSED: "⏸",
+            TaskState.CANCELLED: "⊘",
             TaskState.COMPLETED: "✓",
             TaskState.FAILED: "✗",
             TaskState.SKIPPED: "⊘",
@@ -59,7 +93,17 @@ class TaskState(str, Enum):
     def style(self) -> str:
         return {
             TaskState.PENDING: "dim white",
+            TaskState.CREATED: "dim cyan",
+            TaskState.UNDERSTANDING: "bold cyan",
+            TaskState.PLANNING: "bold gold1",
             TaskState.RUNNING: "bold yellow",
+            TaskState.EXECUTING: "bold green",
+            TaskState.OBSERVING: "bold blue",
+            TaskState.VERIFYING: "bold magenta",
+            TaskState.RECOVERING: "bold yellow",
+            TaskState.WAITING: "dim yellow",
+            TaskState.PAUSED: "dim white",
+            TaskState.CANCELLED: "bold yellow",
             TaskState.COMPLETED: "bold green",
             TaskState.FAILED: "bold red",
             TaskState.SKIPPED: "dim",
