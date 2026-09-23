@@ -21,3 +21,5 @@ class CapabilitySpec:
     dangerous_level: str = "normal"
     availability: str = "unknown"
     version: str = "1"
+    readiness_probe: str | None = None
+    permissions: List[str] = field(default_factory=list)

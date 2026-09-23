@@ -146,12 +146,24 @@ class SlaveExecutor:
 
     async def _execute_youtube_play(self, cmd: MasterCommand) -> SlaveResult:
         """Executes YouTube playback with strict physical verification."""
-        from kratos_agent.computer.browser.intent import parse_media_intent, should_reuse_browser_context
+        from kratos_agent.computer.browser.intent import should_reuse_browser_context
         from kratos_agent.computer.browser.playwright import PlaywrightDriver, can_report_success
         from kratos_agent.computer.browser.target import get_target_manager
         from kratos_agent.computer.browser.manager import get_browser_manager
 
-        query = cmd.parameters.get("query") or cmd.objective
+        query = str(cmd.parameters.get("query") or "").strip()
+        if not query:
+            return SlaveResult(
+                command_id=cmd.command_id,
+                task_id=cmd.task_id,
+                status="failed",
+                verified=False,
+                terminal=True,
+                error={
+                    "type": "TOOL_VALIDATION_ERROR",
+                    "message": "browser.youtube.play requires parameters.query; Slave does not parse natural language.",
+                },
+            )
         logger.info(f"[SlaveExecutor] Executing YouTube play: '{query}'")
 
         # Reuse or establish browser task context (§19)

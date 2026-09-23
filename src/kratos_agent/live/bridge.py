@@ -5,7 +5,6 @@ import logging
 import asyncio
 from typing import Any, Dict, Optional
 
-from kratos_agent.capabilities.discovery import discover_capabilities
 from kratos_agent.diagnostics.errors import error_from_exception
 from kratos_agent.master.supervisor import get_master_supervisor
 from kratos_agent.slave.executor import get_slave_executor
@@ -64,14 +63,9 @@ class KratosBridge:
         params = dict(parameters or {})
         constrs = dict(constraints or {})
         exp_res = dict(expected_result or {})
-        capability = str(action or "generic_task").strip()
+        capability = str(action or "").strip()
 
-        # Capability discovery is allowed to find implementations; it never interprets human language.
-        if capability in {"", "generic_task", "auto"}:
-            candidates = discover_capabilities(objective, limit=5)
-        else:
-            candidates = discover_capabilities(capability, limit=3)
-
+        # Transport boundary only. Gemini supplies semantic intent; Master owns discovery.
         if self.status_hub:
             self.status_hub.update(current_state=LiveState.EXECUTING)
 
@@ -89,7 +83,6 @@ class KratosBridge:
                     "request_id": request_id,
                     "turn_id": turn_id,
                     "tool_call_id": tool_call_id,
-                    "capability_candidates": candidates,
                 },
                 force=force,
             )
@@ -111,8 +104,7 @@ class KratosBridge:
             self.status_hub.update(active_task_id=result["task_id"])
         return {
             **result,
-            "capability": capability,
-            "capability_candidates": candidates,
+            "capability": result.get("capability") or capability or "generic_task",
         }
 
     async def cancel_active_task(self) -> Dict[str, Any]:

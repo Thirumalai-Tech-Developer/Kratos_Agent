@@ -44,12 +44,38 @@ def _builtin_capabilities() -> Iterable[CapabilitySpec]:
         ("code.build", "Build code", "Build the project and verify the build result.", "development"),
     ]
     for capability_id, name, description, category in specs:
+        readiness = {
+            "browser.youtube.play": "youtube_player_ready",
+            "browser.youtube.pause": "youtube_player_ready",
+            "browser.youtube.search": "youtube_search_ready",
+            "whatsapp.open": "whatsapp_ready",
+            "whatsapp.search_contact": "whatsapp_ready",
+            "whatsapp.send_message": "whatsapp_composer_ready",
+        }.get(capability_id)
+        verifier = {
+            "browser.youtube.play": "playback_state",
+            "browser.youtube.pause": "playback_state",
+            "whatsapp.send_message": "sent_message",
+            "filesystem.write": "file_exists_and_hash",
+            "terminal.execute": "exit_code_and_output",
+            "app.launch": "process_and_foreground_window",
+            "browser.navigate": "url_and_dom_readiness",
+        }.get(capability_id)
+        permission_map = {
+            "filesystem": ["read", "write", "execute"],
+            "development": ["read", "write", "execute"],
+            "network": ["network", "execute"],
+            "browser": ["network", "execute"],
+        }
         yield CapabilitySpec(
             capability_id=capability_id,
             name=name,
             description=description,
             category=category,
             supported_backends=["native", "uia", "dom", "cdp", "playwright", "vision", "terminal"],
+            verifier=verifier,
+            readiness_probe=readiness,
+            permissions=permission_map.get(category, ["execute"]),
         )
 
 

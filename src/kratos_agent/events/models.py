@@ -16,7 +16,6 @@ class EventType(str, Enum):
     OBSERVATION_COMPLETED = "observation_completed"
     PLAN_CREATED = "plan_created"
     TASK_STARTED = "task_started"
-    PLAN_CREATED = "plan_created"
     ACTION_STARTED = "action_started"
     ACTION_COMPLETED = "action_completed"
     ACTION_FAILED = "action_failed"
@@ -43,6 +42,9 @@ class AgentEvent:
     source: str = "agent"
     task_id: Optional[str] = None
     turn_id: Optional[str] = None
+    request_id: Optional[str] = None
+    action_id: Optional[str] = None
+    tool_call_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -54,6 +56,9 @@ class AgentEvent:
             "source": self.source,
             "task_id": self.task_id,
             "turn_id": self.turn_id,
+            "request_id": self.request_id,
+            "action_id": self.action_id,
+            "tool_call_id": self.tool_call_id,
         }
 
     @classmethod
@@ -73,4 +78,7 @@ class AgentEvent:
             source=data.get("source", "agent"),
             task_id=data.get("task_id"),
             turn_id=data.get("turn_id"),
+            request_id=data.get("request_id"),
+            action_id=data.get("action_id"),
+            tool_call_id=data.get("tool_call_id"),
         )

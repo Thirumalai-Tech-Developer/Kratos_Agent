@@ -74,7 +74,7 @@ class MissionCoordinator:
                 return
             mission.last_result = dict(result)
             status = str(result.get("status", "")).lower()
-            if status in {"success", "completed"} and result.get("verified", True):
+            if status in {"success", "completed"} and result.get("verified", False):
                 mission.transition(MissionState.COMPLETED, result=result)
             elif status in {"partial", "waiting"}:
                 mission.transition(MissionState.PARTIAL, result=result)

@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional
 from kratos_agent.diagnostics.errors import error_from_exception
 from kratos_agent.orchestrator.mission import get_mission_coordinator
 from kratos_agent.orchestrator.state import MissionState
+from kratos_agent.capabilities.discovery import discover_capabilities
 from .protocol import MasterCommand, SlaveAck, SlaveResult, get_command_bus
 
 logger = logging.getLogger(__name__)
@@ -59,25 +60,37 @@ class MasterSupervisor:
                     "active_task_id": self.active_task_id,
                 }
 
+        context_data = dict(context or {})
+        requested_capability = str(action or "").strip()
+        candidates: list[Dict[str, Any]] = []
+        if requested_capability in {"", "generic_task", "auto", "null", "none"}:
+            candidates = discover_capabilities(objective, limit=5)
+            requested_capability = (
+                str(candidates[0].get("capability_id") or "generic_task")
+                if candidates else "generic_task"
+            )
+        context_data["capability_candidates"] = candidates
+        context_data.setdefault("request_id", f"REQ-{uuid.uuid4().hex[:10].upper()}")
+
         cmd = MasterCommand.create(
             objective=objective,
-            action=action,
+            action=requested_capability,
             parameters=parameters or {},
             constraints=constraints or {},
             expected_result=expected_result or {},
-            context=context or {},
+            context=context_data,
             priority=priority,
             timeout=timeout,
             session_id=self.session_id,
-            request_id=(context or {}).get("request_id"),
-            turn_id=(context or {}).get("turn_id"),
-            action_id=(context or {}).get("action_id"),
-            tool_call_id=(context or {}).get("tool_call_id"),
+            request_id=context_data.get("request_id"),
+            turn_id=context_data.get("turn_id"),
+            action_id=context_data.get("action_id"),
+            tool_call_id=context_data.get("tool_call_id"),
         )
 
         mission = get_mission_coordinator().create(
             goal=objective,
-            capability=action,
+            capability=requested_capability,
             arguments=parameters or {},
             constraints=constraints or {},
             expected_result=expected_result or {},
@@ -96,7 +109,12 @@ class MasterSupervisor:
             self.active_objective = objective
             self.last_task_id = cmd.task_id
             self.last_started_at = time.time()
-            self.last_result = {"status": "started", "task_id": cmd.task_id, "capability": action}
+            self.last_result = {
+                "status": "started",
+                "task_id": cmd.task_id,
+                "capability": requested_capability,
+                "capability_candidates": candidates,
+            }
             self.last_error = None
 
         mission.transition(MissionState.EXECUTING, message="Slave execution started.")
@@ -126,7 +144,8 @@ class MasterSupervisor:
             "accepted": True,
             "task_id": cmd.task_id,
             "command_id": cmd.command_id,
-            "capability": action,
+            "capability": requested_capability,
+            "capability_candidates": candidates,
             "summary": f"Mission accepted for Slave execution: {objective}",
         }
 
