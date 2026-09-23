@@ -1,4 +1,4 @@
-"""Master supervisor coordinating Gemini Live Master and the CommandBus."""
+"""Master lifecycle supervisor for structured Gemini missions."""
 from __future__ import annotations
 
 import asyncio
@@ -6,29 +6,28 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
-from .protocol import (
-    CommandAction,
-    CommandPriority,
-    MasterCommand,
-    SlaveAck,
-    SlaveResult,
-    get_command_bus,
-)
+from kratos_agent.diagnostics.errors import error_from_exception
+from kratos_agent.orchestrator.mission import get_mission_coordinator
+from kratos_agent.orchestrator.state import MissionState
+from .protocol import MasterCommand, SlaveAck, SlaveResult, get_command_bus
 
 logger = logging.getLogger(__name__)
 
 
 class MasterSupervisor:
-    """Supervises task execution delegated from Gemini Live Master to OmniRoute Slave."""
-
     def __init__(self, session_id: Optional[str] = None) -> None:
         self.session_id = session_id or f"LIVE-{uuid.uuid4().hex[:6].upper()}"
         self.command_bus = get_command_bus()
         self.active_task_id: Optional[str] = None
         self.active_command_id: Optional[str] = None
         self.active_objective: Optional[str] = None
+        self.last_result: Optional[Dict[str, Any]] = None
+        self.last_error: Optional[Dict[str, Any]] = None
+        self.last_task_id: Optional[str] = None
+        self.last_started_at: Optional[float] = None
+        self.last_completed_at: Optional[float] = None
         self._lock = threading.Lock()
         self._on_speech_feedback: Optional[Callable[[str], None]] = None
 
@@ -51,14 +50,12 @@ class MasterSupervisor:
         context: Optional[Dict[str, Any]] = None,
         force: bool = False,
     ) -> Dict[str, Any]:
-        """Submits a structured MasterCommand to the Slave via the CommandBus."""
         with self._lock:
             if self.active_task_id is not None and not force and priority.lower() != "cancel":
-                logger.info(f"[MasterSupervisor] Rejecting command — busy with {self.active_task_id}")
                 return {
                     "status": "busy",
                     "accepted": False,
-                    "message": f"I am already working on: '{self.active_objective}'. Would you like to cancel it?",
+                    "message": f"Another mission is active: {self.active_objective or self.active_task_id}.",
                     "active_task_id": self.active_task_id,
                 }
 
@@ -72,66 +69,116 @@ class MasterSupervisor:
             priority=priority,
             timeout=timeout,
             session_id=self.session_id,
+            request_id=(context or {}).get("request_id"),
+            turn_id=(context or {}).get("turn_id"),
+            action_id=(context or {}).get("action_id"),
+            tool_call_id=(context or {}).get("tool_call_id"),
         )
+
+        mission = get_mission_coordinator().create(
+            goal=objective,
+            capability=action,
+            arguments=parameters or {},
+            constraints=constraints or {},
+            expected_result=expected_result or {},
+            priority=priority,
+            request_id=(context or {}).get("request_id") or None,
+            task_id=cmd.task_id,
+        )
+        mission.task_id = cmd.task_id
+        mission.transition(MissionState.ANALYZING, message="Structured mission accepted from Gemini.")
+        mission.transition(MissionState.PLANNING, message="Master created execution plan.")
+        mission.transition(MissionState.READY, message="Master accepted mission for Slave.")
 
         with self._lock:
             self.active_task_id = cmd.task_id
             self.active_command_id = cmd.command_id
             self.active_objective = objective
+            self.last_task_id = cmd.task_id
+            self.last_started_at = time.time()
+            self.last_result = {"status": "started", "task_id": cmd.task_id, "capability": action}
+            self.last_error = None
 
-        logger.info(f"[MasterSupervisor] Submitting command {cmd.command_id} ({cmd.action}) for task {cmd.task_id}")
+        mission.transition(MissionState.EXECUTING, message="Slave execution started.")
         ack_fut, result_fut = await self.command_bus.send_command(cmd)
-
-        # Wait for immediate Slave acknowledgement with short timeout (e.g. 5s)
         try:
             ack: SlaveAck = await asyncio.wait_for(ack_fut, timeout=5.0)
-            if not ack.accepted:
-                with self._lock:
-                    if self.active_command_id == cmd.command_id:
-                        self.active_task_id = None
-                        self.active_command_id = None
-                        self.active_objective = None
-                return {
-                    "status": "rejected",
-                    "accepted": False,
-                    "command_id": cmd.command_id,
-                    "task_id": cmd.task_id,
-                    "message": ack.message or "Slave rejected the command.",
-                }
         except asyncio.TimeoutError:
-            logger.warning(f"[MasterSupervisor] Timeout waiting for Slave ACK for {cmd.command_id}")
-            # Proceed optimistically if ack delayed
             ack = SlaveAck(command_id=cmd.command_id, task_id=cmd.task_id, accepted=True, status="accepted")
 
-        # Background task to await result and notify speech callback
-        asyncio.create_task(self._await_result(cmd, result_fut))
+        if not ack.accepted:
+            with self._lock:
+                self.last_result = {
+                    "status": "rejected",
+                    "task_id": cmd.task_id,
+                    "capability": action,
+                    "message": ack.message or "Slave rejected the mission.",
+                }
+                self.active_task_id = None
+                self.active_command_id = None
+                self.active_objective = None
+            get_mission_coordinator().update_result(cmd.task_id, self.last_result)
+            return self.last_result
 
+        asyncio.create_task(self._await_result(cmd, result_fut))
         return {
             "status": "started",
             "accepted": True,
-            "command_id": cmd.command_id,
             "task_id": cmd.task_id,
-            "summary": f"Task '{objective}' delegated to Slave. Waiting for verified execution.",
+            "command_id": cmd.command_id,
+            "capability": action,
+            "summary": f"Mission accepted for Slave execution: {objective}",
         }
 
     async def _await_result(self, cmd: MasterCommand, result_fut: asyncio.Future[SlaveResult]) -> None:
         try:
             result = await asyncio.wait_for(result_fut, timeout=cmd.timeout)
-            logger.info(f"[MasterSupervisor] Received SlaveResult for {result.command_id}: status={result.status}, verified={result.verified}")
-            spoken_summary = self.format_response_for_master(result)
-            if self._on_speech_feedback and spoken_summary:
-                self._on_speech_feedback(spoken_summary)
-        except asyncio.TimeoutError:
-            logger.error(f"[MasterSupervisor] Execution timeout ({cmd.timeout}s) for {cmd.command_id}")
+            result_dict = result.to_dict()
+            mission = get_mission_coordinator().get(cmd.task_id)
+            if mission:
+                mission.transition(MissionState.VERIFYING, message="Master received Slave result; verifying evidence.")
+            with self._lock:
+                self.last_result = result_dict
+                self.last_completed_at = time.time()
+                self.last_error = result.error or None
+            get_mission_coordinator().update_result(cmd.task_id, result_dict)
+            summary = self.format_response_for_master(result)
+            if self._on_speech_feedback and summary:
+                self._on_speech_feedback(summary)
+        except asyncio.TimeoutError as exc:
+            error = error_from_exception(
+                exc,
+                component="MasterSupervisor",
+                stage="execution_timeout",
+                task_id=cmd.task_id,
+                retryable=True,
+                recovery_action="Inspect current task state and retry after fresh observation.",
+                user_message=f"Mission {cmd.task_id} timed out before verified completion.",
+            ).to_dict()
+            with self._lock:
+                self.last_error = error
+                self.last_result = {"status": "failed", "task_id": cmd.task_id, "error": error}
+                self.last_completed_at = time.time()
+            get_mission_coordinator().update_result(cmd.task_id, self.last_result)
             if self._on_speech_feedback:
-                self._on_speech_feedback("The execution timed out before verifying the result.")
-        except Exception as e:
-            logger.exception(f"[MasterSupervisor] Error awaiting result for {cmd.command_id}: {e}")
-            err_text = str(e).strip() or type(e).__name__
+                self._on_speech_feedback(error["user_message"])
+        except Exception as exc:
+            error = error_from_exception(
+                exc,
+                component="MasterSupervisor",
+                stage="await_result",
+                task_id=cmd.task_id,
+                retryable=True,
+                recovery_action="Inspect Slave status and retry the mission.",
+                user_message=f"Mission execution failed in Master while waiting for the Slave: {type(exc).__name__}.",
+            ).to_dict()
+            with self._lock:
+                self.last_error = error
+                self.last_result = {"status": "failed", "task_id": cmd.task_id, "error": error}
+                self.last_completed_at = time.time()
+            get_mission_coordinator().update_result(cmd.task_id, self.last_result)
             if self._on_speech_feedback:
-                self._on_speech_feedback(
-                    f"Execution error in the requested task: {type(e).__name__}: {err_text}"
-                )
+                self._on_speech_feedback(error["user_message"])
         finally:
             with self._lock:
                 if self.active_command_id == cmd.command_id:
@@ -140,54 +187,73 @@ class MasterSupervisor:
                     self.active_objective = None
 
     async def cancel_active_task(self, reason: str = "User cancelled") -> Dict[str, Any]:
-        """Cancels the currently running task."""
         with self._lock:
-            tid = self.active_task_id
+            task_id = self.active_task_id
+        if not task_id:
+            return {"status": "idle", "message": "No active mission."}
+
+        await self.command_bus.cancel_task(task_id, reason)
+        with self._lock:
+            self.last_result = {"status": "cancelled", "task_id": task_id, "message": reason}
+            self.last_completed_at = time.time()
             self.active_task_id = None
             self.active_command_id = None
             self.active_objective = None
+        get_mission_coordinator().update_result(task_id, self.last_result)
+        return self.last_result
 
-        if tid:
-            await self.command_bus.cancel_task(tid, reason)
-            return {"status": "cancelled", "task_id": tid, "message": f"Task {tid} cancellation sent to Slave."}
-        return {"status": "idle", "message": "No active task to cancel."}
+    def get_status(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+        with self._lock:
+            active_id = self.active_task_id
+            objective = self.active_objective
+            result = dict(self.last_result or {})
+            error = dict(self.last_error or {}) if self.last_error else None
+
+        selected_task = task_id or active_id or result.get("task_id") or self.last_task_id
+        mission = get_mission_coordinator().get(selected_task) if selected_task else None
+        return {
+            "status": "running" if active_id else (result.get("status") or "idle"),
+            "state": (mission.state_machine.state.value if mission and mission.state_machine else None),
+            "current_state": (mission.state_machine.state.value if mission and mission.state_machine else None),
+            "task_id": selected_task,
+            "active_task_id": active_id,
+            "mission": mission.goal if mission else objective,
+            "current_stage": (mission.state_machine.state.value if mission and mission.state_machine else None),
+            "current_capability": mission.capability if mission else result.get("capability"),
+            "execution_backend": (result.get("evidence") or {}).get("backend"),
+            "last_event": (mission.state_machine.history[-1] if mission and mission.state_machine and mission.state_machine.history else None),
+            "last_result": result or None,
+            "last_error": error,
+            "error_component": error.get("component") if error else None,
+            "retryable": bool(error.get("retryable")) if error else False,
+            "recovery_attempt": (error.get("recovery_action") if error else None),
+            "is_busy": bool(active_id),
+            "active_task_desc": objective,
+        }
 
     def format_response_for_master(self, result: SlaveResult) -> str:
-        """Transforms a structured SlaveResult into concise spoken text for the Master to speak."""
         if result.is_success():
             if result.state == "VIDEO_PLAYING":
                 return "Done — the video is playing."
-            elif result.state == "SEARCH_RESULTS":
-                return "Done — search results are displayed on screen."
-            elif result.state == "APPLICATION_OPENED":
-                return "Done — the application is open and ready in the foreground."
-            elif result.evidence.get("message"):
+            if result.state == "SEARCH_RESULTS":
+                return "Done — search results are displayed."
+            if result.state == "APPLICATION_OPENED":
+                return "Done — the application is open and verified."
+            if result.evidence.get("message"):
                 return f"Done — {result.evidence['message']}"
-            return "Done — the task completed successfully and verified."
-
-        elif result.status == "failed":
-            err_msg = ""
-            if result.error:
-                err_msg = result.error.get("message") or str(result.error)
-            elif result.evidence.get("error"):
-                err_msg = str(result.evidence["error"])
-            return f"I encountered an issue executing the task: {err_msg or 'Verification failed.'}"
-
-        elif result.status == "partial":
-            done_items = result.evidence.get("completed_steps", [])
-            return f"Partially completed: {', '.join(done_items) if done_items else 'initial steps done'}."
-
-        elif result.status == "permission_required":
-            target = result.evidence.get("target", "operation")
-            return f"Permission required to perform {target}. Would you like me to proceed?"
-
-        elif result.status == "ambiguous":
-            return result.evidence.get("clarification_question", "Could you please clarify your request?")
-
-        return "Task status received."
+            return "Done — the mission completed and was physically verified."
+        if result.status == "failed":
+            message = (result.error or {}).get("message") or "Verification failed."
+            return f"The mission failed during execution: {message}"
+        if result.status == "partial":
+            return "The mission is partially complete; final state was not fully verified."
+        if result.status == "permission_required":
+            return "The operating system requires elevation for this action."
+        if result.status == "ambiguous":
+            return result.evidence.get("clarification_question", "The target is ambiguous.")
+        return f"Mission status: {result.status}."
 
 
-# Global supervisor singleton
 _global_supervisor: Optional[MasterSupervisor] = None
 
 

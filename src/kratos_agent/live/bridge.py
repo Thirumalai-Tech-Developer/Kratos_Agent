@@ -1,43 +1,31 @@
-"""Kratos Bridge connecting Gemini Live Master to OmniRoute Slave execution bus."""
+"""Bridge from Gemini semantic missions to Master/Slave execution."""
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
-import threading
-import uuid
+import asyncio
 from typing import Any, Dict, Optional
 
-from kratos_agent.master.protocol import MasterCommand, SlaveAck, SlaveResult, get_command_bus
-from kratos_agent.master.supervisor import MasterSupervisor, get_master_supervisor
-from kratos_agent.slave.executor import SlaveExecutor, get_slave_executor
+from kratos_agent.capabilities.discovery import discover_capabilities
+from kratos_agent.diagnostics.errors import error_from_exception
+from kratos_agent.master.supervisor import get_master_supervisor
+from kratos_agent.slave.executor import get_slave_executor
 from .events import LiveState, LiveStatusHub
 
 logger = logging.getLogger(__name__)
 
 
 class KratosBridge:
-    """Upgraded bridge orchestrating MasterCommandQueue, SlaveResultQueue, and status."""
-
-    def __init__(
-        self,
-        runtime: Optional[Any] = None,
-        status_hub: Optional[LiveStatusHub] = None,
-    ) -> None:
+    def __init__(self, runtime: Optional[Any] = None, status_hub: Optional[LiveStatusHub] = None) -> None:
         if runtime is None:
             from kratos_agent.main import runtime as default_runtime
-            self.runtime = default_runtime
-        else:
-            self.runtime = runtime
-
+            runtime = default_runtime
+        self.runtime = runtime
         self.status_hub = status_hub
         self.supervisor = get_master_supervisor()
         self.slave_executor = get_slave_executor()
         self.slave_executor.runtime = self.runtime
-
-        # Ensure slave executor is running
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             self.slave_executor.start()
         except RuntimeError:
             pass
@@ -56,109 +44,93 @@ class KratosBridge:
         priority: str = "normal",
         timeout: float = 60.0,
         force: bool = False,
+        request_id: str = "",
+        turn_id: str = "",
+        tool_call_id: str = "",
     ) -> Dict[str, Any]:
-        """Submits an actionable command from Master to Slave via CommandBus."""
         from kratos_agent.live.echo_guard import get_echo_guard
         from kratos_agent.core.task_deduplicator import get_task_deduplicator
 
         if get_echo_guard().should_suppress_mic():
-            logger.info(f"[LiveBridge] Suppressed echo task: {task_description}")
-            return {"status": "echo_suppressed", "message": "Ignored microphone input during or right after TTS playback."}
+            return {"status": "echo_suppressed", "message": "Ignored microphone echo during or immediately after TTS playback."}
 
         if get_task_deduplicator().is_duplicate(task_description):
-            logger.info(f"[LiveBridge] Suppressed duplicate task: {task_description}")
-            return {"status": "duplicate_suppressed", "message": "Duplicate task received within 3s window."}
+            return {"status": "duplicate_suppressed", "message": "Duplicate request suppressed by request deduplication."}
 
-        # Auto-detect intent if not explicitly set
-        desc_lower = task_description.lower().strip()
+        objective = str(task_description or "").strip()
+        if not objective:
+            return {"status": "error", "error_type": "validation_error", "message": "Mission objective is empty."}
+
         params = dict(parameters or {})
         constrs = dict(constraints or {})
         exp_res = dict(expected_result or {})
+        capability = str(action or "generic_task").strip()
 
-        if action == "generic_task":
-            from kratos_agent.computer.browser.intent import is_pure_browser_media_request, is_pure_app_launch_request
-            if is_pure_browser_media_request(task_description):
-                action = "browser.youtube.play"
-                params["query"] = task_description.replace("open youtube and play", "").replace("play", "").replace("on youtube", "").strip()
-                constrs.update({"reuse_existing_chrome_window": True, "create_one_task_tab": True, "reuse_task_tab": True, "foreground_required": True})
-                exp_res.update({"video_playing": True, "playback_advancing": True})
-            elif is_pure_app_launch_request(task_description):
-                action = "open_application"
-                app_text = re.sub(r"^(?:can you|could you|please)\s+", "", task_description.strip(), flags=re.IGNORECASE)
-                params["app_name"] = re.sub(r"^(?:open|launch|start)\s+", "", app_text, flags=re.IGNORECASE).strip()
-            elif any(desc_lower.startswith(p) for p in ("search ", "find ", "who is ", "what is ")):
-                action = "search"
-                params["query"] = task_description
-
-        # Start slave background loop if not already started
-        self.slave_executor.start()
+        # Capability discovery is allowed to find implementations; it never interprets human language.
+        if capability in {"", "generic_task", "auto"}:
+            candidates = discover_capabilities(objective, limit=5)
+        else:
+            candidates = discover_capabilities(capability, limit=3)
 
         if self.status_hub:
             self.status_hub.update(current_state=LiveState.EXECUTING)
 
-        logger.info(f"[MASTER -> SLAVE] Delegating action='{action}', objective='{task_description[:80]}'")
-        print(f"\n⚡ [Master -> Slave Command]: {task_description} ({action})\n", flush=True)
-
         try:
-            res = await self.supervisor.submit_delegated_task(
-                objective=task_description,
-                action=action,
+            result = await self.supervisor.submit_delegated_task(
+                objective=objective,
+                action=capability,
                 parameters=params,
                 constraints=constrs,
                 expected_result=exp_res,
                 priority=priority,
                 timeout=timeout,
-                context={"visual_context": visual_context} if visual_context else None,
+                context={
+                    "visual_context": visual_context,
+                    "request_id": request_id,
+                    "turn_id": turn_id,
+                    "tool_call_id": tool_call_id,
+                    "capability_candidates": candidates,
+                },
                 force=force,
             )
         except Exception as exc:
-            err_text = str(exc).strip() or type(exc).__name__
-            logger.exception("[LiveBridge] Task submission failed: %s", err_text)
+            error = error_from_exception(
+                exc,
+                component="KratosBridge",
+                stage="task_submission",
+                request_id=request_id or None,
+                retryable=True,
+                recovery_action="Retry submission or inspect Master/Slave status.",
+            )
+            logger.exception("[LiveBridge] task submission failed")
             if self.status_hub:
-                self.status_hub.report_error("slave", f"{type(exc).__name__}: {err_text}")
-            return {
-                "status": "error",
-                "accepted": False,
-                "error_type": type(exc).__name__,
-                "message": err_text,
-            }
+                self.status_hub.report_error("bridge", error.user_message)
+            return {"status": "failed", "accepted": False, "error": error.to_dict()}
 
-        if self.status_hub and res.get("task_id"):
-            self.status_hub.update(active_task_id=res["task_id"])
-        return res
+        if self.status_hub and result.get("task_id"):
+            self.status_hub.update(active_task_id=result["task_id"])
+        return {
+            **result,
+            "capability": capability,
+            "capability_candidates": candidates,
+        }
 
     async def cancel_active_task(self) -> Dict[str, Any]:
-        """Cancels active task across the Master/Slave bus."""
-        res = await self.supervisor.cancel_active_task()
+        result = await self.supervisor.cancel_active_task()
         if hasattr(self.runtime, "cancel"):
             self.runtime.cancel()
         if self.status_hub:
             self.status_hub.update(active_task_id=None, current_state=LiveState.IDLE)
-        return res
+        return result
 
-    def get_status(self) -> Dict[str, Any]:
-        """Returns the current Master/Slave execution status."""
-        plan_dict = None
-        if hasattr(self.runtime, "loop") and getattr(self.runtime.loop, "current_plan", None):
-            plan_dict = self.runtime.loop.current_plan.to_dict()
-
-        live_error = None
-        live_error_component = None
-        live_connected = None
-        live_health = None
+    def get_status(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+        status = self.supervisor.get_status(task_id)
         if self.status_hub:
-            live_error = self.status_hub.status.last_error
-            live_error_component = self.status_hub.status.last_error_component
-            live_connected = self.status_hub.status.gemini_connected
-            live_health = self.status_hub.status.live_health
-
-        return {
-            "is_busy": self.is_busy(),
-            "active_task_id": self.supervisor.active_task_id,
-            "active_task_desc": self.supervisor.active_objective,
-            "plan": plan_dict,
-            "live_connected": live_connected,
-            "live_health": live_health,
-            "last_error": live_error,
-            "last_error_component": live_error_component,
-        }
+            live = self.status_hub.status
+            status.update({
+                "live_connected": live.gemini_connected,
+                "live_health": live.live_health,
+                "last_error": live.last_error or status.get("last_error"),
+                "last_error_component": live.last_error_component or status.get("error_component"),
+            })
+        return status

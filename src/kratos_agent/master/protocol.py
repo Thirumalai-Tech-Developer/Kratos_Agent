@@ -67,6 +67,10 @@ class MasterCommand:
     task_id: str
     objective: str
     action: str
+    request_id: str = ""
+    turn_id: str = ""
+    action_id: str = ""
+    tool_call_id: str = ""
     parameters: Dict[str, Any] = field(default_factory=dict)
     constraints: Dict[str, Any] = field(default_factory=dict)
     expected_result: Dict[str, Any] = field(default_factory=dict)
@@ -88,6 +92,10 @@ class MasterCommand:
         timeout: float = 60.0,
         session_id: Optional[str] = None,
         task_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
+        action_id: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
     ) -> MasterCommand:
         cid = f"CMD-{uuid.uuid4().hex[:8].upper()}"
         tid = task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
@@ -96,6 +104,10 @@ class MasterCommand:
             command_id=cid,
             session_id=sid,
             task_id=tid,
+            request_id=request_id or "",
+            turn_id=turn_id or "",
+            action_id=action_id or f"ACT-{uuid.uuid4().hex[:8].upper()}",
+            tool_call_id=tool_call_id or "",
             objective=objective,
             action=action,
             parameters=parameters or {},
@@ -111,6 +123,10 @@ class MasterCommand:
             "command_id": self.command_id,
             "session_id": self.session_id,
             "task_id": self.task_id,
+            "request_id": self.request_id,
+            "turn_id": self.turn_id,
+            "action_id": self.action_id,
+            "tool_call_id": self.tool_call_id,
             "objective": self.objective,
             "action": self.action,
             "parameters": self.parameters,
@@ -128,6 +144,10 @@ class MasterCommand:
             command_id=data["command_id"],
             session_id=data.get("session_id", "default"),
             task_id=data["task_id"],
+            request_id=data.get("request_id", ""),
+            turn_id=data.get("turn_id", ""),
+            action_id=data.get("action_id", ""),
+            tool_call_id=data.get("tool_call_id", ""),
             objective=data.get("objective", ""),
             action=data.get("action", "generic_task"),
             parameters=data.get("parameters", {}),

@@ -151,14 +151,25 @@ class LiveRuntime:
         if not self.status_hub.get_status().gemini_connected:
             return None
         try:
+            from kratos_agent.interfaces.cli import build_cli_input
+            envelope = build_cli_input(text)
             fut = asyncio.run_coroutine_threadsafe(
-                self.session.send_text_turn(text, timeout=timeout),
+                self.session.send_text_turn(envelope.text, timeout=timeout),
                 self._loop,
             )
-            return fut.result(timeout=timeout + 3.0)
+            result = fut.result(timeout=timeout + 3.0)
+            if result:
+                return result
+            status = self.bridge.get_status()
+            error = status.get("last_error")
+            if error:
+                return str(error.get("user_message") or error.get("message") or "Live turn completed without a model response.")
+            return "Gemini Live completed the turn without returning a user-facing response."
         except Exception as e:
-            logger.warning(f"[LiveRuntime] Error in send_chat_turn_sync: {e}")
-            return None
+            logger.exception("[LiveRuntime] Error in send_chat_turn_sync")
+            message = str(e).strip() or type(e).__name__
+            self.status_hub.report_error("live_runtime", message)
+            return f"Gemini Live turn failed: {type(e).__name__}: {message}"
 
     def capture_screen_now_sync(self) -> None:
         """Safely triggers an on-demand screen capture from non-async threads."""

@@ -77,13 +77,23 @@ class SlaveExecutor:
                     result = await self._execute_command(cmd)
                 except Exception as e:
                     logger.error(f"[SlaveExecutor] Execution exception on {cmd.command_id}: {e}", exc_info=True)
+                    from kratos_agent.diagnostics.errors import error_from_exception
+                    err = error_from_exception(
+                        e,
+                        component="SlaveExecutor",
+                        stage="physical_execution",
+                        task_id=cmd.task_id,
+                        request_id=cmd.request_id or None,
+                        retryable=True,
+                        recovery_action="Inspect execution evidence and retry with another authorized backend.",
+                    )
                     result = SlaveResult(
                         command_id=cmd.command_id,
                         task_id=cmd.task_id,
                         status="failed",
                         verified=False,
                         terminal=True,
-                        error={"type": type(e).__name__, "message": str(e)},
+                        error=err.to_dict(),
                         duration_ms=(time.time() - started_at) * 1000,
                     )
 
@@ -128,31 +138,11 @@ class SlaveExecutor:
         """Routes command to appropriate deterministic execution handler."""
         action = cmd.action.lower()
 
-        # 1. Browser actions
-        if action in ("browser.youtube.play", "browser_youtube_play", "play_video") or "youtube" in action:
-            return await self._execute_youtube_play(cmd)
-        elif action in ("browser.open", "browser_open", "browser.navigate", "browser_navigate"):
-            return await self._execute_browser_open(cmd)
-        elif action in ("browser.pause", "browser_pause"):
-            return await self._execute_browser_pause(cmd)
-        elif action in ("browser.resume", "browser_resume"):
-            return await self._execute_browser_resume(cmd)
-
-        # 2. Desktop Application actions
-        elif action in ("open_application", "app.launch", "app_launch") or action.startswith("app."):
-            return await self._execute_app_launch(cmd)
-
-        # 3. Web Search actions
-        elif action in ("search", "web_search", "search.web"):
-            return await self._execute_search(cmd)
-
-        # 4. Screen Observation actions
-        elif action in ("observe", "observe_screen", "screen_capture"):
-            return await self._execute_observe(cmd)
-
-        # 5. Generic agent task (AgentLoop / tools)
-        else:
-            return await self._execute_agent_task(cmd)
+        # Structured capability dispatch only. No natural-language routing happens here.
+        from kratos_agent.slave.dispatcher import SlaveDispatcher
+        if not hasattr(self, "_dispatcher"):
+            self._dispatcher = SlaveDispatcher(self)
+        return await self._dispatcher.dispatch(cmd)
 
     async def _execute_youtube_play(self, cmd: MasterCommand) -> SlaveResult:
         """Executes YouTube playback with strict physical verification."""
