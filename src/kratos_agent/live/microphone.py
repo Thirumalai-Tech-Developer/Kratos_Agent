@@ -458,12 +458,14 @@ class MicrophoneListener:
             self._stream = sd.RawInputStream(**stream_kwargs)
             self._stream.start()
             if self.status_hub:
-                self.status_hub.update(microphone_active=True)
+                self.status_hub.clear_error("microphone")
+                self.status_hub.update(microphone_active=True, microphone_health="online")
         except Exception as e:
             err_msg = f"Failed to open microphone stream ({type(e).__name__}): {e}"
             logger.warning(f"[Microphone] {err_msg}")
             if self.status_hub:
-                self.status_hub.update(microphone_active=False, last_error=err_msg)
+                self.status_hub.update(microphone_active=False, microphone_health="error")
+                self.status_hub.report_error("microphone", err_msg)
             self.is_running = False
             return
 
@@ -487,7 +489,8 @@ class MicrophoneListener:
         except Exception as e:
             logger.warning(f"[Microphone] Error during audio capture: {e}")
             if self.status_hub:
-                self.status_hub.update(last_error=f"Microphone capture error: {e}")
+                self.status_hub.update(microphone_health="error")
+                self.status_hub.report_error("microphone", f"Microphone capture error: {e}")
         finally:
             self.is_running = False
             if self._stream:
@@ -498,7 +501,7 @@ class MicrophoneListener:
                     pass
                 self._stream = None
             if self.status_hub:
-                self.status_hub.update(microphone_active=False)
+                self.status_hub.update(microphone_active=False, microphone_health="offline")
 
     async def _run_pyaudio(self) -> None:
         try:
@@ -561,7 +564,8 @@ class MicrophoneListener:
         except Exception as e:
             logger.warning(f"[Microphone] Error during PyAudio capture: {e}")
             if self.status_hub:
-                self.status_hub.update(last_error=f"PyAudio capture error: {e}")
+                self.status_hub.update(microphone_health="error")
+                self.status_hub.report_error("microphone", f"PyAudio capture error: {e}")
         finally:
             self.is_running = False
             if self._stream:

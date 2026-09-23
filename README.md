@@ -130,9 +130,20 @@ USER ───► [ 🎤 SPEAK / 👁️ CAMERA / 🖥️ SCREEN ]
 * 🔊 **Natural Voice Output**: 24kHz 16-bit PCM speaker output playing Gemini's spoken replies with zero conversational latency.
 * 👁️ **Camera Vision**: Real-time video frame capture via OpenCV (`cv2.VideoCapture`) with automatic thumbnail compression and ~1 FPS throttling.
 * 🖥️ **Screen Vision**: Primary monitor capture via `mss` with automatic aspect ratio scaling and ~1 FPS throttling.
-* 🧠 **Single Unified Runtime**: No separate "Live Agent" or duplicate planners. Gemini Live delegates workspace tasks to Kratos via native Live tool calls (`start_agent_task`, `cancel_active_task`, `get_task_status`).
+* 🧠 **Single Unified Runtime**: No separate "Live Agent" or duplicate planners. Gemini Live delegates workspace tasks to Kratos through the current Master/Slave bridge using non-blocking Live tools (`delegate_task`, `search`, `observe`, `get_task_status`, `cancel_task`, `continue_task`, with `start_agent_task` retained as a compatibility alias).
 * 🎙️ **Event Narration**: High-signal execution milestones (`INSPECTING`, `PLANNING`, `MODIFYING`, `RUNNING_TESTS`, `VERIFYING`, `COMPLETED`) are automatically sanitized and narrated in natural speech.
 * 🛡️ **Fault Isolation**: If microphone or camera is unavailable, Kratos CLI and Web continue operating normally without interruption.
+
+### 🔧 Gemini Live Reliability & Error Isolation
+
+The Live integration is aligned with the current **Gemini 3.8 Live Extended Thinking** contract:
+
+- Live function declarations use `behavior="NON_BLOCKING"`.
+- The runtime tracks `interaction_status` (`IN_PROGRESS` / `IDLE`) instead of treating `turnComplete` as the end of the whole extended-thinking interaction.
+- Component failures are isolated and reported separately for Gemini, microphone, speaker, camera, and screen capture.
+- `/voice on|off` controls the microphone only; speaker output remains available.
+- Screen/camera capture failures do not terminate the Gemini or Kratos runtime.
+- Gemini credentials are resolved from the project environment; no machine-specific `C:\\Users\\...` fallback path is used.
 
 ### ⚡ Single-Command Startup
 

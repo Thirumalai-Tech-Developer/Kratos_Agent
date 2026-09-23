@@ -256,6 +256,8 @@ class LiveRuntime:
             self._loop = loop
             try:
                 loop.run_until_complete(self.start())
+                if not self._is_running:
+                    return
                 loop.run_forever()
             except Exception as e:
                 logger.warning(f"[LiveRuntime] Background thread error: {e}")

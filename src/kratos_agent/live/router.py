@@ -53,6 +53,7 @@ class LiveRouter:
         """Returns the small, dedicated Master-level tool declarations for Gemini Live Master."""
         delegate_task_fn = types.FunctionDeclaration(
             name="delegate_task",
+            behavior="NON_BLOCKING",
             description=(
                 "Delegate an autonomous execution command to the Slave agent (OmniRoute / Brain runtime). "
                 "Call this whenever the user wants to open/close/launch any application, browse/click/type/search "
@@ -94,6 +95,7 @@ class LiveRouter:
 
         search_fn = types.FunctionDeclaration(
             name="search",
+            behavior="NON_BLOCKING",
             description=(
                 "Search the web, technical documentation, or GitHub via Kratos Search Fabric. "
                 "Use this to answer factual questions, find downloads, or look up information."
@@ -110,6 +112,7 @@ class LiveRouter:
 
         observe_fn = types.FunctionDeclaration(
             name="observe",
+            behavior="NON_BLOCKING",
             description="Capture and inspect a fresh desktop screen frame or specific application window.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -121,6 +124,7 @@ class LiveRouter:
 
         get_status_fn = types.FunctionDeclaration(
             name="get_task_status",
+            behavior="NON_BLOCKING",
             description="Get the status, plan, and progress of the active Slave task.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -132,6 +136,7 @@ class LiveRouter:
 
         cancel_task_fn = types.FunctionDeclaration(
             name="cancel_task",
+            behavior="NON_BLOCKING",
             description="Immediately stop and abort the active Slave execution task.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -143,6 +148,7 @@ class LiveRouter:
 
         continue_task_fn = types.FunctionDeclaration(
             name="continue_task",
+            behavior="NON_BLOCKING",
             description="Instruct the Slave to continue the active browser session or task tab without creating a new window.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -155,6 +161,7 @@ class LiveRouter:
 
         ask_user_fn = types.FunctionDeclaration(
             name="ask_user",
+            behavior="NON_BLOCKING",
             description="Ask the user for confirmation or clarification before proceeding with high-impact actions.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -168,6 +175,7 @@ class LiveRouter:
         # Legacy alias function for compatibility
         start_task_fn = types.FunctionDeclaration(
             name="start_agent_task",
+            behavior="NON_BLOCKING",
             description="Legacy alias for delegate_task. Submits task to Slave.",
             parameters=types.Schema(
                 type="OBJECT",
@@ -247,10 +255,19 @@ class LiveRouter:
                         res = await self.capture_screen_handler()
                     else:
                         res = self.capture_screen_handler()
-                    if res is False or (isinstance(res, dict) and res.get("status") == "error"):
-                        err_msg = res.get("message") or res.get("error") if isinstance(res, dict) else "Screen capture failed"
+                    if res is None or res is False:
+                        return {"status": "error", "message": "Screen capture failed: no frame was captured."}
+                    if isinstance(res, dict) and res.get("status") == "error":
+                        err_msg = res.get("message") or res.get("error") or "Screen capture failed"
                         return {"status": "error", "message": f"Screen capture failed: {err_msg}"}
-                    return {"status": "success", "message": "Desktop screen captured and streamed to your visual perception."}
+                    metadata = {}
+                    if hasattr(res, "width") and hasattr(res, "height"):
+                        metadata = {"width": res.width, "height": res.height}
+                    return {
+                        "status": "success",
+                        "message": "Desktop screen captured and streamed to your visual perception.",
+                        **metadata,
+                    }
                 except Exception as e:
                     return {"status": "error", "message": f"Screen capture exception: {e}"}
             return {"status": "error", "message": "Screen capture handler not configured."}

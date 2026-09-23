@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+import uuid
 from typing import Any, Callable, Dict, Optional
 
 from google import genai
@@ -153,6 +155,9 @@ class LiveSession:
         self._send_lock = asyncio.Lock()
         self._turn_complete_event: Optional[asyncio.Event] = None
         self._turn_transcript_chunks: list[str] = []
+        self._last_heartbeat: float = 0.0
+        self._last_logged_error: str = ""
+        self._last_logged_error_time: float = 0.0
 
         # Wire speech feedback from Slave execution to Gemini Master narration
         get_master_supervisor().set_speech_callback(self._on_slave_result_feedback)
@@ -162,6 +167,30 @@ class LiveSession:
         if self.is_running and self.session is not None and text.strip():
             asyncio.create_task(self.send_narration(text.strip()))
 
+
+    @staticmethod
+    def _normalize_interaction_status(value: Any) -> Optional[str]:
+        """Normalize SDK enum/string values for Gemini 3.8 Live interaction lifecycle handling."""
+        if value is None:
+            return None
+        raw = getattr(value, "value", value)
+        text = str(raw).strip().upper()
+        return text or None
+
+    @staticmethod
+    def _extract_interaction_status(response: Any) -> Optional[str]:
+        """Read interaction_status across SDK response layouts for forward compatibility."""
+        value = getattr(response, "interaction_status", None)
+        if value is None:
+            server_content = getattr(response, "server_content", None)
+            value = getattr(server_content, "interaction_status", None)
+        if value is None:
+            value = getattr(response, "interactionStatus", None)
+        return LiveSession._normalize_interaction_status(value)
+
+    def _requires_interaction_status(self) -> bool:
+        """Gemini 3.8 Live Extended Thinking uses interaction_status instead of turnComplete alone."""
+        return "extended-thinking" in self.config.model.lower()
 
     def _build_connect_config(self) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
@@ -310,6 +339,11 @@ class LiveSession:
                     if not self.is_running:
                         break
 
+                    self._last_heartbeat = time.time()
+                    interaction_status = self._extract_interaction_status(response)
+                    if self.status_hub:
+                        self.status_hub.update(last_heartbeat=self._last_heartbeat)
+
                     # 1. Check Tool Calls
                     tool_call = getattr(response, "tool_call", None)
                     if tool_call and hasattr(tool_call, "function_calls"):
@@ -431,7 +465,21 @@ class LiveSession:
                                 else:
                                     print(f"\n⚡ [Voice] Kratos: {sentence}\n", flush=True)
 
-                    # Check Turn Completion
+                    # Check Turn Completion.
+                    # For Gemini 3.8 Extended Thinking, turnComplete is only an utterance boundary.
+                    if (
+                        getattr(server_content, "turn_complete", False)
+                        and self._requires_interaction_status()
+                        and interaction_status != "IDLE"
+                    ):
+                        from kratos_agent.live.echo_guard import get_echo_guard
+                        get_echo_guard().stop_speaking()
+                        if self.status_hub:
+                            self.status_hub.update(
+                                current_state=LiveState.EXECUTING if self.status_hub.status.active_task_id else LiveState.THINKING
+                            )
+                        continue
+
                     if getattr(server_content, "turn_complete", False):
                         from kratos_agent.live.echo_guard import get_echo_guard
                         get_echo_guard().stop_speaking()
@@ -469,6 +517,14 @@ class LiveSession:
                         self._output_transcript_buffer = ""
                         self._task_started_in_turn = False
 
+                        if self.status_hub:
+                            self.status_hub.update(
+                                current_state=LiveState.EXECUTING if self.status_hub.status.active_task_id else LiveState.IDLE
+                            )
+
+                    elif interaction_status == "IDLE":
+                        if self._turn_complete_event is not None:
+                            self._turn_complete_event.set()
                         if self.status_hub:
                             self.status_hub.update(
                                 current_state=LiveState.EXECUTING if self.status_hub.status.active_task_id else LiveState.IDLE
@@ -579,11 +635,13 @@ class LiveSession:
                     self._last_heartbeat = time.time()
                     logger.info("[LiveSession] Gemini Live session connected.")
                     if self.status_hub:
+                        self.status_hub.clear_error("gemini")
                         self.status_hub.update(
                             gemini_connected=True,
                             live_health="online",
                             last_heartbeat=self._last_heartbeat,
                             last_error=None,
+                            last_error_component=None,
                             current_state=LiveState.CONNECTED,
                         )
 
@@ -604,6 +662,7 @@ class LiveSession:
                 break
             except Exception as e:
                 err_str = str(e)
+                safe_err_str = re.sub(r"(AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,})", "[REDACTED]", err_str)
                 now = time.time()
 
                 # Detect 1006 abnormal closure (§14)
@@ -616,16 +675,19 @@ class LiveSession:
                             current_state=LiveState.DEGRADED,
                             live_health="degraded",
                             last_error="1006 abnormal closure detected",
+                            last_error_component="gemini",
                         )
 
                 # Throttle repeated network/DNS errors to once every 60s
-                if err_str != self._last_logged_error or (now - self._last_logged_error_time) > 60.0:
+                if safe_err_str != self._last_logged_error or (now - self._last_logged_error_time) > 60.0:
                     if "getaddrinfo failed" in err_str:
                         logger.warning("[LiveSession] Network or DNS resolution unavailable (getaddrinfo failed). Retrying in background...")
                     else:
                         logger.warning(f"[LiveSession] Connection lost or error: {e}")
-                    self._last_logged_error = err_str
+                    self._last_logged_error = safe_err_str
                     self._last_logged_error_time = now
+                    if self.status_hub:
+                        self.status_hub.report_error("gemini", safe_err_str)
                 else:
                     logger.debug(f"[LiveSession] Reconnect attempt failed: {e}")
 
@@ -635,7 +697,7 @@ class LiveSession:
                 if self.status_hub:
                     self.status_hub.update(
                         gemini_connected=False,
-                        last_error=err_str,
+                        last_error=safe_err_str,
                         current_state=LiveState.RECONNECTING,
                         live_health="reconnecting",
                     )

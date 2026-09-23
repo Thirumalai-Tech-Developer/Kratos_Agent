@@ -287,11 +287,11 @@ Located in [`src/kratos_agent/live/`](file:///c:/Users/thiru/Documents/Kratos_Ag
 
 ### [`session.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/session.py)
 - **Purpose**: Gemini Live bidirectional WebSocket session. Streams audio input and video/screen frames to Gemini Live in real-time, receives audio responses, and connects tool execution back to the agent loop.
-- **Key Exports**: `LiveSession`, `LiveSessionState`.
+- **Key Exports**: `LiveSession` and the Gemini Live connection/receive lifecycle. Extended-thinking sessions use non-blocking tool declarations and `interaction_status` to determine true idle state.
 
 ### [`microphone.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/microphone.py)
-- **Purpose**: Low-level microphone capture using PyAudio. Handles sample rate conversion (16kHz PCM), Voice Activity Detection (VAD), audio buffering, and hardware mute toggles.
-- **Key Exports**: `MicrophoneStream`, `AudioCaptureConfig`.
+- **Purpose**: Low-level microphone capture using `sounddevice` first with PyAudio fallback. Handles 16kHz PCM capture, VAD, audio buffering, device selection, and Windows endpoint mute diagnostics.
+- **Key Exports**: `MicrophoneListener`, `get_input_devices()`, `get_microphone_health()`.
 
 ### [`speaker.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/speaker.py)
 - **Purpose**: Audio output playback using PyAudio. Streams 24kHz PCM audio from Gemini Live / TTS to system speakers with smooth buffering.
@@ -322,8 +322,8 @@ Located in [`src/kratos_agent/live/`](file:///c:/Users/thiru/Documents/Kratos_Ag
 - **Key Exports**: `VoiceIntentRouter`, `IntentClassification`.
 
 ### [`runtime.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/runtime.py) & [`bridge.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/bridge.py)
-- **Purpose**: Inter-thread bridge synchronizing the async Gemini Live WebSocket loop with the synchronous/async agent task execution runner.
-- **Key Exports**: `LiveAgentBridge`, `LiveRuntime`.
+- **Purpose**: Owns the Live lifecycle in a background asyncio thread and bridges Gemini perception/actions to the existing Master/Slave execution supervisor.
+- **Key Exports**: `LiveRuntime`, `get_live_runtime()`, `KratosBridge`.
 
 ### [`events.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/events.py)
 - **Purpose**: Live session event models (`SpeechStarted`, `SpeechEnded`, `TurnComplete`, `ToolCallReceived`).
@@ -573,3 +573,7 @@ Located in [`src/kratos_agent/tui/`](file:///c:/Users/thiru/Documents/Kratos_Age
 - [`docs/GUI_AUTOMATION.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/GUI_AUTOMATION.md): Guide for GUI accessibility tree navigation and element resolution.
 - [`docs/cloudflare_d1_setup.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/cloudflare_d1_setup.md): Setup instructions for Cloudflare D1 persistent memory.
 - [`docs/SECURITY.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/SECURITY.md): Security guidelines, sandboxing, and approval policies.
+
+
+### Current Gemini Live contract
+The `live/` package targets `gemini-3.8-live-extended-thinking`. Live function declarations are asynchronous/non-blocking, and the receive loop uses `interaction_status=IDLE` as the authoritative end-of-interaction signal. `turnComplete` is treated as an utterance boundary only for the extended-thinking model. Component errors are stored per subsystem so microphone or capture failures cannot overwrite Gemini connection diagnostics.

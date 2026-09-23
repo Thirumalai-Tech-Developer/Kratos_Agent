@@ -52,6 +52,8 @@ class LiveStatus:
     current_state: LiveState = LiveState.DISCONNECTED
     last_transcript: str = ""
     last_error: Optional[str] = None
+    last_error_component: Optional[str] = None
+    errors: Dict[str, str] = field(default_factory=dict)
     microphone_health: str = "offline"
     screen_health: str = "offline"
     camera_health: str = "offline"
@@ -74,6 +76,8 @@ class LiveStatus:
             "current_state": self.current_state.value if isinstance(self.current_state, LiveState) else str(self.current_state),
             "last_transcript": self.last_transcript,
             "last_error": self.last_error,
+            "last_error_component": self.last_error_component,
+            "errors": dict(self.errors),
             "microphone_health": self.microphone_health,
             "screen_health": self.screen_health,
             "camera_health": self.camera_health,
@@ -116,4 +120,39 @@ class LiveStatusHub:
         return self.status
 
     def get_status(self) -> LiveStatus:
+        return self.status
+
+    def report_error(self, component: str, message: str) -> LiveStatus:
+        """Record a component-scoped error without overwriting unrelated diagnostics."""
+        component = str(component).strip().lower() or "unknown"
+        message = str(message).strip() or "Unknown error"
+        self.status.errors[component] = message
+        self.status.last_error = message
+        self.status.last_error_component = component
+        self.status.updated_at = time.time()
+        for listener in list(self._listeners):
+            try:
+                listener(self.status)
+            except Exception:
+                pass
+        return self.status
+
+    def clear_error(self, component: str) -> LiveStatus:
+        """Clear one component error and recompute visible last-error state."""
+        component = str(component).strip().lower() or "unknown"
+        self.status.errors.pop(component, None)
+        if self.status.last_error_component == component:
+            if self.status.errors:
+                last_component, last_message = next(reversed(self.status.errors.items()))
+                self.status.last_error_component = last_component
+                self.status.last_error = last_message
+            else:
+                self.status.last_error_component = None
+                self.status.last_error = None
+        self.status.updated_at = time.time()
+        for listener in list(self._listeners):
+            try:
+                listener(self.status)
+            except Exception:
+                pass
         return self.status

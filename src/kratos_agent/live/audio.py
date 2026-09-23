@@ -45,6 +45,7 @@ class AudioManager:
         self.speaker = SpeakerPlayer(
             audio_in_queue=self.audio_in_queue,
             sample_rate=receive_sample_rate,
+            status_hub=self.status_hub,
         )
         self._tasks: list[asyncio.Task[Any]] = []
 
@@ -78,14 +79,14 @@ class AudioManager:
         return self.mic.is_muted
 
     def mute(self) -> None:
+        """Mute microphone input only; speaker output remains available for /voice off."""
         self.mic.mute()
-        self.speaker.mute()
         if self.status_hub:
             self.status_hub.update(muted=True)
 
     def unmute(self) -> None:
+        """Unmute microphone input without changing speaker state."""
         self.mic.unmute()
-        self.speaker.unmute()
         if self.status_hub:
             self.status_hub.update(muted=False)
 

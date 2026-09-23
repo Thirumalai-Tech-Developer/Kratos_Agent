@@ -173,6 +173,53 @@ class TestLiveRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.classify_intent_fallback("Hello there"), IntentKind.CHAT)
 
 
+
+class TestLiveExtendedThinkingContract(unittest.IsolatedAsyncioTestCase):
+    async def test_live_tools_are_non_blocking_for_extended_thinking(self):
+        router = LiveRouter(bridge=MagicMock())
+        tools = router.get_tool_declarations()
+        declarations = tools[0].function_declarations
+        self.assertTrue(declarations)
+        for declaration in declarations:
+            self.assertTrue(str(getattr(declaration, "behavior", "")).endswith("NON_BLOCKING"))
+
+    def test_interaction_status_normalization(self):
+        self.assertEqual(LiveSession._normalize_interaction_status("IN_PROGRESS"), "IN_PROGRESS")
+        self.assertEqual(LiveSession._normalize_interaction_status("idle"), "IDLE")
+        self.assertIsNone(LiveSession._normalize_interaction_status(None))
+
+    def test_interaction_status_extraction(self):
+        response = MagicMock()
+        response.interaction_status = "IN_PROGRESS"
+        self.assertEqual(LiveSession._extract_interaction_status(response), "IN_PROGRESS")
+
+
+class TestLiveErrorIsolation(unittest.TestCase):
+    def test_component_errors_are_retained_independently(self):
+        hub = LiveStatusHub()
+        hub.report_error("gemini", "Live connection failed")
+        hub.report_error("microphone", "Microphone access denied")
+        status = hub.get_status()
+        self.assertEqual(status.last_error_component, "microphone")
+        self.assertEqual(status.errors["gemini"], "Live connection failed")
+        self.assertEqual(status.errors["microphone"], "Microphone access denied")
+
+
+class TestLiveRouterCaptureFailure(unittest.IsolatedAsyncioTestCase):
+    async def test_observe_none_is_reported_as_failure(self):
+        router = LiveRouter(bridge=MagicMock(), capture_screen_handler=AsyncMock(return_value=None))
+        result = await router.handle_tool_call("observe", {"reason": "test"})
+        self.assertEqual(result["status"], "error")
+
+
+class TestAudioMuteSemantics(unittest.TestCase):
+    def test_voice_mute_only_mutes_microphone(self):
+        audio = AudioManager(out_queue=asyncio.Queue())
+        audio.speaker.is_muted = False
+        audio.mute()
+        self.assertTrue(audio.mic.is_muted)
+        self.assertFalse(audio.speaker.is_muted)
+
 class TestSpeakerPlayer(unittest.TestCase):
     def test_clear_flushes_queue(self):
         q = asyncio.Queue()

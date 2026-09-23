@@ -5,6 +5,8 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from .events import LiveStatusHub
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,10 +18,12 @@ class SpeakerPlayer:
         audio_in_queue: asyncio.Queue[bytes],
         sample_rate: int = 24000,
         channels: int = 1,
+        status_hub: Optional[LiveStatusHub] = None,
     ) -> None:
         self.audio_in_queue = audio_in_queue
         self.sample_rate = sample_rate
         self.channels = channels
+        self.status_hub = status_hub
         self.is_running = False
         self.is_muted = False
         self.device_name: str = "Unknown"
@@ -43,6 +47,8 @@ class SpeakerPlayer:
     async def run(self) -> None:
         """Runs the speaker playback loop."""
         self.is_running = True
+        if self.status_hub:
+            self.status_hub.update(speaker_health="starting")
 
         use_sounddevice = False
         try:
@@ -75,9 +81,15 @@ class SpeakerPlayer:
                 dtype='int16',
             )
             self._stream.start()
+            if self.status_hub:
+                self.status_hub.update(speaker_health="online", speaker_active=True)
         except Exception as e:
-            logger.warning(f"[Speaker] Failed to open speaker stream: {e}")
+            err_msg = f"Failed to open speaker stream ({type(e).__name__}): {e}"
+            logger.warning(f"[Speaker] {err_msg}")
             self.is_running = False
+            if self.status_hub:
+                self.status_hub.update(speaker_active=False, speaker_health="error")
+                self.status_hub.report_error("speaker", err_msg)
             return
 
         try:
@@ -92,7 +104,11 @@ class SpeakerPlayer:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.warning(f"[Speaker] Playback error: {e}")
+            err_msg = f"Speaker playback error: {e}"
+            logger.warning(f"[Speaker] {err_msg}")
+            if self.status_hub:
+                self.status_hub.update(speaker_health="error")
+                self.status_hub.report_error("speaker", err_msg)
         finally:
             self.is_running = False
             if self._stream:
@@ -122,8 +138,12 @@ class SpeakerPlayer:
                 output=True,
             )
         except Exception as e:
-            logger.warning(f"[Speaker] Failed to open PyAudio speaker: {e}")
+            err_msg = f"Failed to open PyAudio speaker ({type(e).__name__}): {e}"
+            logger.warning(f"[Speaker] {err_msg}")
             self.is_running = False
+            if self.status_hub:
+                self.status_hub.update(speaker_active=False, speaker_health="error")
+                self.status_hub.report_error("speaker", err_msg)
             if pya:
                 try:
                     pya.terminate()

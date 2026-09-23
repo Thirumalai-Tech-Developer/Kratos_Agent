@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -12,24 +11,9 @@ load_dotenv()
 
 
 def _resolve_api_key() -> str:
-    """Resolve Gemini API key from environment, .env, or Omni/.env fallback."""
+    """Resolve Gemini credentials from the process environment / project .env only."""
     key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if key and key.strip():
-        return key.strip()
-
-    # Fallback to Omni/.env if present
-    omni_env = Path("C:/Users/thiru/Documents/Omni/.env")
-    if omni_env.is_file():
-        try:
-            import dotenv
-            omni_vals = dotenv.dotenv_values(str(omni_env))
-            omni_key = omni_vals.get("GEMINI_API_KEY") or omni_vals.get("GOOGLE_API_KEY")
-            if omni_key and omni_key.strip():
-                return omni_key.strip()
-        except Exception:
-            pass
-
-    return ""
+    return key.strip() if key and key.strip() else ""
 
 
 @dataclass

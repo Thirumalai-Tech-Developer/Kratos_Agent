@@ -392,17 +392,17 @@ Bidirectional multimodal streaming session with Gemini Live.
 - **Purpose**: Live session exports.
 
 ### [`live/session.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/session.py)
-- **Purpose**: Gemini Live WebSocket connection, send/receive loops, and tool response handling.
+- **Purpose**: Gemini Live connection, realtime media send/receive loops, asynchronous tool handling, and Extended Thinking interaction lifecycle (`interaction_status`).
 - **Classes & Functions**:
   - `LiveSession`: Manages connection backoff, audio streaming, screen capture uploads, and tool calls.
   - `receive_loop()`: Dispatches incoming tool calls, feeds audio to speaker, buffers transcripts through `VoiceBuffer`, and triggers `VoiceEchoGuard`.
   - `LIVE_SYSTEM_PROMPT`: Instructions for Gemini Live forbidding follow-up questions ("Is there anything else...").
 
 ### [`live/microphone.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/microphone.py)
-- **Purpose**: Low-level PyAudio microphone capture, 16kHz PCM resampling, VAD, and hardware mute controls.
+- **Purpose**: `sounddevice`-first microphone capture with PyAudio fallback, 16kHz PCM, VAD, device discovery, and Windows endpoint mute diagnostics.
 
 ### [`live/speaker.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/speaker.py)
-- **Purpose**: PyAudio audio playback output stream for 24kHz PCM audio.
+- **Purpose**: 24kHz PCM speaker playback with sounddevice/PyAudio fallback and component health reporting.
 
 ### [`live/audio.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/src/kratos_agent/live/audio.py)
 - **Purpose**: Audio resampling, WAV encoding/decoding, and volume normalization.
@@ -906,3 +906,7 @@ Exhaustive test suite, regression guards, and latency benchmarks.
 - **`tests/system/`**:
   - [`system/test_shell_abstraction.py`](file:///c:/Users/thiru/Documents/Kratos_Agent/tests/system/test_shell_abstraction.py): Tests PowerShell script rendering, CLIXML stripping, and operator translation.
 
+
+
+### Gemini 3.8 Extended Thinking integration requirements
+`behavior="NON_BLOCKING"` is required on Live function declarations. `interaction_status` is tracked in the receive loop because `turnComplete` is not sufficient to identify the end of an Extended Thinking interaction. Tool responses do not use function scheduling directives because scheduling configurations are not supported by the Extended Thinking Live model.

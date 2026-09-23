@@ -93,16 +93,16 @@ class VisionManager:
             else:
                 logger.warning(f"[VisionManager] Screen capture offline: {health.error}")
                 if self.status_hub:
-                    self.status_hub.update(
-                        screen_active=False,
-                        last_error=f"Screen capture unavailable: {health.error}",
-                    )
+                    self.status_hub.update(screen_active=False, screen_health="error")
+                    self.status_hub.report_error("screen", f"Screen capture unavailable: {health.error}")
 
         await asyncio.sleep(0.05)
         if self.status_hub:
             self.status_hub.update(
                 camera_active=self.camera.is_running,
                 screen_active=self.screen.is_running,
+                camera_health="online" if self.camera.is_running else "offline",
+                screen_health="online" if self.screen.is_running else "offline",
                 video_mode=self.mode,
             )
 
