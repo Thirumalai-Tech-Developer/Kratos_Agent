@@ -21,6 +21,7 @@ class MemoryStore:
         self._records: Dict[str, MemoryRecord] = {}
         self._lock = threading.RLock()
         self._cache_max_entries = 128
+        self._hot_cache: Dict[str, Tuple[float, List[MemoryRecord]]] = {}
         self._dirty_accesses = 0
         self._last_save = 0.0
         self._load()
