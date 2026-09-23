@@ -50,6 +50,7 @@ class MasterSupervisor:
         timeout: float = 60.0,
         context: Optional[Dict[str, Any]] = None,
         force: bool = False,
+        wait_for_result: bool = False,
     ) -> Dict[str, Any]:
         with self._lock:
             if self.active_task_id is not None and not force and priority.lower() != "cancel":
@@ -138,7 +139,20 @@ class MasterSupervisor:
             get_mission_coordinator().update_result(cmd.task_id, self.last_result)
             return self.last_result
 
-        asyncio.create_task(self._await_result(cmd, result_fut))
+        result_task = asyncio.create_task(
+            self._await_result(cmd, result_fut, emit_speech=not wait_for_result)
+        )
+        if wait_for_result:
+            result_dict = await result_task
+            return {
+                **result_dict,
+                "accepted": True,
+                "task_id": cmd.task_id,
+                "command_id": cmd.command_id,
+                "capability": requested_capability,
+                "capability_candidates": candidates,
+            }
+
         return {
             "status": "started",
             "accepted": True,
@@ -149,55 +163,86 @@ class MasterSupervisor:
             "summary": f"Mission accepted for Slave execution: {objective}",
         }
 
-    async def _await_result(self, cmd: MasterCommand, result_fut: asyncio.Future[SlaveResult]) -> None:
+    async def _await_result(
+        self,
+        cmd: MasterCommand,
+        result_fut: asyncio.Future[SlaveResult],
+        *,
+        emit_speech: bool = True,
+    ) -> Dict[str, Any]:
         try:
             result = await asyncio.wait_for(result_fut, timeout=cmd.timeout)
             result_dict = result.to_dict()
             mission = get_mission_coordinator().get(cmd.task_id)
             if mission:
-                mission.transition(MissionState.VERIFYING, message="Master received Slave result; verifying evidence.")
+                mission.transition(
+                    MissionState.VERIFYING,
+                    message="Master received Slave result; verifying evidence.",
+                )
             with self._lock:
                 self.last_result = result_dict
                 self.last_completed_at = time.time()
                 self.last_error = result.error or None
             get_mission_coordinator().update_result(cmd.task_id, result_dict)
+
             summary = self.format_response_for_master(result)
-            if self._on_speech_feedback and summary:
+            if emit_speech and self._on_speech_feedback and summary:
                 self._on_speech_feedback(summary)
+            return result_dict
         except asyncio.TimeoutError as exc:
             error = error_from_exception(
                 exc,
                 component="MasterSupervisor",
                 stage="execution_timeout",
                 task_id=cmd.task_id,
+                request_id=cmd.request_id or None,
                 retryable=True,
                 recovery_action="Inspect current task state and retry after fresh observation.",
                 user_message=f"Mission {cmd.task_id} timed out before verified completion.",
             ).to_dict()
+            result_dict = {
+                "status": "failed",
+                "accepted": True,
+                "task_id": cmd.task_id,
+                "command_id": cmd.command_id,
+                "capability": cmd.action,
+                "error": error,
+            }
             with self._lock:
                 self.last_error = error
-                self.last_result = {"status": "failed", "task_id": cmd.task_id, "error": error}
+                self.last_result = result_dict
                 self.last_completed_at = time.time()
-            get_mission_coordinator().update_result(cmd.task_id, self.last_result)
-            if self._on_speech_feedback:
+            get_mission_coordinator().update_result(cmd.task_id, result_dict)
+            if emit_speech and self._on_speech_feedback:
                 self._on_speech_feedback(error["user_message"])
+            return result_dict
         except Exception as exc:
             error = error_from_exception(
                 exc,
                 component="MasterSupervisor",
                 stage="await_result",
                 task_id=cmd.task_id,
+                request_id=cmd.request_id or None,
                 retryable=True,
                 recovery_action="Inspect Slave status and retry the mission.",
                 user_message=f"Mission execution failed in Master while waiting for the Slave: {type(exc).__name__}.",
             ).to_dict()
+            result_dict = {
+                "status": "failed",
+                "accepted": True,
+                "task_id": cmd.task_id,
+                "command_id": cmd.command_id,
+                "capability": cmd.action,
+                "error": error,
+            }
             with self._lock:
                 self.last_error = error
-                self.last_result = {"status": "failed", "task_id": cmd.task_id, "error": error}
+                self.last_result = result_dict
                 self.last_completed_at = time.time()
-            get_mission_coordinator().update_result(cmd.task_id, self.last_result)
-            if self._on_speech_feedback:
+            get_mission_coordinator().update_result(cmd.task_id, result_dict)
+            if emit_speech and self._on_speech_feedback:
                 self._on_speech_feedback(error["user_message"])
+            return result_dict
         finally:
             with self._lock:
                 if self.active_command_id == cmd.command_id:

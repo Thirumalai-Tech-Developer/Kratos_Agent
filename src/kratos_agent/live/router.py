@@ -56,7 +56,9 @@ class LiveRouter:
             description=(
                 "Convert the user's natural-language request into one structured mission for Kratos Master. "
                 "You own semantic intent. Supply the complete mission plus capability and structured arguments "
-                "when you know them. Never call this from a phrase parser; decide from meaning and multimodal context."
+                "when you know them. The returned result is authoritative: wait for it before claiming success "
+                "and use its error/evidence fields when execution fails. Never call this from a phrase parser; "
+                "decide from meaning and multimodal context."
             ),
             parameters=obj_schema(
                 {
@@ -151,6 +153,7 @@ class LiveRouter:
                 request_id=str(args.get("request_id") or ""),
                 turn_id=str(args.get("turn_id") or ""),
                 tool_call_id=str(args.get("tool_call_id") or ""),
+                wait_for_result=(name == "execute_mission"),
             )
 
         if name == "search":

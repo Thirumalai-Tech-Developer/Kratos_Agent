@@ -46,6 +46,7 @@ class KratosBridge:
         request_id: str = "",
         turn_id: str = "",
         tool_call_id: str = "",
+        wait_for_result: bool = False,
     ) -> Dict[str, Any]:
         from kratos_agent.live.echo_guard import get_echo_guard
         from kratos_agent.core.task_deduplicator import get_task_deduplicator
@@ -64,6 +65,11 @@ class KratosBridge:
         constrs = dict(constraints or {})
         exp_res = dict(expected_result or {})
         capability = str(action or "").strip()
+
+        # The bridge can be constructed before LiveRuntime's background event loop.
+        # Start the Slave when a real mission is submitted so commands are consumable.
+        if not self.slave_executor._running:
+            self.slave_executor.start()
 
         # Transport boundary only. Gemini supplies semantic intent; Master owns discovery.
         if self.status_hub:
@@ -101,7 +107,10 @@ class KratosBridge:
             return {"status": "failed", "accepted": False, "error": error.to_dict()}
 
         if self.status_hub and result.get("task_id"):
-            self.status_hub.update(active_task_id=result["task_id"])
+            if wait_for_result and result.get("status") in {"success", "failed", "partial", "cancelled"}:
+                self.status_hub.update(active_task_id=None)
+            else:
+                self.status_hub.update(active_task_id=result["task_id"])
         return {
             **result,
             "capability": result.get("capability") or capability or "generic_task",

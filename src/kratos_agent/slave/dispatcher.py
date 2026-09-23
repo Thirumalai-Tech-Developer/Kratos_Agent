@@ -61,37 +61,6 @@ class SlaveDispatcher:
                 },
             )
 
-        if action == "browser.youtube.play":
-            from kratos_agent.executors.youtube import YouTubeExecutor
-            query = str(cmd.parameters.get("query") or "").strip()
-            if not query:
-                return SlaveResult(
-                    command_id=cmd.command_id,
-                    task_id=cmd.task_id,
-                    status="failed",
-                    verified=False,
-                    terminal=True,
-                    error={
-                        "type": "TOOL_VALIDATION_ERROR",
-                        "message": "browser.youtube.play requires structured parameters.query from Gemini.",
-                    },
-                )
-            result = await YouTubeExecutor().execute(query)
-            verified = bool(result.get("verified"))
-            return SlaveResult(
-                command_id=cmd.command_id,
-                task_id=cmd.task_id,
-                status="success" if result.get("ok") and verified else "failed",
-                verified=verified,
-                terminal=True,
-                state="VIDEO_PLAYING" if verified else "VIDEO_NOT_VERIFIED",
-                evidence=result,
-                error=None if verified else {
-                    "type": "PLAYBACK_VERIFICATION_FAILED",
-                    "message": result.get("detail") or "YouTube playback was not physically verified.",
-                },
-            )
-
         handler = self._handlers.get(action)
         if handler is not None:
             return await handler(cmd)

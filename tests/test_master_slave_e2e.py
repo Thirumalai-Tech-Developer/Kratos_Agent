@@ -51,17 +51,18 @@ class TestMasterSlaveEndToEnd(unittest.TestCase):
                     parameters={"query": "GTA Vice City walkthrough"},
                     constraints={"reuse_existing_chrome_window": True, "create_one_task_tab": True},
                     expected_result={"video_playing": True, "playback_advancing": True},
+                    wait_for_result=True,
                 )
 
                 self.assertTrue(sub_res["accepted"])
-                self.assertEqual(sub_res["status"], "started")
+                self.assertEqual(sub_res["status"], "success")
+                self.assertTrue(sub_res["verified"])
+                self.assertEqual(sub_res["state"], "VIDEO_PLAYING")
+                self.assertEqual(sub_res["evidence"]["query"], "GTA Vice City walkthrough")
 
-                # Allow slave executor to process command and emit result
-                await asyncio.sleep(0.3)
-
-                # Check Master speech output
-                self.assertTrue(len(spoken_outputs) > 0)
-                self.assertIn("video is playing", spoken_outputs[0].lower())
+                # Live missions return the verified result directly instead of
+                # re-entering Gemini with a concurrent narration turn.
+                self.assertEqual(spoken_outputs, [])
 
         asyncio.run(_run())
 
