@@ -28,6 +28,11 @@ class TestShellAbstraction(unittest.TestCase):
         self.assertNotIn("||", rendered)
         self.assertIn("pytest; if (-not $?) { echo failed }", rendered)
 
+    def test_powershell_translates_cmd_cd_drive_switch(self) -> None:
+        cmd = r"cd /d C:\Users\thiru\Documents\Kratos_Agent; if ($?) { uv run kratos }"
+        rendered = render_powershell_script(cmd, supports_and=False)
+        self.assertNotIn("cd /d", rendered.lower())
+        self.assertIn("Set-Location -LiteralPath 'C:\\Users\\thiru\\Documents\\Kratos_Agent'", rendered)
     def test_render_command_argv(self) -> None:
         argv = render_command_argv("Get-Process")
         self.assertIsInstance(argv, list)

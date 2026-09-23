@@ -1489,6 +1489,19 @@ def start_interactive_cli():
         complete_while_typing=True,
         style=prompt_style
     )
+
+    # Every interactive CLI launch starts a new conversational/task session.
+    # Older sessions remain available explicitly via /session load.
+    try:
+        fresh_session = memory.create_session(
+            title=f"CLI {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            model=runtime.model_name,
+        )
+        runtime.activate_session()
+        console.print(f"[dim]🧼 Fresh session started: {fresh_session.session_id}[/dim]")
+    except Exception as exc:
+        console.print(f"[dim yellow]⚠ Could not create a fresh session; continuing with current runtime: {exc}[/dim yellow]")
+
     from kratos_agent.live import get_live_runtime
     from kratos_agent.output.terminal import get_terminal_renderer
     live_runtime = get_live_runtime()

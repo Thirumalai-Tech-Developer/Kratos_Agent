@@ -12,6 +12,23 @@ def render_powershell_script(command: str, supports_and: bool = False) -> str:
     """Translates chained Bash/CMD syntax (&&, ||) into valid PowerShell syntax (§30, §33)."""
     clean = command.strip()
 
+    # CMD uses `cd /d <path>` to switch drive and directory. PowerShell
+    # does not accept /d, so translate it at the shell boundary.
+    pattern = re.compile(
+        r"(?P<prefix>(?:^|[;&])\\s*)cd\\s+/d\\s+(?P<path>\"[^\"]*\"|'[^']*'|[^;&]+)",
+        re.IGNORECASE,
+    )
+
+    def _replace_cmd_cd(match: re.Match[str]) -> str:
+        raw_path = match.group("path").strip()
+        if len(raw_path) >= 2 and raw_path[0] == raw_path[-1] and raw_path[0] in "\"'":
+            literal = raw_path
+        else:
+            literal = "'" + raw_path.replace("'", "''") + "'"
+        return f"{match.group('prefix')}Set-Location -LiteralPath {literal}"
+
+    clean = pattern.sub(_replace_cmd_cd, clean)
+
     # If the shell does not support && or || (e.g. Windows PowerShell 5.1)
     if not supports_and:
         # Replace && with '; if ($?) { ... }'
