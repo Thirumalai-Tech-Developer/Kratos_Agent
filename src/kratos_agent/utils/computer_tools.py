@@ -872,22 +872,24 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
             from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
 
             chrome_windows = enumerate_chrome_windows()
-            whatsapp_windows = [
-                w for w in chrome_windows
-                if "whatsapp" in str(w.get("title", "")).lower()
-            ]
-            if not whatsapp_windows:
+            if not chrome_windows:
                 return None
 
-            whatsapp_windows.sort(key=lambda w: (not bool(w.get("foreground")),))
-            win = whatsapp_windows[0]
-            hwnd = win.get("hwnd")
-            if hwnd:
-                get_window_manager().focus_window(handle=str(hwnd))
-
+            # Do not trust the Chrome top-level title to identify the page. It may be
+            # generic while a WhatsApp tab is active inside the same window.
+            chrome_windows.sort(key=lambda w: (not bool(w.get("foreground")),))
             backend = WindowsUIABackend()
             wanted_contact = " ".join(contact.lower().split())
             wanted_message = " ".join(message.lower().split())
+            whatsapp_markers = (
+                "whatsapp",
+                "search or start new chat",
+                "search or start",
+                "type a message",
+                "communities",
+                "status",
+                "chats",
+            )
 
             def element_text(el: Any) -> str:
                 return " ".join(
@@ -901,26 +903,40 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
                     if str(v or "").strip()
                 ).lower()
 
+            # Pick the Chrome window whose visible accessibility tree actually looks like WhatsApp.
+            win = None
             search = None
             while time.monotonic() < deadline:
-                els = backend.dump_tree(max_nodes=1800, max_depth=14, visible_only=True)
-                candidates = [
-                    e for e in els
-                    if str(getattr(e, "role", "")).lower() in {"edit", "combobox"}
-                    and any(k in element_text(e) for k in ("search", "find or start", "search or start new chat"))
-                ]
-                if candidates:
-                    search = candidates[0]
+                for candidate in chrome_windows:
+                    hwnd = candidate.get("hwnd")
+                    if hwnd:
+                        get_window_manager().focus_window(handle=str(hwnd))
+                    els = backend.dump_tree(max_nodes=2200, max_depth=14, visible_only=True)
+                    all_text = " ".join(element_text(e) for e in els)
+                    is_whatsapp = sum(marker in all_text for marker in whatsapp_markers) >= 2
+                    if not is_whatsapp:
+                        continue
+                    searches = [
+                        e for e in els
+                        if str(getattr(e, "role", "")).lower() in {"edit", "combobox"}
+                        and any(k in element_text(e) for k in ("search", "find or start", "search or start new chat"))
+                    ]
+                    if searches:
+                        win = candidate
+                        search = searches[0]
+                        break
+                if search:
                     break
                 time.sleep(0.25)
 
             if search is None:
-                return {
-                    "ok": False,
-                    "verified": False,
-                    "existing_whatsapp_tab": True,
-                    "error": "Existing WhatsApp Web tab was found, but its search control is not exposed through Windows UI Automation.",
-                }
+                # We had Chrome, but could not prove that the visible page is WhatsApp.
+                # Do not hijack an unrelated Chrome tab or create a new tab here.
+                return None
+
+            hwnd = win.get("hwnd") if win else None
+            if hwnd:
+                get_window_manager().focus_window(handle=str(hwnd))
 
             backend.type_element(search, contact, clear_first=True)
 
