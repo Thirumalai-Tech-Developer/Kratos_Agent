@@ -176,17 +176,45 @@ class LiveRouter:
             ),
         )
 
-        # Legacy alias function for compatibility
+        # Compatibility alias: keep the same structured delegation contract so Gemini
+        # can semantically choose a concrete execution capability without relying on
+        # client-side phrasing heuristics.
         start_task_fn = types.FunctionDeclaration(
             name="start_agent_task",
             behavior="NON_BLOCKING",
-            description="Legacy alias for delegate_task. Submits task to Slave.",
+            description=(
+                "Compatibility alias for delegate_task. Use for ANY computer action when "
+                "semantic understanding determines the task. Prefer a structured action and "
+                "parameters whenever a specialized capability is clearly applicable; do not "
+                "depend on exact user wording. Natural-language requests phrased as questions "
+                "(for example 'can you play...', 'could you open...', or 'please send...') "
+                "are action requests when the user is asking you to perform them."
+            ),
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "task_description": types.Schema(type="STRING", description="Task description."),
-                    "visual_context": types.Schema(type="STRING", description="Visual context."),
-                    "priority": types.Schema(type="STRING", description="Priority."),
+                    "task_description": types.Schema(
+                        type="STRING",
+                        description="Complete natural-language objective preserving the user's intended end state.",
+                    ),
+                    "action": types.Schema(
+                        type="STRING",
+                        description="Optional structured execution action chosen semantically, e.g. browser.youtube.play, browser.navigate, whatsapp.send_message, open_application, generic_task.",
+                    ),
+                    "parameters": types.Schema(
+                        type="OBJECT",
+                        description="Structured action parameters chosen from the user's intent, e.g. query, contact, message, app_name, url.",
+                    ),
+                    "constraints": types.Schema(
+                        type="OBJECT",
+                        description="Execution constraints inferred from context, such as reuse_existing_chrome_window, reuse_task_tab, foreground_required.",
+                    ),
+                    "expected_result": types.Schema(
+                        type="OBJECT",
+                        description="Physical evidence required for completion, such as video_playing, playback_advancing, message_sent.",
+                    ),
+                    "visual_context": types.Schema(type="STRING", description="Relevant screen/vision context when the task depends on what is visible."),
+                    "priority": types.Schema(type="STRING", description="Priority: low, normal, high, urgent."),
                 },
                 required=["task_description"],
             ),
