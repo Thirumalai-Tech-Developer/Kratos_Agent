@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from threading import RLock
 from typing import Dict, Iterable, List, Optional
 
@@ -102,13 +103,38 @@ class CapabilityRegistry:
         return self.get(capability_id) is not None
 
     def discover(self, query: str, limit: int = 8) -> List[CapabilitySpec]:
-        tokens = {part.lower() for part in str(query).replace(".", " ").replace("_", " ").split() if part}
+        """Discover capabilities using exact token matches, not substring matches.
+
+        Natural-language mission text can contain common words that happen to appear
+        inside unrelated capability descriptions. Substring matching can therefore
+        route a generic task to the wrong executor (for example, YouTube).
+        Tokenize both sides, ignore common stop words, and score exact matches with a
+        small bonus for capability-id segments.
+        """
+        raw_tokens = re.findall(r"[a-z0-9]+", str(query).lower())
+        stop_words = {
+            "a", "an", "and", "are", "can", "could", "do", "for", "from",
+            "how", "i", "in", "is", "it", "me", "my", "of", "on", "or",
+            "please", "the", "this", "to", "we", "what", "with", "you",
+        }
+        tokens = {token for token in raw_tokens if token not in stop_words}
+        if not tokens:
+            return []
+
         scored = []
         for spec in self.all():
-            haystack = f"{spec.capability_id} {spec.name} {spec.description}".lower()
-            score = sum(1 for token in tokens if token in haystack)
-            if score:
-                scored.append((score, spec))
+            capability_id_tokens = set(re.findall(r"[a-z0-9]+", spec.capability_id.lower()))
+            text_tokens = set(
+                re.findall(r"[a-z0-9]+", f"{spec.name} {spec.description} {spec.category}".lower())
+            )
+            matched = tokens & (capability_id_tokens | text_tokens)
+            if not matched:
+                continue
+
+            score = len(matched)
+            score += 2 * len(tokens & capability_id_tokens)
+            scored.append((score, spec))
+
         scored.sort(key=lambda item: (-item[0], item[1].capability_id))
         return [spec for _, spec in scored[:limit]]
 
