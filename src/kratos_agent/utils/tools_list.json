@@ -642,335 +642,6 @@
             }
         },
         {
-            "name": "ActionResult",
-            "description": "ActionResult(ok: bool, action: str, detail: str = '', data: dict | None = None, screenshot_ref: str | None = None, duration_ms: int = 0)",
-            "func_name": "ActionResult",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean",
-                        "description": "ok"
-                    },
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    },
-                    "detail": {
-                        "type": "string",
-                        "description": "detail"
-                    },
-                    "data": {
-                        "type": "object",
-                        "description": "data"
-                    },
-                    "screenshot_ref": {
-                        "type": "string",
-                        "description": "screenshot ref"
-                    },
-                    "duration_ms": {
-                        "type": "integer",
-                        "description": "duration ms"
-                    }
-                },
-                "required": [
-                    "ok",
-                    "action"
-                ]
-            }
-        },
-        {
-            "name": "Any",
-            "description": "Special type indicating an unconstrained type.",
-            "func_name": "Any",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "args": {
-                        "type": "string",
-                        "description": "args"
-                    },
-                    "kwargs": {
-                        "type": "string",
-                        "description": "kwargs"
-                    }
-                },
-                "required": [
-                    "args",
-                    "kwargs"
-                ]
-            }
-        },
-        {
-            "name": "CapabilityUnavailable",
-            "description": "Raised when a requested capability is not present on this platform/machine.",
-            "func_name": "CapabilityUnavailable",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "capability": {
-                        "type": "string",
-                        "description": "capability"
-                    },
-                    "platform": {
-                        "type": "string",
-                        "description": "platform"
-                    },
-                    "hint": {
-                        "type": "string",
-                        "description": "hint"
-                    },
-                    "install": {
-                        "type": "string",
-                        "description": "install"
-                    }
-                },
-                "required": [
-                    "capability",
-                    "platform"
-                ]
-            }
-        },
-        {
-            "name": "Dict",
-            "description": "Deprecated alias to dict.",
-            "func_name": "Dict",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "args": {
-                        "type": "string",
-                        "description": "args"
-                    },
-                    "kwargs": {
-                        "type": "string",
-                        "description": "kwargs"
-                    }
-                },
-                "required": [
-                    "args",
-                    "kwargs"
-                ]
-            }
-        },
-        {
-            "name": "Evidence",
-            "description": "Proof that an outcome is true. Never constructed by hand from an",
-            "func_name": "Evidence",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "claim": {
-                        "type": "string",
-                        "description": "claim"
-                    },
-                    "method": {
-                        "type": "string",
-                        "description": "method"
-                    },
-                    "met": {
-                        "type": "string",
-                        "description": "met"
-                    },
-                    "observed": {
-                        "type": "object",
-                        "description": "observed"
-                    },
-                    "confidence": {
-                        "type": "string",
-                        "description": "confidence"
-                    },
-                    "samples": {
-                        "type": "string",
-                        "description": "samples"
-                    },
-                    "interval_ms": {
-                        "type": "string",
-                        "description": "interval ms"
-                    },
-                    "frame_ref": {
-                        "type": "string",
-                        "description": "frame ref"
-                    },
-                    "detail": {
-                        "type": "string",
-                        "description": "detail"
-                    },
-                    "sampled_at": {
-                        "type": "string",
-                        "description": "sampled at"
-                    },
-                    "stale_ms": {
-                        "type": "string",
-                        "description": "stale ms"
-                    }
-                },
-                "required": [
-                    "claim",
-                    "method",
-                    "met",
-                    "observed"
-                ]
-            }
-        },
-        {
-            "name": "List",
-            "description": "Deprecated alias to list.",
-            "func_name": "List",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "args": {
-                        "type": "string",
-                        "description": "args"
-                    },
-                    "kwargs": {
-                        "type": "string",
-                        "description": "kwargs"
-                    }
-                },
-                "required": [
-                    "args",
-                    "kwargs"
-                ]
-            }
-        },
-        {
-            "name": "Optional",
-            "description": "Optional[X] is equivalent to Union[X, None].",
-            "func_name": "Optional",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "args": {
-                        "type": "string",
-                        "description": "args"
-                    },
-                    "kwds": {
-                        "type": "string",
-                        "description": "kwds"
-                    }
-                },
-                "required": [
-                    "args",
-                    "kwds"
-                ]
-            }
-        },
-        {
-            "name": "OutcomeAssertion",
-            "description": "Declarative post-condition. Written by the PLANNER when the step is created,",
-            "func_name": "OutcomeAssertion",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "kind": {
-                        "type": "string",
-                        "description": "kind"
-                    },
-                    "params": {
-                        "type": "object",
-                        "description": "params"
-                    },
-                    "timeout_s": {
-                        "type": "string",
-                        "description": "timeout s"
-                    },
-                    "poll_ms": {
-                        "type": "string",
-                        "description": "poll ms"
-                    },
-                    "require_samples": {
-                        "type": "string",
-                        "description": "require samples"
-                    },
-                    "sample_gap_ms": {
-                        "type": "string",
-                        "description": "sample gap ms"
-                    }
-                },
-                "required": [
-                    "kind"
-                ]
-            }
-        },
-        {
-            "name": "Path",
-            "description": "PurePath subclass that can make system calls.",
-            "func_name": "Path",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "args": {
-                        "type": "string",
-                        "description": "args"
-                    },
-                    "kwargs": {
-                        "type": "string",
-                        "description": "kwargs"
-                    }
-                },
-                "required": [
-                    "args",
-                    "kwargs"
-                ]
-            }
-        },
-        {
-            "name": "Point",
-            "description": "Point(x: int, y: int)",
-            "func_name": "Point",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "integer",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "integer",
-                        "description": "y"
-                    }
-                },
-                "required": [
-                    "x",
-                    "y"
-                ]
-            }
-        },
-        {
-            "name": "Rect",
-            "description": "Rect(x: int, y: int, w: int, h: int)",
-            "func_name": "Rect",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "integer",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "integer",
-                        "description": "y"
-                    },
-                    "w": {
-                        "type": "integer",
-                        "description": "w"
-                    },
-                    "h": {
-                        "type": "integer",
-                        "description": "h"
-                    }
-                },
-                "required": [
-                    "x",
-                    "y",
-                    "w",
-                    "h"
-                ]
-            }
-        },
-        {
             "name": "active_window_info",
             "description": "Returns the title and bounds of the foreground active window.",
             "func_name": "active_window_info",
@@ -1223,21 +894,6 @@
             }
         },
         {
-            "name": "bluetooth_control",
-            "description": "Scans or manages Bluetooth devices.",
-            "func_name": "bluetooth_control",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
             "name": "browser_click",
             "description": "Clicks an element in the browser via CDP.",
             "func_name": "browser_click",
@@ -1445,29 +1101,6 @@
             "parameters": {
                 "type": "object",
                 "properties": {},
-                "required": []
-            }
-        },
-        {
-            "name": "browser_tab",
-            "description": "Manages browser tabs.",
-            "func_name": "browser_tab",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    },
-                    "index": {
-                        "type": "string",
-                        "description": "index"
-                    },
-                    "url": {
-                        "type": "string",
-                        "description": "url"
-                    }
-                },
                 "required": []
             }
         },
@@ -1820,41 +1453,6 @@
             }
         },
         {
-            "name": "firewall_rule",
-            "description": "Manages OS firewall rules.",
-            "func_name": "firewall_rule",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "get_capability_map",
-            "description": "Detects and caches the host's capabilities.",
-            "func_name": "get_capability_map",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        },
-        {
-            "name": "get_computer_controller",
-            "description": "Returns the platform-specific computer controller singleton.",
-            "func_name": "get_computer_controller",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        },
-        {
             "name": "gui_explore",
             "description": "Walks menus and windows to map the UI structure of an application.",
             "func_name": "gui_explore",
@@ -1868,29 +1466,6 @@
                     "depth": {
                         "type": "string",
                         "description": "depth"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "hosts_file_edit",
-            "description": "Reads or edits the OS hosts file.",
-            "func_name": "hosts_file_edit",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    },
-                    "hostname": {
-                        "type": "string",
-                        "description": "hostname"
-                    },
-                    "ip": {
-                        "type": "string",
-                        "description": "ip"
                     }
                 },
                 "required": []
@@ -2305,25 +1880,6 @@
             }
         },
         {
-            "name": "read_notifications",
-            "description": "Reads recent OS notifications.",
-            "func_name": "read_notifications",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "app": {
-                        "type": "string",
-                        "description": "app"
-                    },
-                    "limit": {
-                        "type": "string",
-                        "description": "limit"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
             "name": "record_macro",
             "description": "Records a user macro for subsequent playback.",
             "func_name": "record_macro",
@@ -2562,23 +2118,6 @@
             }
         },
         {
-            "name": "self_install_capability",
-            "description": "Installs missing system capability or tool dependency.",
-            "func_name": "self_install_capability",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "capability": {
-                        "type": "string",
-                        "description": "capability"
-                    }
-                },
-                "required": [
-                    "capability"
-                ]
-            }
-        },
-        {
             "name": "service_control",
             "description": "Queries or controls OS background services.",
             "func_name": "service_control",
@@ -2596,28 +2135,6 @@
                 },
                 "required": [
                     "name"
-                ]
-            }
-        },
-        {
-            "name": "shortcut_create",
-            "description": "Creates a desktop or start menu shortcut.",
-            "func_name": "shortcut_create",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "path"
-                    },
-                    "target": {
-                        "type": "string",
-                        "description": "target"
-                    }
-                },
-                "required": [
-                    "path",
-                    "target"
                 ]
             }
         },
@@ -2890,31 +2407,6 @@
             }
         },
         {
-            "name": "ui_invoke",
-            "description": "Directly invokes a UI automation pattern without moving the mouse.",
-            "func_name": "ui_invoke",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ref": {
-                        "type": "string",
-                        "description": "ref"
-                    },
-                    "pattern": {
-                        "type": "string",
-                        "description": "pattern"
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "value"
-                    }
-                },
-                "required": [
-                    "ref"
-                ]
-            }
-        },
-        {
             "name": "ui_read_element",
             "description": "Reads attributes of a cached element reference.",
             "func_name": "ui_read_element",
@@ -3034,25 +2526,6 @@
             }
         },
         {
-            "name": "volume_control",
-            "description": "Controls or queries system audio volume.",
-            "func_name": "volume_control",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "value"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
             "name": "wallpaper_set",
             "description": "Sets the desktop wallpaper.",
             "func_name": "wallpaper_set",
@@ -3067,25 +2540,6 @@
                 "required": [
                     "path"
                 ]
-            }
-        },
-        {
-            "name": "wifi_control",
-            "description": "Scans or manages Wi-Fi connections.",
-            "func_name": "wifi_control",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "action"
-                    },
-                    "ssid": {
-                        "type": "string",
-                        "description": "ssid"
-                    }
-                },
-                "required": []
             }
         },
         {
@@ -3276,7 +2730,9 @@
                         "description": "UI role (e.g. 'button', 'edit', 'link')"
                     }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         },
         {
@@ -3329,7 +2785,9 @@
                         "description": "Target element ID"
                     }
                 },
-                "required": ["text"]
+                "required": [
+                    "text"
+                ]
             }
         },
         {
@@ -3344,7 +2802,9 @@
                         "description": "Key to press"
                     }
                 },
-                "required": ["key"]
+                "required": [
+                    "key"
+                ]
             }
         },
         {
@@ -3359,7 +2819,9 @@
                         "description": "Key combination separated by '+' (e.g. 'ctrl+c')"
                     }
                 },
-                "required": ["keys"]
+                "required": [
+                    "keys"
+                ]
             }
         },
         {
@@ -3378,7 +2840,9 @@
                         "description": "Horizontal scroll amount"
                     }
                 },
-                "required": ["dy"]
+                "required": [
+                    "dy"
+                ]
             }
         },
         {
@@ -3412,11 +2876,15 @@
                     },
                     "args": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "items": {
+                            "type": "string"
+                        },
                         "description": "Optional command line arguments"
                     }
                 },
-                "required": ["target"]
+                "required": [
+                    "target"
+                ]
             }
         },
         {
@@ -3458,7 +2926,9 @@
                         "description": "Window title or handle"
                     }
                 },
-                "required": ["target"]
+                "required": [
+                    "target"
+                ]
             }
         },
         {
@@ -3491,7 +2961,9 @@
                         "description": "Text to write to clipboard"
                     }
                 },
-                "required": ["text"]
+                "required": [
+                    "text"
+                ]
             }
         },
         {
@@ -3576,7 +3048,9 @@
                         "description": "Input name or placeholder"
                     }
                 },
-                "required": ["text"]
+                "required": [
+                    "text"
+                ]
             }
         },
         {
@@ -3609,7 +3083,9 @@
                         "description": "Path to file"
                     }
                 },
-                "required": ["path"]
+                "required": [
+                    "path"
+                ]
             }
         },
         {
@@ -3628,7 +3104,10 @@
                         "description": "Text content"
                     }
                 },
-                "required": ["path", "content"]
+                "required": [
+                    "path",
+                    "content"
+                ]
             }
         },
         {
@@ -3647,7 +3126,10 @@
                         "description": "Destination path"
                     }
                 },
-                "required": ["src", "dst"]
+                "required": [
+                    "src",
+                    "dst"
+                ]
             }
         },
         {
@@ -3666,7 +3148,10 @@
                         "description": "Destination path"
                     }
                 },
-                "required": ["src", "dst"]
+                "required": [
+                    "src",
+                    "dst"
+                ]
             }
         },
         {
@@ -3681,7 +3166,9 @@
                         "description": "Path to delete"
                     }
                 },
-                "required": ["path"]
+                "required": [
+                    "path"
+                ]
             }
         },
         {
@@ -3714,7 +3201,9 @@
                         "description": "Control role"
                     }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         },
         {
@@ -3763,8 +3252,119 @@
                         "description": "Element ID"
                     }
                 },
-                "required": ["text"]
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "download_file",
+            "description": "Safely downloads an HTTP(S) resource with size limits, atomic writes, and SHA-256 verification.",
+            "func_name": "download_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string"
+                    },
+                    "destination_dir": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "overwrite": {
+                        "type": "boolean"
+                    },
+                    "timeout": {
+                        "type": "number"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "url"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "download_many",
+            "description": "Downloads multiple HTTP(S) resources concurrently with the same safety limits.",
+            "func_name": "download_many",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "urls": {
+                        "type": "array"
+                    },
+                    "destination_dir": {
+                        "type": "string"
+                    },
+                    "overwrite": {
+                        "type": "boolean"
+                    },
+                    "concurrency": {
+                        "type": "integer"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "urls"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "cleanup_screenshot_frames",
+            "description": "Prunes persisted screenshot evidence using bounded count, age, and total-size retention.",
+            "func_name": "cleanup_screenshot_frames",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_count": {
+                        "type": "integer"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    },
+                    "max_age_s": {
+                        "type": "integer"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "browser_whatsapp_send_message",
+            "description": "Finds a WhatsApp Web contact, sends a Unicode-safe message, and verifies it when requested.",
+            "func_name": "browser_whatsapp_send_message",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contact": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "verify": {
+                        "type": "boolean"
+                    },
+                    "timeout": {
+                        "type": "number"
+                    }
+                },
+                "required": [
+                    "contact",
+                    "message"
+                ],
+                "additionalProperties": false
             }
         }
     ]
-}
+}

@@ -3,11 +3,17 @@ Provides real perception, input injection, window/app management, browser automa
 and autonomous task execution without stubs.
 """
 from __future__ import annotations
+import hashlib
 import json
+import mimetypes
 import os
 import re
 import sys
 import time
+import urllib.parse
+import urllib.request
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,7 +37,7 @@ def screen_read_text(region: Optional[Dict[str, int]] = None, monitor: int = 1,
     from kratos_agent.ccs.perception.screenshot import take_screenshot
     from kratos_agent.ccs.perception.ocr import OcrEngine
     r = Rect(x=region["x"], y=region["y"], w=region["w"], h=region["h"]) if region else None
-    data, ref = take_screenshot(monitor=monitor, region=r)
+    data, ref = take_screenshot(monitor=monitor, region=r, persist=False)
     try:
         engine = OcrEngine()
         elements = engine.extract_text(data)
@@ -96,7 +102,7 @@ def screen_diff(ref_a: Optional[str] = None, ref_b: Optional[str] = None, thresh
     """Compares two screenshots to identify changed regions."""
     from kratos_agent.ccs.perception.screenshot import take_screenshot
     from kratos_agent.ccs.perception.screen_diff import compute_screen_diff
-    f1, _ = take_screenshot()
+    f1, _ = take_screenshot(persist=False)
     time.sleep(0.1)
     f2, _ = take_screenshot()
     changed, diff_px = compute_screen_diff(f1, f2, threshold=int(threshold))
@@ -575,8 +581,22 @@ def disk_info(path: Optional[str] = None) -> str:
     return json.dumps({"total_gb": round(usage.total / 1073741824, 1), "used_gb": round(usage.used / 1073741824, 1), "free_gb": round(usage.free / 1073741824, 1)}, indent=2)
 
 def disk_cleanup(targets: Optional[List[str]] = None) -> str:
-    """Cleans temporary files and caches."""
-    return json.dumps({"ok": True, "freed_mb": 0}, indent=2)
+    """Cleans Kratos screenshot evidence and temporary partial downloads."""
+    from kratos_agent.ccs.perception.screenshot import cleanup_frame_store
+    result = {"frames": cleanup_frame_store()}
+    removed_partials = 0
+    root = Path.home() / "Downloads"
+    if (not targets) or "partials" in targets:
+        for path in root.glob(".*.part"):
+            try:
+                path.unlink()
+                removed_partials += 1
+            except OSError:
+                pass
+    result["partial_downloads_removed"] = removed_partials
+    return json.dumps(result, indent=2)
+
+# ── 7. Browser Tools
 
 # ── 7. Browser Tools ─────────────────────────────────────────────────────────
 
@@ -632,20 +652,252 @@ def browser_snapshot_dom() -> str:
     return browser_read(mode="markdown")
 
 def browser_fill_form(fields: List[Dict[str, Any]]) -> str:
-    """Fills multiple form inputs in the browser."""
-    return json.dumps({"ok": True, "fields_filled": len(fields)}, indent=2)
+    """Fill browser form fields through the semantic browser driver."""
+    from kratos_agent.computer.browser.playwright import PlaywrightDriver
+    driver = PlaywrightDriver()
+    results = []
+    for field in fields:
+        name = field.get("name")
+        selector = field.get("selector")
+        role = field.get("role")
+        text_value = str(field.get("value", ""))
+        res = driver.fill(text_value, role=role, name=name, selector=selector)
+        results.append({"name": name, "ok": res.ok, "detail": res.detail})
+    return json.dumps({"ok": all(item["ok"] for item in results), "fields": results}, indent=2)
+
+
+def _safe_download_name(name: str) -> str:
+    name = Path(str(name)).name
+    name = re.sub(r'[\\x00-\\x1f<>:"/\\\\|?*]+', "_", name).strip(" .")
+    return name or f"download-{int(time.time())}"
+
+
+def _unique_destination(path: Path, overwrite: bool) -> Path:
+    if overwrite or not path.exists():
+        return path
+    for index in range(1, 10000):
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("Could not allocate a unique download filename.")
+
+
+def download_file(url: str, destination_dir: Optional[str] = None, filename: Optional[str] = None,
+                  overwrite: bool = False, timeout: float = 60.0,
+                  max_bytes: int = 512 * 1024 * 1024) -> str:
+    """Download an HTTP(S) resource safely with atomic writes and SHA-256 evidence."""
+    parsed = urllib.parse.urlparse(str(url).strip())
+    if parsed.scheme not in {"http", "https"}:
+        return json.dumps({"ok": False, "error": "Only http:// and https:// downloads are allowed."}, indent=2)
+    if max_bytes <= 0:
+        return json.dumps({"ok": False, "error": "max_bytes must be positive."}, indent=2)
+    root = Path(destination_dir).expanduser() if destination_dir else Path.home() / "Downloads"
+    root.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(parsed.geturl(), headers={"User-Agent": "Kratos-Agent/1.0"}, method="GET")
+    temp_path = None
+    try:
+        with urllib.request.urlopen(req, timeout=float(timeout)) as response:
+            length = response.headers.get("Content-Length")
+            if length and length.isdigit() and int(length) > max_bytes:
+                return json.dumps({"ok": False, "error": f"Remote file exceeds max_bytes ({max_bytes})."}, indent=2)
+            if not filename:
+                disposition = response.headers.get("Content-Disposition", "")
+                match = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';]+)', disposition, re.IGNORECASE)
+                filename = urllib.parse.unquote(match.group(1)) if match else None
+            filename = _safe_download_name(filename or Path(parsed.path).name or "download")
+            target = _unique_destination(root / filename, overwrite)
+            temp_path = root / f".{target.name}.{uuid.uuid4().hex}.part"
+            digest = hashlib.sha256()
+            total = 0
+            with temp_path.open("wb") as handle:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(f"Download exceeds max_bytes ({max_bytes}).")
+                    digest.update(chunk)
+                    handle.write(chunk)
+            os.replace(temp_path, target)
+            temp_path = None
+            return json.dumps({
+                "ok": True, "path": str(target), "url": parsed.geturl(), "bytes": total,
+                "sha256": digest.hexdigest(),
+                "content_type": response.headers.get("Content-Type") or mimetypes.guess_type(str(target))[0],
+            }, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2)
+
+
+def download_many(urls: List[str], destination_dir: Optional[str] = None, overwrite: bool = False,
+                  concurrency: int = 3, max_bytes: int = 512 * 1024 * 1024) -> str:
+    """Download several HTTP(S) resources concurrently with the same safety limits."""
+    if not urls:
+        return json.dumps({"ok": True, "downloads": []}, indent=2)
+    workers = max(1, min(int(concurrency), 6))
+    results = []
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="kratos-download") as pool:
+        futures = [
+            pool.submit(download_file, url, destination_dir, None, overwrite, 60.0, max_bytes)
+            for url in urls
+        ]
+        for future in as_completed(futures):
+            try:
+                results.append(json.loads(future.result()))
+            except Exception as exc:
+                results.append({"ok": False, "error": str(exc)})
+    return json.dumps({
+        "ok": all(item.get("ok", False) for item in results),
+        "downloads": results,
+    }, indent=2, ensure_ascii=False)
+
 
 def browser_download(url: Optional[str] = None, dest: Optional[str] = None) -> str:
-    """Downloads a file via the browser."""
-    return json.dumps({"ok": True, "downloaded": url}, indent=2)
+    """Download a browser URL through the same safe downloader."""
+    if not url:
+        return json.dumps({"ok": False, "error": "url is required."}, indent=2)
+    if dest:
+        target = Path(dest).expanduser()
+        if target.suffix:
+            return download_file(url, str(target.parent), target.name)
+    return download_file(url, dest)
+
+
+def cleanup_screenshot_frames(max_count: Optional[int] = None, max_bytes: Optional[int] = None,
+                              max_age_s: Optional[int] = None) -> str:
+    """Prune persisted screenshot evidence using the bounded retention policy."""
+    from kratos_agent.ccs.perception.screenshot import cleanup_frame_store
+    return json.dumps(cleanup_frame_store(max_count=max_count, max_bytes=max_bytes, max_age_s=max_age_s), indent=2)
+
+
+def browser_whatsapp_send_message(contact: str, message: str, verify: bool = True,
+                                  timeout: float = 15.0) -> str:
+    """Find a WhatsApp Web contact, send a Unicode-safe message, and verify it when requested."""
+    contact, message = str(contact).strip(), str(message)
+    if not contact or not message:
+        return json.dumps({"ok": False, "verified": False, "error": "contact and message are required."}, indent=2)
+    from kratos_agent.ccs.browser.cdp import cdp_client
+    from kratos_agent.computer.browser.manager import get_browser_manager
+    from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+    try:
+        state = json.loads(browser_state())
+        if not state.get("connected") or "web.whatsapp.com" not in str(state.get("url", "")):
+            bm = get_browser_manager()
+            bm.initialize_browser_task(initial_url="https://web.whatsapp.com")
+            nav = bm.open_url("https://web.whatsapp.com")
+            if not nav.ok:
+                return json.dumps({"ok": False, "verified": False, "error": nav.detail or "Could not open WhatsApp Web."}, indent=2)
+            time.sleep(1.0)
+        deadline = time.monotonic() + timeout
+        search_ready = False
+        while time.monotonic() < deadline:
+            ready = cdp_client.evaluate("""(() => {
+                const els = [...document.querySelectorAll('input, textarea')];
+                const el = els.find(e => {
+                    const meta = [e.getAttribute('placeholder'), e.getAttribute('aria-label'), e.getAttribute('title')].filter(Boolean).join(' ').toLowerCase();
+                    return meta.includes('search') && e.offsetParent !== null;
+                });
+                if (!el) return false;
+                el.focus(); el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); return true;
+            })()""")
+            if ready:
+                search_ready = True
+                break
+            time.sleep(0.25)
+        if not search_ready:
+            return json.dumps({"ok": False, "verified": False, "error": "WhatsApp search box was not found."}, indent=2)
+        cdp_client.send_command("Input.insertText", {"text": contact})
+        KeyboardEngine().key_tap(["enter"])
+        time.sleep(0.8)
+        wanted = json.dumps(re.sub(r"\s+", " ", contact.lower()).strip())
+        clicked = cdp_client.evaluate(f"""(() => {{
+            const wanted = {wanted};
+            const norm = v => String(v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+            const nodes = [...document.querySelectorAll('[role="row"], [data-testid*="cell-frame"], [title], [aria-label]')];
+            for (const node of nodes.slice(0, 1500)) {{
+                const text = norm([node.innerText, node.getAttribute('title'), node.getAttribute('aria-label')].filter(Boolean).join(' '));
+                if (text === wanted || text.includes(wanted)) {{ node.click(); return true; }}
+            }}
+            return false;
+        }})()""")
+        if not clicked:
+            return json.dumps({"ok": False, "verified": False, "error": f"WhatsApp contact '{contact}' was not found."}, indent=2)
+        time.sleep(0.5)
+        ready = cdp_client.evaluate("""(() => {
+            const els = [...document.querySelectorAll('footer [contenteditable="true"], div[role="textbox"][contenteditable="true"]')];
+            const el = els.find(e => e.offsetParent !== null);
+            if (!el) return false; el.focus(); return true;
+        })()""")
+        if not ready:
+            return json.dumps({"ok": False, "verified": False, "error": "WhatsApp message box was not found."}, indent=2)
+        cdp_client.send_command("Input.insertText", {"text": message})
+        KeyboardEngine().key_tap(["enter"])
+        time.sleep(0.8)
+        verified = True
+        evidence = {"contact": contact, "message": message}
+        if verify:
+            wanted_msg = json.dumps(re.sub(r"\s+", " ", message.strip()))
+            check = cdp_client.evaluate(f"""(() => {{
+                const wanted = {wanted_msg};
+                const norm = v => String(v || '').replace(/\\s+/g, ' ').trim();
+                const nodes = [...document.querySelectorAll('[data-testid*="msg-container"], div.copyable-text')];
+                const recent = nodes.slice(-30).map(n => norm(n.innerText || n.textContent || ''));
+                return {{found: recent.some(t => t === wanted || t.includes(wanted)), recent: recent.slice(-5)}};
+            }})()""")
+            verified = bool(check and check.get("found"))
+            evidence["verification"] = check
+        return json.dumps({"ok": True, "verified": verified, "evidence": evidence}, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"ok": False, "verified": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2, ensure_ascii=False)
 
 def browser_wait_for(condition: str, mode: str = "load", timeout: float = 20.0) -> str:
-    """Waits for page load or element in the browser."""
-    return json.dumps({"ok": True, "condition": condition, "met": True}, indent=2)
+    """Wait for a real browser condition instead of returning a synthetic success."""
+    from kratos_agent.ccs.browser.cdp import cdp_client
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not cdp_client.is_available():
+            return json.dumps({"ok": False, "met": False, "error": "Browser not connected via CDP."}, indent=2)
+        try:
+            if mode == "load":
+                value = cdp_client.evaluate("document.readyState") == "complete"
+            elif mode == "selector":
+                value = bool(cdp_client.evaluate(f"Boolean(document.querySelector({json.dumps(condition)}))"))
+            elif mode == "text":
+                value = str(cdp_client.evaluate("document.body ? document.body.innerText : ''")).lower().find(condition.lower()) >= 0
+            elif mode == "url":
+                value = condition in str(cdp_client.evaluate("window.location.href"))
+            else:
+                return json.dumps({"ok": False, "met": False, "error": f"Unsupported mode: {mode}"}, indent=2)
+            if value:
+                return json.dumps({"ok": True, "met": True, "condition": condition, "mode": mode}, indent=2)
+        except Exception:
+            pass
+        time.sleep(0.25)
+    return json.dumps({"ok": True, "met": False, "condition": condition, "mode": mode, "timeout": timeout}, indent=2)
+
 
 def browser_profile_list() -> str:
-    """Lists available user browser profiles."""
-    return json.dumps(["Default", "Profile 1"], indent=2)
+    """Lists detected local browser profile directories instead of returning placeholders."""
+    roots = [
+        Path(os.getenv("LOCALAPPDATA", "")) / "Google/Chrome/User Data",
+        Path.home() / ".config/google-chrome",
+        Path.home() / ".config/chromium",
+    ]
+    profiles = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for child in root.iterdir():
+            if child.is_dir() and (child.name == "Default" or child.name.startswith("Profile ")):
+                profiles.append(str(child))
+    return json.dumps(sorted(set(profiles)), indent=2)
+
 
 def browser_state() -> str:
     """Returns active URL, title, and state of the browser."""
@@ -677,9 +929,21 @@ def app_task(app: str, goal: str, max_steps: int = 15) -> str:
     """Executes an autonomous task scoped to a single application."""
     return computer_task(f"In {app}: {goal}", max_steps=max_steps)
 
-def verify_gui_state(expectation: str, evidence: str = "all") -> str:
-    """Verifies that a desired visual or UI state is currently true on screen."""
-    return json.dumps({"met": True, "expectation": expectation}, indent=2)
+def verify_gui_state(expectation: str, evidence: str = "text") -> str:
+    """Checks an observable UI condition instead of assuming success."""
+    expectation = str(expectation).strip()
+    if not expectation:
+        return json.dumps({"met": False, "error": "expectation is required."}, indent=2)
+    if evidence in ("text", "all"):
+        text = screen_read_text()
+        if expectation.lower() in text.lower():
+            return json.dumps({"met": True, "method": "ocr_text", "expectation": expectation}, indent=2)
+    if evidence in ("window", "all"):
+        info = json.loads(active_window_info())
+        if expectation.lower() in str(info.get("title", "")).lower():
+            return json.dumps({"met": True, "method": "active_window", "expectation": expectation}, indent=2)
+    return json.dumps({"met": False, "expectation": expectation, "evidence": evidence}, indent=2)
+
 
 def gui_explore(app: Optional[str] = None, depth: int = 3) -> str:
     """Walks menus and windows to map the UI structure of an application."""

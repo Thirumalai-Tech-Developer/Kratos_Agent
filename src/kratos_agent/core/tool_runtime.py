@@ -233,7 +233,7 @@ def _permission_for(name: str) -> ToolPermission:
         return ToolPermission.WRITE
     if name.startswith("git_"):
         return ToolPermission.GIT
-    if name in {"fetch_url", "google_search", "computer_browser_navigate"}:
+    if name in {"fetch_url", "google_search", "computer_browser_navigate", "browser_download", "download_file", "download_many"}:
         return ToolPermission.NETWORK
     return ToolPermission.EXECUTE
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import uuid
 from typing import Any, Dict, Optional
@@ -75,17 +76,16 @@ class KratosBridge:
         exp_res = dict(expected_result or {})
 
         if action == "generic_task":
-            if any(w in desc_lower for w in ("youtube", "play video", "watch")):
+            from kratos_agent.computer.browser.intent import is_pure_browser_media_request, is_pure_app_launch_request
+            if is_pure_browser_media_request(task_description):
                 action = "browser.youtube.play"
                 params["query"] = task_description.replace("open youtube and play", "").replace("play", "").replace("on youtube", "").strip()
                 constrs.update({"reuse_existing_chrome_window": True, "create_one_task_tab": True, "reuse_task_tab": True, "foreground_required": True})
                 exp_res.update({"video_playing": True, "playback_advancing": True})
-            elif desc_lower.startswith(("open chrome", "launch chrome", "open google chrome")):
+            elif is_pure_app_launch_request(task_description):
                 action = "open_application"
-                params["app_name"] = "chrome"
-            elif desc_lower.startswith(("open ", "launch ", "start ")):
-                action = "open_application"
-                params["app_name"] = desc_lower.split(maxsplit=1)[-1].strip()
+                app_text = re.sub(r"^(?:can you|could you|please)\s+", "", task_description.strip(), flags=re.IGNORECASE)
+                params["app_name"] = re.sub(r"^(?:open|launch|start)\s+", "", app_text, flags=re.IGNORECASE).strip()
             elif any(desc_lower.startswith(p) for p in ("search ", "find ", "who is ", "what is ")):
                 action = "search"
                 params["query"] = task_description

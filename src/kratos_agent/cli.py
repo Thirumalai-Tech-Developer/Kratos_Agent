@@ -2087,7 +2087,7 @@ def start_interactive_cli():
             clean_lower = clean_q.lower()
 
             # 1. Direct URL Fast Path (§22)
-            if re.match(r"^(https?://|www\.)[^\s]+", clean_q, re.IGNORECASE):
+            if re.fullmatch(r"(?:https?://|www\.)[^\s]+", clean_q, re.IGNORECASE):
                 console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Navigating to: {clean_q}[/bold cyan]")
                 from kratos_agent.computer.browser.manager import get_browser_manager
                 b_res = get_browser_manager().open_url(clean_q)
@@ -2101,8 +2101,10 @@ def start_interactive_cli():
 
             # 2. Generic Desktop Application Launch Fast Path (§18, §23, §35)
             from kratos_agent.computer.apps.launcher import get_launcher
+            from kratos_agent.computer.browser.intent import parse_media_intent, is_pure_app_launch_request
             resolved_app = get_launcher().resolve_application(clean_q)
-            if resolved_app and not clean_lower.startswith(("open youtube", "go to youtube", "play ", "search ")):
+            m_intent_hint = parse_media_intent(clean_q)
+            if resolved_app and is_pure_app_launch_request(clean_q) and m_intent_hint.get("intent") not in {"open_youtube", "open_whatsapp", "whatsapp_message"}:
                 _, _, display_name = resolved_app
                 console.print(f"\n[bold cyan]⚡ [AppFastPath] Opening {display_name}...[/bold cyan]")
                 a_res = get_launcher().launch_and_verify(clean_q)
@@ -2117,7 +2119,7 @@ def start_interactive_cli():
                     messages.append({"role": "assistant", "content": f"Could not launch {display_name}: {a_res.detail}"})
                 continue
 
-            # 3. Semantic Media Intent Parsing & Physical Verification (§10, §12, §13, §14, §15, §19, §21, §24)
+            # 3. Semantic Media / Browser Intent Parsing & Physical Verification
             from kratos_agent.computer.browser.intent import parse_media_intent, should_reuse_browser_context
             from kratos_agent.computer.browser.playwright import PlaywrightDriver, can_report_success
             from kratos_agent.computer.browser.target import get_target_manager
@@ -2147,24 +2149,46 @@ def start_interactive_cli():
                     messages.append({"role": "assistant", "content": f"YouTube could not be opened: {b_res.detail}"})
                 continue
 
-            # Open WhatsApp Web (§10, §46)
+            # Open WhatsApp Web only for a pure open request.
             if intent_type == "open_whatsapp":
                 prev_task = get_target_manager().get_active_task_target()
                 reuse_target = should_reuse_browser_context(prev_task, m_intent)
                 if not reuse_target and prev_task is not None:
                     get_target_manager().clear_task_target()
                 prev_state = prev_task.tab_id if prev_task else "None"
-                print(f"[CONTINUATION]\nTask: open whatsapp\nPrevious state: {prev_state}\nNew command: open whatsapp\nReuse target: {reuse_target}")
-                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Opening WhatsApp Web in current Chrome window...[/bold cyan]")
+                print(
+                    f"[CONTINUATION]\nTask: open whatsapp\nPrevious state: {prev_state}"
+                    f"\nNew command: open whatsapp\nReuse target: {reuse_target}"
+                )
+                console.print("\n[bold cyan]⚡ [BrowserFastPath] Opening WhatsApp Web...[/bold cyan]")
                 if not reuse_target:
                     get_browser_manager().initialize_browser_task(initial_url="https://web.whatsapp.com")
                 b_res = get_browser_manager().open_url("https://web.whatsapp.com")
                 if b_res.ok:
-                    console.print(f"[bold green]✓ Done — WhatsApp Web is open.[/bold green]\n")
+                    console.print("[bold green]✓ Done — WhatsApp Web is open.[/bold green]\n")
                     messages.append({"role": "assistant", "content": "Done — WhatsApp Web is open."})
                 else:
                     console.print(f"[bold red]⚠️ WhatsApp Web could not be opened: {b_res.detail}[/bold red]\n")
                     messages.append({"role": "assistant", "content": f"WhatsApp Web could not be opened: {b_res.detail}"})
+                continue
+
+            # Compound WhatsApp message: complete the requested action.
+            if intent_type == "whatsapp_message":
+                from kratos_agent.utils.computer_tools import browser_whatsapp_send_message
+                contact = str(m_intent.get("contact", "")).strip()
+                message = str(m_intent.get("message", ""))
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Sending WhatsApp message to {contact}...[/bold cyan]")
+                try:
+                    result = json.loads(browser_whatsapp_send_message(contact=contact, message=message, verify=True))
+                except Exception as exc:
+                    result = {"ok": False, "verified": False, "error": str(exc)}
+                if result.get("ok") and result.get("verified", True):
+                    console.print(f"[bold green]✓ Done — sent the message to {contact} and verified it in WhatsApp Web.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": f"Done — sent the message to {contact} and verified it."})
+                else:
+                    reason = result.get("error") or result.get("detail") or "Message could not be verified."
+                    console.print(f"[bold red]⚠️ WhatsApp message failed: {reason}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"WhatsApp message failed: {reason}"})
                 continue
 
             # Search Video (State: SEARCH_RESULTS, NOT VIDEO_PLAYING)
