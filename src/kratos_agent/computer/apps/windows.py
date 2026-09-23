@@ -168,3 +168,62 @@ def get_window_manager() -> WindowManager:
     if _window_manager is None:
         _window_manager = WindowManager()
     return _window_manager
+
+
+def enumerate_chrome_windows() -> List[Dict[str, Any]]:
+    """Lists all visible, non-minimized Chrome and Chromium windows with HWND, PID, title, and foreground status (§30)."""
+    chrome_windows: List[Dict[str, Any]] = []
+    if sys.platform == "win32":
+        import ctypes
+        user32 = ctypes.windll.user32
+        fore_hwnd = user32.GetForegroundWindow()
+
+        if gw:
+            try:
+                for win in gw.getAllWindows():
+                    hwnd = win._hWnd
+                    if not win.title:
+                        continue
+                    if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                        continue
+
+                    # Check PID and process name
+                    pid = ctypes.c_ulong()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    pid_val = pid.value
+
+                    is_chrome = False
+                    try:
+                        import psutil
+                        p_name = psutil.Process(pid_val).name().lower()
+                        if "chrome" in p_name or "edge" in p_name or "brave" in p_name:
+                            is_chrome = True
+                    except Exception:
+                        t_lower = win.title.lower()
+                        if any(b in t_lower for b in ("google chrome", "chrome", "edge", "brave")) or "youtube" in t_lower:
+                            is_chrome = True
+
+                    if is_chrome:
+                        chrome_windows.append({
+                            "hwnd": hwnd,
+                            "pid": pid_val,
+                            "title": win.title,
+                            "visible": True,
+                            "foreground": (hwnd == fore_hwnd),
+                        })
+            except Exception:
+                pass
+    elif sys.platform == "linux":
+        wm = get_window_manager()
+        for win in wm.list_windows():
+            t_lower = win.title.lower()
+            if any(b in t_lower for b in ("chrome", "chromium", "google chrome")):
+                chrome_windows.append({
+                    "hwnd": int(win.id) if win.id.isdigit() else win.id,
+                    "pid": None,
+                    "title": win.title,
+                    "visible": True,
+                    "foreground": win.is_active,
+                })
+    return chrome_windows
+

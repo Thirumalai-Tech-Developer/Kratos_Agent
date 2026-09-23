@@ -22,6 +22,16 @@ class LiveState(str, Enum):
     IDLE = "idle"
 
 
+class ComponentHealth(str, Enum):
+    """Real component health state distinguishing configured vs verified operational (§8)."""
+    OFFLINE = "offline"
+    STARTING = "starting"
+    ONLINE = "online"
+    MUTED = "muted"
+    DEGRADED = "degraded"
+    ERROR = "error"
+
+
 @dataclass
 class LiveStatus:
     """Central status of the Live multimodal subsystem."""
@@ -37,6 +47,8 @@ class LiveStatus:
     current_state: LiveState = LiveState.CONNECTING
     last_transcript: str = ""
     last_error: Optional[str] = None
+    microphone_health: str = "offline"
+    screen_health: str = "offline"
     updated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -53,8 +65,11 @@ class LiveStatus:
             "current_state": self.current_state.value if isinstance(self.current_state, LiveState) else str(self.current_state),
             "last_transcript": self.last_transcript,
             "last_error": self.last_error,
+            "microphone_health": self.microphone_health,
+            "screen_health": self.screen_health,
             "updated_at": self.updated_at,
         }
+
 
 
 StatusListener = Callable[[LiveStatus], None]

@@ -3,7 +3,12 @@ import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple
-from mss import mss
+try:
+    from mss import mss
+    _HAS_MSS = True
+except ImportError:
+    _HAS_MSS = False
+
 from PIL import Image
 import io
 
@@ -20,22 +25,26 @@ def take_screenshot(monitor: Optional[int] = None, region: Optional[Rect] = None
                    max_long_edge: int = 1568, save_dir: Optional[Path] = None,
                    include_cursor: bool = False, downscale: int = 0) -> Tuple[bytes, str]:
     """
-    Takes a screenshot using mss, downscales if necessary, and saves to disk.
+    Takes a screenshot using mss (or ImageGrab fallback), downscales if necessary, and saves to disk.
     Returns (PNG bytes, frame_id).
     """
     img = None
-    try:
-        with mss() as sct:
-            if region:
-                monitor_dict = {"top": region.y, "left": region.x, "width": region.w, "height": region.h}
-            elif monitor is not None and monitor < len(sct.monitors):
-                monitor_dict = sct.monitors[monitor]
-            else:
-                monitor_dict = sct.monitors[0]
+    if _HAS_MSS:
+        try:
+            with mss() as sct:
+                if region:
+                    monitor_dict = {"top": region.y, "left": region.x, "width": region.w, "height": region.h}
+                elif monitor is not None and monitor < len(sct.monitors):
+                    monitor_dict = sct.monitors[monitor]
+                else:
+                    monitor_dict = sct.monitors[0]
 
-            sct_img = sct.grab(monitor_dict)
-            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-    except Exception:
+                sct_img = sct.grab(monitor_dict)
+                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+        except Exception:
+            pass
+    if img is None:
+
         try:
             from PIL import ImageGrab
             if region:

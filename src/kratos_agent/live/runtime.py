@@ -195,8 +195,9 @@ class LiveRuntime:
                 pass
             self.avatar = None
 
-    async def set_vision_mode(self, mode: str) -> None:
-        await self.vision.set_mode(mode)
+    async def set_vision_mode(self, mode: str) -> Dict[str, Any]:
+        return await self.vision.set_mode(mode)
+
 
     async def start(self) -> None:
         """Starts all Live subsystems within the current asyncio event loop."""

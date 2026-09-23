@@ -15,7 +15,7 @@ Do not check dependencies for tools that are not being used.
 
 Choose the simplest available execution backend.
 
-For browser tasks, prefer the existing browser session and Playwright before Selenium or GUI automation.
+For browser tasks, prefer the existing browser session and Playwright. Never use Selenium or ChromeDriver.
 
 For desktop tasks, prefer semantic accessibility APIs before vision or coordinates.
 

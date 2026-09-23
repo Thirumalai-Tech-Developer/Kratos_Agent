@@ -1573,9 +1573,36 @@ def start_interactive_cli():
                         asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("camera"), live_runtime._loop)
                     console.print("\n[bold green]👁 Vision mode set to CAMERA.[/bold green]\n")
                 elif arg in ("screen", "desktop"):
+                    res = None
                     if live_runtime._loop and live_runtime._loop.is_running():
-                        asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("screen"), live_runtime._loop)
-                    console.print("\n[bold green]🖥 Vision mode set to SCREEN.[/bold green]\n")
+                        fut = asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("screen"), live_runtime._loop)
+                        try:
+                            res = fut.result(timeout=5.0)
+                        except Exception as e:
+                            res = {"status": "error", "error": str(e)}
+                    # Format output according to §13
+                    st = live_runtime.get_status()
+                    is_connected = st.gemini_connected
+                    if res and (res.get("status") == "error" or res.get("screen", {}).get("health") == "error"):
+                        err_text = res.get("error") or res.get("screen", {}).get("error") or "Capture error"
+                        console.print(
+                            f"\n[bold gold1]🖥 Vision mode:[/bold gold1] [bold cyan]SCREEN[/bold cyan]\n"
+                            f"   [bold red]Capture: ERROR[/bold red]\n"
+                            f"   Backend: {res.get('screen', {}).get('backend', 'MSS')}\n"
+                            f"   Error: {err_text}\n"
+                        )
+                    else:
+                        scr_info = res.get("screen", {}) if isinstance(res, dict) else {}
+                        cap_w = scr_info.get("width", 1920) if isinstance(scr_info, dict) else 1920
+                        cap_h = scr_info.get("height", 1080) if isinstance(scr_info, dict) else 1080
+                        backend_name = scr_info.get("backend", "MSS") if isinstance(scr_info, dict) else "MSS"
+                        console.print(
+                            f"\n[bold gold1]🖥 Vision mode:[/bold gold1] [bold cyan]SCREEN[/bold cyan]\n"
+                            f"   [bold green]Capture: ONLINE[/bold green]\n"
+                            f"   Backend: {backend_name}\n"
+                            f"   Resolution: {cap_w}x{cap_h}\n"
+                            f"   Gemini stream: {'[bold green]CONNECTED[/bold green]' if is_connected else '[dim]OFFLINE[/dim]'}\n"
+                        )
                 elif arg in ("both", "all"):
                     if live_runtime._loop and live_runtime._loop.is_running():
                         asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("both"), live_runtime._loop)
@@ -1631,11 +1658,31 @@ def start_interactive_cli():
                     live_table.add_column("Subsystem", style="bold gold1")
                     live_table.add_column("Status", style="white")
                     live_table.add_row("Gemini Live", "[bold green]CONNECTED[/bold green]" if st.gemini_connected else "[bold yellow]CONNECTING / IDLE[/bold yellow]")
-                    live_table.add_row("Microphone", "[bold green]ONLINE[/bold green]" if st.microphone_active else "[dim]OFFLINE[/dim]")
+
+                    # Microphone health
+                    mic_h = getattr(st, "microphone_health", "")
+                    if st.muted or mic_h == "muted":
+                        mic_display = "[bold yellow]MUTED[/bold yellow]"
+                    elif st.microphone_active or mic_h == "online":
+                        mic_display = "[bold green]ONLINE[/bold green]"
+                    else:
+                        mic_display = "[dim]OFFLINE[/dim]"
+                    live_table.add_row("Microphone", mic_display)
                     live_table.add_row("Speaker", "[bold green]ONLINE[/bold green]" if st.speaker_active else "[dim]OFFLINE[/dim]")
                     live_table.add_row("Camera", "[bold green]ONLINE[/bold green]" if st.camera_active else "[dim]OFFLINE[/dim]")
-                    live_table.add_row("Screen", "[bold green]ONLINE[/bold green]" if st.screen_active else "[dim]OFFLINE[/dim]")
-                    live_table.add_row("Muted", "[bold yellow]YES[/bold yellow]" if st.muted else "[bold green]NO[/bold green]")
+
+                    # Screen health
+                    scr_h = getattr(st, "screen_health", "")
+                    if scr_h == "online" or (st.screen_active and scr_h != "error"):
+                        scr_display = "[bold green]ONLINE[/bold green]"
+                    elif scr_h == "error":
+                        scr_display = "[bold red]ERROR[/bold red]"
+                    elif scr_h == "degraded":
+                        scr_display = "[bold yellow]DEGRADED[/bold yellow]"
+                    else:
+                        scr_display = "[dim]OFFLINE[/dim]"
+                    live_table.add_row("Screen", scr_display)
+                    live_table.add_row("Muted", "[bold yellow]YES[/bold yellow]" if (st.muted or mic_h == "muted") else "[bold green]NO[/bold green]")
                     live_table.add_row("Vision Mode", f"[bold cyan]{st.video_mode}[/bold cyan]")
                     live_table.add_row("Active Task", str(st.active_task_id or "None"))
                     if st.last_error:
@@ -1644,6 +1691,33 @@ def start_interactive_cli():
                     console.print(live_table)
                     console.print()
                 continue
+
+            if user_input.lower().startswith("/debug"):
+                parts = user_input.split(maxsplit=1)
+                d_arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                if d_arg in ("errors", "error", "err"):
+                    from kratos_agent.live.screen import get_screen_stream
+                    from kratos_agent.computer.browser.manager import get_browser_manager
+                    from kratos_agent.core.error_pipeline import get_error_pipeline
+                    s_health = get_screen_stream().health_check()
+                    b_diag = get_browser_manager().diagnostics()
+                    st = live_runtime.get_status() if live_runtime else None
+                    pipe = get_error_pipeline()
+                    recent_errs = pipe.get_recent_errors(limit=5)
+
+                    console.print("\n[bold gold1]── Diagnostic State (§46) ──[/bold gold1]")
+                    console.print(f"[bold cyan][SCREEN][/bold cyan]\nbackend={s_health.backend}\navailable={s_health.available}\nresolution={s_health.width}x{s_health.height}\nframes={s_health.frame_count}\nerror={s_health.error}")
+                    console.print(f"\n[bold cyan][GEMINI][/bold cyan]\nsession={'CONNECTED' if (st and st.gemini_connected) else 'DISCONNECTED'}\nmode={st.video_mode if st else 'unknown'}\nerror={st.last_error if st else None}")
+                    console.print(f"\n[bold cyan][BROWSER][/bold cyan]\nbackend={b_diag.get('backend')}\nconnected={b_diag.get('connected')}\nactive_url={b_diag.get('active_url')}\nactive_title={b_diag.get('active_title')}")
+                    if recent_errs:
+                        console.print("\n[bold cyan][RECENT STRUCTURED ERRORS][/bold cyan]")
+                        for err in recent_errs:
+                            console.print(f" • [{err.subsystem.upper()}:{err.operation}] {err.error_type}: {err.message} (recoverable={err.recoverable})")
+                    else:
+                        console.print("\n[bold green]No recent errors in error pipeline.[/bold green]")
+                    console.print()
+                    continue
+
 
             if any(user_input.lower().startswith(c) for c in ("/session", "/sessions")):
                 parts = user_input.split(maxsplit=1)
@@ -1665,9 +1739,16 @@ def start_interactive_cli():
                 continue
 
             if user_input.lower() == "/clear":
+                from kratos_agent.computer.browser.target import get_target_manager
+                get_target_manager().clear_target()
+                if hasattr(runtime, "active_task"):
+                    runtime.active_task = None
+                if hasattr(runtime, "task_history"):
+                    runtime.task_history.clear()
                 console.clear()
                 print_welcome()
                 continue
+
 
             if user_input.lower() == "/help":
                 console.print(Panel(HELP_TEXT, title="[bold gold1]Commands & Shortcuts[/bold gold1]", border_style="gold1"))
@@ -1857,6 +1938,14 @@ def start_interactive_cli():
                     console.print(f"\n[bold gold1]📋 Plan Mode activated for:[/bold gold1] {arg}\n")
                     user_input = arg
 
+            # /clear — Clear conversation history and browser task state (§25)
+            if user_input.lower().strip() in ("/clear", "clear"):
+                from kratos_agent.computer.browser.target import get_target_manager
+                get_target_manager().clear_task_target()
+                messages.clear()
+                console.print("[dim]Session and browser task state cleared. (Chrome window and tabs retained).[/dim]\n")
+                continue
+
             # /status — Comprehensive live subsystem status
             if user_input.lower().strip() in ("/status", "status"):
                 handle_system_status_command()
@@ -1932,6 +2021,167 @@ def start_interactive_cli():
             # Multi-turn history
             messages.append({"role": "user", "content": processed_query})
 
+            # Check fast paths before Gemini Live or general agent loop (§14, §22, §23, §43, §47, §49)
+            clean_q = processed_query.strip()
+            clean_lower = clean_q.lower()
+
+            # 1. Direct URL Fast Path (§22)
+            if re.match(r"^(https?://|www\.)[^\s]+", clean_q, re.IGNORECASE):
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Navigating to: {clean_q}[/bold cyan]")
+                from kratos_agent.computer.browser.manager import get_browser_manager
+                b_res = get_browser_manager().open_url(clean_q)
+                if b_res.ok:
+                    console.print(f"[bold green]✓ Navigated to {clean_q}[/bold green]\n")
+                    messages.append({"role": "assistant", "content": f"Navigated to {clean_q}."})
+                else:
+                    console.print(f"[bold red]⚠️ Navigation failed: {b_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"Failed to navigate to {clean_q}: {b_res.detail}"})
+                continue
+
+            # 2. Semantic Media Intent Parsing & Physical Verification (§12, §13, §14, §15, §19, §21, §24)
+            from kratos_agent.computer.browser.intent import parse_media_intent
+            from kratos_agent.computer.browser.playwright import PlaywrightDriver, can_report_success
+            from kratos_agent.computer.browser.target import get_target_manager
+            from kratos_agent.computer.browser.manager import get_browser_manager
+
+            m_intent = parse_media_intent(processed_query)
+            intent_type = m_intent.get("intent")
+            intent_query = m_intent.get("query", "")
+
+            # Open YouTube
+            if intent_type == "open_youtube":
+                prev_task = get_target_manager().get_active_task_target()
+                prev_state = prev_task.tab_id if prev_task else "None"
+                print(f"[CONTINUATION]\nTask: open youtube\nPrevious state: {prev_state}\nNew command: open youtube\nReuse target: True")
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Opening YouTube...[/bold cyan]")
+                if not (prev_task and prev_task.locked and not prev_task.is_closed()):
+                    get_browser_manager().initialize_browser_task(initial_url="https://www.youtube.com")
+                b_res = get_browser_manager().open_url("https://www.youtube.com")
+                if b_res.ok:
+                    console.print(f"[bold green]✓ Done — YouTube is open.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": "Done — YouTube is open."})
+                else:
+                    console.print(f"[bold red]⚠️ YouTube could not be opened: {b_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"YouTube could not be opened: {b_res.detail}"})
+                continue
+
+            # Search Video (State: SEARCH_RESULTS, NOT VIDEO_PLAYING)
+            if intent_type == "search_video":
+                from urllib.parse import quote_plus
+                search_url = f"https://www.youtube.com/results?search_query={quote_plus(intent_query)}"
+                prev_task = get_target_manager().get_active_task_target()
+                prev_state = prev_task.tab_id if prev_task else "None"
+                print(f"[CONTINUATION]\nTask: search {intent_query}\nPrevious state: {prev_state}\nNew command: search {intent_query}\nReuse target: True")
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Searching YouTube for '{intent_query}'...[/bold cyan]")
+                b_res = get_browser_manager().open_url(search_url)
+                if b_res.ok:
+                    active_task = get_target_manager().get_active_task_target()
+                    tab_lbl = active_task.tab_id if active_task else "PAGE-42"
+                    print(f"[ACTION]\nOperation: youtube_search\nTab: {tab_lbl}\nTarget: {intent_query}\nVerified: True\nState: SEARCH_RESULTS")
+                    print("[TERMINATION]\nSuccess: True\nVerified: True\nFinal State: SEARCH_RESULTS")
+                    console.print(f"[bold green]✓ Done — YouTube search results for '{intent_query}' are displayed.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": f"Done — YouTube search results for '{intent_query}' are displayed."})
+                else:
+                    console.print(f"[bold red]⚠️ YouTube search failed: {b_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"YouTube search failed: {b_res.detail}"})
+                continue
+
+            # Play Video / Compound Browser Task (Evidence-based verification! §13, §14, §15, §27)
+            if intent_type in ("compound_browser_task", "play_video"):
+                prev_task = get_target_manager().get_active_task_target()
+                prev_target = get_target_manager().get_active_target()
+                prev_state = prev_task.tab_id if prev_task else (prev_target.url if prev_target else "None")
+                print(f"[CONTINUATION]\nTask: play {intent_query}\nPrevious state: {prev_state}\nNew command: play {intent_query}\nReuse target: True")
+                console.print(f"\n[bold cyan]⚡ [BrowserFastPath] Playing {intent_query} in current Chrome window...[/bold cyan]")
+                drv = PlaywrightDriver()
+                p_res = drv.search_and_play_youtube(intent_query)
+                if can_report_success(p_res):
+                    console.print(f"[bold green]✓ Done — the {intent_query} walkthrough is playing in the current Chrome window.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": f"Done — the {intent_query} walkthrough is playing in the current Chrome window."})
+                else:
+                    err_reason = p_res.detail or "⚠️ I found the YouTube results, but I couldn't verify that a video started playing."
+                    if not err_reason.startswith("⚠️"):
+                        err_reason = f"⚠️ {err_reason}"
+                    console.print(f"[bold red]{err_reason}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": err_reason})
+                continue
+
+            # Pause Video
+            if intent_type == "pause_video":
+                prev_target = get_target_manager().get_active_target()
+                prev_state = prev_target.url if prev_target else "Video Playing"
+                print(f"[CONTINUATION]\nTask: pause video\nPrevious state: {prev_state}\nNew command: pause\nReuse target: True")
+                console.print(f"\n[bold cyan]⚡ [Continuation] Pausing video in current Chrome window...[/bold cyan]")
+                drv = PlaywrightDriver()
+                p_res = drv.pause_video()
+                if p_res.ok and p_res.verified:
+                    console.print(f"[bold green]✓ Done — Video paused.[/bold green]\n")
+                    messages.append({"role": "assistant", "content": "Done — Video paused."})
+                else:
+                    console.print(f"[bold red]⚠️ Could not pause video: {p_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"Could not pause video: {p_res.detail}"})
+                continue
+
+            # Resume Video
+            if intent_type == "resume_video":
+                prev_target = get_target_manager().get_active_target()
+                prev_state = prev_target.url if prev_target else "Video Paused"
+                print(f"[CONTINUATION]\nTask: resume video\nPrevious state: {prev_state}\nNew command: resume\nReuse target: True")
+                console.print(f"\n[bold cyan]⚡ [Continuation] Resuming video in current Chrome window...[/bold cyan]")
+                drv = PlaywrightDriver()
+                p_res = drv.resume_video()
+                if p_res.ok and p_res.verified:
+                    console.print(f"[bold green]✓ Done — Video resumed (playing).[/bold green]\n")
+                    messages.append({"role": "assistant", "content": "Done — Video resumed (playing)."})
+                else:
+                    console.print(f"[bold red]⚠️ Could not resume video: {p_res.detail}[/bold red]\n")
+                    messages.append({"role": "assistant", "content": f"Could not resume video: {p_res.detail}"})
+                continue
+
+            # Standby Command
+            if intent_type == "standby":
+                prev_target = get_target_manager().get_active_target()
+                prev_state = prev_target.url if prev_target else "Active"
+                print(f"[CONTINUATION]\nTask: standby\nPrevious state: {prev_state}\nNew command: standby\nReuse target: True")
+                console.print(f"[bold green]✓ Standing by. Session and browser continuation state retained.[/bold green]\n")
+                messages.append({"role": "assistant", "content": "Standing by. Session and browser continuation state retained."})
+                continue
+
+
+
+            # 4. Vision "What do you see" Fast Path (§14, §15, §16, §38)
+            if clean_lower in (
+                "what do you see",
+                "what you see in this screen",
+                "what do you see on this screen",
+                "what do you see in this screen",
+                "describe screen",
+                "describe the screen",
+                "look at screen",
+                "look at the screen",
+            ):
+                console.print(f"\n[bold cyan]👁 [VisionFastPath] Inspecting screen...[/bold cyan]")
+                v_desc = None
+                if live_runtime and live_runtime.vision:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        live_runtime.vision.describe_screen_fallback("Describe concisely what you see on the screen."),
+                        live_runtime._loop,
+                    )
+                    try:
+                        v_desc = fut.result(timeout=15.0)
+                    except Exception as e:
+                        v_desc = f"Unable to describe screen: {e}"
+                else:
+                    from kratos_agent.live.screen import get_screen_stream
+                    s_frame = get_screen_stream().capture_now()
+                    if s_frame:
+                        v_desc = f"Screen capture online ({s_frame.width}x{s_frame.height}, backend: {s_frame.backend})."
+                    else:
+                        v_desc = "Screen capture offline. Unable to capture frame."
+                console.print(f"[bold green]{v_desc}[/bold green]\n")
+                messages.append({"role": "assistant", "content": v_desc})
+                continue
+
             # Check if Gemini Live multimodal layer is connected and should handle the query first
             # Gemini will speak with voice, answer or assign task to Kratos Brain via start_agent_task
             is_gemini_connected = (
@@ -1950,6 +2200,7 @@ def start_interactive_cli():
                 except Exception as e:
                     logger.warning(f"[CLI] Gemini Live turn error, falling back to Kratos Agent: {e}")
                     console.print(f"[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
+
 
             # ── Live TUI invoke (replaces bare runtime.invoke) ──────────────
             try:

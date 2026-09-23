@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional
 
+from dataclasses import dataclass, field
 from kratos_agent.computer.state import ComputerAction, ActionResult
 from kratos_agent.computer.gui.resolver import get_resolver
 from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
@@ -15,6 +16,41 @@ from kratos_agent.computer.apps.focus import get_active_window
 from kratos_agent.computer.vision.grounding import get_vision_grounding
 from kratos_agent.computer.recovery import get_recovery_engine
 from kratos_agent.computer.permissions import get_permission_policy
+from kratos_agent.core.errors import KratosError, create_kratos_error
+
+
+@dataclass
+class ExecutionOutcome:
+    """Standardized execution outcome contract (§29, §30)."""
+    success: bool
+    verified: bool = False
+    error: Optional[KratosError] = None
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    detail: str = ""
+
+    @classmethod
+    def from_action_result(cls, res: ActionResult, subsystem: str = "computer", operation: str = "action") -> ExecutionOutcome:
+        err = None
+        if not res.ok:
+            err = create_kratos_error(
+                exc=res.detail or "Action execution failed",
+                subsystem=subsystem,
+                operation=operation,
+                details=res.data or {},
+            )
+        return cls(
+            success=bool(res.ok and res.verified),
+            verified=bool(res.verified),
+            error=err,
+            evidence=res.data or {},
+            detail=res.detail or "",
+        )
+
+
+
+import threading
+
+gui_action_lock = threading.Lock()
 
 
 class ActionExecutor:
@@ -35,7 +71,7 @@ class ActionExecutor:
         self._mouse = MouseEngine()
 
     def execute(self, action: ComputerAction) -> ActionResult:
-        """Executes a computer action with permission checking and automated multi-tier recovery."""
+        """Executes a computer action with permission checking, GUI lock, and automated multi-tier recovery (§33)."""
         # 1. Permission check
         permitted, reason = get_permission_policy().check_permission(action)
         if not permitted:
@@ -43,13 +79,26 @@ class ActionExecutor:
 
         started = time.time()
 
-        # 2. Dispatch through recovery engine
-        def _dispatch_attempt(act: ComputerAction, attempt: int) -> ActionResult:
-            return self._dispatch(act, attempt)
+        # 2. Acquire GUI action lock so concurrent tasks don't fight over focus (§33)
+        with gui_action_lock:
+            # Dispatch through recovery engine
+            def _dispatch_attempt(act: ComputerAction, attempt: int) -> ActionResult:
+                return self._dispatch(act, attempt)
 
-        result = get_recovery_engine().execute_with_recovery(action, _dispatch_attempt)
-        result.duration_ms = int((time.time() - started) * 1000)
-        return result
+            result = get_recovery_engine().execute_with_recovery(action, _dispatch_attempt)
+            result.duration_ms = int((time.time() - started) * 1000)
+            return result
+
+
+    def execute_outcome(self, action: ComputerAction) -> ExecutionOutcome:
+        """Executes computer action and returns verified ExecutionOutcome (§29, §30)."""
+        res = self.execute(action)
+        return ExecutionOutcome.from_action_result(
+            res,
+            subsystem="browser" if "browser" in action.action.lower() else "computer",
+            operation=action.action,
+        )
+
 
     def _dispatch(self, action: ComputerAction, tier: int) -> ActionResult:
         act_name = action.action.lower()

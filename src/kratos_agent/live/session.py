@@ -194,15 +194,21 @@ class LiveSession:
 
                 blob = types.Blob(data=data, mime_type=mime_type)
 
-                async with self._send_lock:
-                    if mime_type.startswith("audio/"):
-                        await self.session.send_realtime_input(audio=blob)
-                    else:
-                        await self.session.send_realtime_input(video=blob)
+                try:
+                    async with self._send_lock:
+                        if mime_type.startswith("audio/"):
+                            await self.session.send_realtime_input(audio=blob)
+                        else:
+                            await self.session.send_realtime_input(video=blob)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as frame_err:
+                    logger.debug(f"[LiveSession] Realtime frame send error ({mime_type}): {frame_err}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.warning(f"[LiveSession] Send loop error: {e}")
+
 
     # ── Refusal Intercept Guard ──────────────────────────────────────────────
     # Patterns that indicate Gemini refused instead of calling start_agent_task
@@ -328,10 +334,13 @@ class LiveSession:
                         logger.info("[LiveSession] Interruption detected. Clearing audio queue.")
                         self.audio_manager.handle_interruption()
                         self._output_transcript_buffer = ""
+                        if self._turn_complete_event is not None:
+                            self._turn_complete_event.set()
                         from kratos_agent.live.echo_guard import get_echo_guard
                         get_echo_guard().stop_speaking()
                         if self.status_hub:
                             self.status_hub.update(current_state=LiveState.LISTENING)
+
 
                     # Model Audio Output
                     model_turn = getattr(server_content, "model_turn", None)

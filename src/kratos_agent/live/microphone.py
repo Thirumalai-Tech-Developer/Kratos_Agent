@@ -193,6 +193,9 @@ def get_windows_endpoint_mute_states() -> Dict[str, bool]:
     return states
 
 
+_WARNED_DEVICES: set[tuple[str, str]] = set()
+
+
 class MicrophoneListener:
     """Captures 16kHz 16-bit PCM audio from microphone, detects speech/VAD, and queues for Gemini Live."""
 
@@ -239,9 +242,39 @@ class MicrophoneListener:
 
     def mute(self) -> None:
         self.is_muted = True
+        if self.status_hub:
+            self.status_hub.update(muted=True, microphone_health="muted")
 
     def unmute(self) -> None:
         self.is_muted = False
+        mute_states = get_windows_endpoint_mute_states()
+        is_hw_muted = self._is_device_muted(self.device_name, mute_states) if self.device_name else False
+        if self.status_hub:
+            self.status_hub.update(
+                muted=is_hw_muted,
+                microphone_health="muted" if is_hw_muted else ("online" if self.is_running else "offline"),
+            )
+
+    def health_check(self) -> Dict[str, Any]:
+        """Returns structured microphone health without crashing if muted (§36)."""
+        mute_states = get_windows_endpoint_mute_states()
+        is_hw_muted = self._is_device_muted(self.device_name, mute_states) if self.device_name else False
+        available = self.device_index is not None or bool(get_input_devices())
+        muted = self.is_muted or is_hw_muted
+        health_state = "muted" if muted else ("online" if self.is_running else ("offline" if not available else "starting"))
+        return {
+            "device": self.device_name,
+            "device_index": self.device_index,
+            "available": available,
+            "muted": muted,
+            "hardware_muted": is_hw_muted,
+            "software_muted": self.is_muted,
+            "sample_rate": self.sample_rate,
+            "channels": self.channels,
+            "is_running": self.is_running,
+            "health": health_state,
+            "error": None,
+        }
 
     def _resolve_device(self) -> tuple[Optional[int], str]:
         """Resolves device index and display name from configured device setting."""
@@ -285,9 +318,12 @@ class MicrophoneListener:
             is_def_muted = self._is_device_muted(def_name, mute_states)
 
             if is_def_muted:
-                logger.warning(
-                    f"[Microphone] ⚠️ Default device '{def_name}' is currently MUTED in Windows (laptop mic mute key F4 / Fn+F4 or Windows Settings)."
-                )
+                warn_key = (def_name.lower().strip(), "muted")
+                if warn_key not in _WARNED_DEVICES:
+                    _WARNED_DEVICES.add(warn_key)
+                    logger.warning(
+                        f"[Microphone] ⚠️ Default device '{def_name}' is currently MUTED in Windows (laptop mic mute key F4 / Fn+F4 or Windows Settings)."
+                    )
                 # Search for an active unmuted alternative (skip generic pseudo-devices)
                 for alt_d in devices:
                     if alt_d["index"] == default_dev["index"]:
@@ -301,11 +337,13 @@ class MicrophoneListener:
                         )
                         return alt_d["index"], alt_d["name"]
 
-                # No unmuted alternative found, warn user explicitly
+                # No unmuted alternative found, warn user explicitly once
                 warn_msg = f"Microphone '{def_name}' is MUTED in Windows. Unmute via laptop keyboard (F4 / Fn+F4) or Windows Sound Settings."
-                logger.warning(f"[Microphone] ⚠️ {warn_msg}")
+                if warn_key not in _WARNED_DEVICES:
+                    _WARNED_DEVICES.add(warn_key)
+                    logger.warning(f"[Microphone] ⚠️ {warn_msg}")
                 if self.status_hub:
-                    self.status_hub.update(last_error=warn_msg)
+                    self.status_hub.update(microphone_health="muted", muted=True, last_error=warn_msg)
 
             return default_dev["index"], default_dev["name"]
 
@@ -320,12 +358,16 @@ class MicrophoneListener:
         return False
 
     def _check_and_warn_muted(self, dev_name: str, mute_states: Dict[str, bool]) -> None:
-        """Warn user if explicitly configured device is muted."""
+        """Warn user once if explicitly configured device is muted (§35)."""
         if self._is_device_muted(dev_name, mute_states):
+            warn_key = (dev_name.lower().strip(), "muted")
             warn_msg = f"Configured microphone '{dev_name}' is MUTED in Windows. Unmute via laptop keyboard (F4 / Fn+F4) or Windows Sound Settings."
-            logger.warning(f"[Microphone] ⚠️ {warn_msg}")
+            if warn_key not in _WARNED_DEVICES:
+                _WARNED_DEVICES.add(warn_key)
+                logger.warning(f"[Microphone] ⚠️ {warn_msg}")
             if self.status_hub:
-                self.status_hub.update(last_error=warn_msg)
+                self.status_hub.update(microphone_health="muted", muted=True, last_error=warn_msg)
+
 
     def _process_audio_chunk(self, data: bytes) -> None:
         """Processes real-time audio chunk for VAD and queues for Gemini Live."""
@@ -551,3 +593,27 @@ class MicrophoneListener:
             self._stream = None
         if self.status_hub:
             self.status_hub.update(microphone_active=False)
+
+
+def get_microphone_health() -> Dict[str, Any]:
+    """Module-level helper to check microphone health without instantiating listener (§36)."""
+    devices = get_input_devices()
+    mute_states = get_windows_endpoint_mute_states()
+    default_dev = next((d for d in devices if d.get("is_default")), (devices[0] if devices else None))
+    dev_name = default_dev["name"] if default_dev else "No Microphone Detected"
+    is_muted = False
+    if default_dev:
+        dev_lower = dev_name.lower().strip()
+        for k, muted in mute_states.items():
+            if k in dev_lower or dev_lower in k:
+                is_muted = muted
+                break
+    return {
+        "device": dev_name,
+        "available": bool(devices),
+        "muted": is_muted,
+        "sample_rate": 16000,
+        "channels": 1,
+        "error": None if devices else "No audio input devices detected",
+    }
+

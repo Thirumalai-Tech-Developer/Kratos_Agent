@@ -168,16 +168,35 @@ class LiveRouter:
             if self.capture_screen_handler:
                 try:
                     if inspect.iscoroutinefunction(self.capture_screen_handler):
-                        await self.capture_screen_handler()
+                        res = await self.capture_screen_handler()
                     else:
-                        self.capture_screen_handler()
+                        res = self.capture_screen_handler()
+                    if res is False or (isinstance(res, dict) and res.get("status") == "error"):
+                        err_msg = res.get("message") or res.get("error") if isinstance(res, dict) else "Screen capture returned failure"
+                        return {
+                            "status": "error",
+                            "error_type": "SCREEN_CAPTURE_FAILURE",
+                            "message": f"Screen capture failed: {err_msg}",
+                            "recoverable": True,
+                        }
                     return {
                         "status": "success",
                         "message": "Desktop screen captured and streamed to your visual perception. You can now inspect and analyze what the user is seeing.",
                     }
                 except Exception as e:
-                    return {"status": "error", "message": f"Failed to capture screen: {e}"}
-            return {"status": "error", "message": "Screen capture handler not configured."}
+                    return {
+                        "status": "error",
+                        "error_type": "SCREEN_CAPTURE_FAILURE",
+                        "message": f"Screen capture failed: {type(e).__name__}: {e}",
+                        "recoverable": True,
+                    }
+            return {
+                "status": "error",
+                "error_type": "SCREEN_CAPTURE_UNAVAILABLE",
+                "message": "Screen capture handler not configured.",
+                "recoverable": False,
+            }
+
 
         elif name == "cancel_active_task":
             return self.bridge.cancel_active_task()

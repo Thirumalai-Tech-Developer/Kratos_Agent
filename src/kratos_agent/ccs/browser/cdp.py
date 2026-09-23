@@ -31,6 +31,66 @@ class CdpClient:
         except Exception:
             return False
 
+    def list_tabs(self) -> List[Dict[str, Any]]:
+        """Lists all active page tabs via CDP."""
+        try:
+            url = f"http://{self.host}:{self.port}/json/list"
+            req = urllib.request.Request(url, headers={"User-Agent": "Kratos/1.0"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return [target for target in data if target.get("type") == "page"]
+        except Exception:
+            return []
+
+    def count_tabs(self) -> int:
+        """Returns current count of page tabs."""
+        return len(self.list_tabs())
+
+    def create_tab(self, url: str = "about:blank") -> Optional[Dict[str, Any]]:
+        """Creates a new tab via CDP HTTP endpoint and activates it (§16, §18)."""
+        try:
+            import urllib.parse
+            endpoint = f"http://{self.host}:{self.port}/json/new?{urllib.parse.quote_plus(url)}"
+            req = urllib.request.Request(endpoint, method="PUT", headers={"User-Agent": "Kratos/1.0"})
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                target_id = data.get("id")
+                if target_id:
+                    self.activate_tab(target_id)
+                return data
+        except Exception:
+            try:
+                res = self.send_command("Target.createTarget", {"url": url})
+                if "targetId" in res:
+                    target_id = res["targetId"]
+                    self.activate_tab(target_id)
+                    return {"id": target_id, "url": url}
+            except Exception:
+                pass
+        return None
+
+    def activate_tab(self, target_id: str) -> bool:
+        """Activates the specified tab target and brings it to front (§16, §18)."""
+        try:
+            endpoint = f"http://{self.host}:{self.port}/json/activate/{target_id}"
+            req = urllib.request.Request(endpoint, headers={"User-Agent": "Kratos/1.0"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                return resp.status == 200
+        except Exception:
+            res = self.send_command("Target.activateTarget", {"targetId": target_id})
+            return "error" not in res
+
+    def close_tab(self, target_id: str) -> bool:
+        """Closes the specified tab target."""
+        try:
+            endpoint = f"http://{self.host}:{self.port}/json/close/{target_id}"
+            req = urllib.request.Request(endpoint, headers={"User-Agent": "Kratos/1.0"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                return resp.status == 200
+        except Exception:
+            res = self.send_command("Target.closeTarget", {"targetId": target_id})
+            return "error" not in res
+
     def _get_active_tab_ws_url(self) -> Optional[str]:
         try:
             url = f"http://{self.host}:{self.port}/json/list"

@@ -34,6 +34,11 @@ class RequestRouter:
     """Classifies user requests to bypass unnecessary planning, observation, or memory."""
 
     # Fast-path pattern matchers
+    _URL_PATTERN = re.compile(r"^(https?://|www\.)[^\s]+", re.IGNORECASE)
+    _VISION_QUERY_PATTERN = re.compile(
+        r"^(what('?s| is)? (do you see|you see|on (my |the )?screen|on (my |the )?display|this error)|describe (the |my )?screen|look at (the |my )?screen)",
+        re.IGNORECASE,
+    )
     _MATH_PATTERN = re.compile(r"^(what is|calculate|solve|\b)\s*(\d+\s*[\+\-\*\/\^%]\s*\d+)", re.IGNORECASE)
     _GREETING_PATTERN = re.compile(r"^(hi|hello|hey|good morning|good evening|who are you|what can you do)(\s+[a-zA-Z0-9_-]+)?[\?!.]*$", re.IGNORECASE)
     _EXPLAIN_PATTERN = re.compile(r"^(explain|what is|how does|why is|define)\s+(?!chrome|browser|app|computer|file|git|terminal)", re.IGNORECASE)
@@ -52,6 +57,37 @@ class RequestRouter:
         clean = request.strip()
         clean_lower = clean.lower()
 
+        # 0a. Direct URL Navigation Fast Path (§22)
+        if self._URL_PATTERN.match(clean):
+            return RouteDecision(
+                category=RequestCategory.BROWSER,
+                is_fast_path=True,
+                target_tool_categories=["BROWSER", "COMPUTER", "GENERAL"],
+                requires_planning=False,
+                requires_memory=False,
+                requires_observation=True,
+                confidence=0.98,
+            )
+
+        # 0b. Vision Fast Path ("what do you see", "look at screen") (§14)
+        if self._VISION_QUERY_PATTERN.match(clean) or clean_lower in (
+            "what do you see",
+            "what you see in this screen",
+            "what do you see on this screen",
+            "what do you see in this screen",
+            "describe screen",
+            "describe the screen",
+        ):
+            return RouteDecision(
+                category=RequestCategory.COMPUTER_USE,
+                is_fast_path=True,
+                target_tool_categories=["COMPUTER", "GENERAL"],
+                requires_planning=False,
+                requires_memory=False,
+                requires_observation=True,
+                confidence=0.98,
+            )
+
         # 1. Trivial CHAT / Math fast path
         if self._GREETING_PATTERN.match(clean) or self._MATH_PATTERN.match(clean):
             return RouteDecision(
@@ -63,6 +99,7 @@ class RequestRouter:
                 requires_observation=False,
                 confidence=0.99,
             )
+
 
         # 2. Browser / YouTube / Web Navigation direct path (§18, §19, §22, §23)
         if self._BROWSER_PATTERNS.search(clean_lower):
