@@ -106,7 +106,9 @@ HELP_TEXT = """
   [bold cyan]/vision[/bold cyan] [dim][camera|screen|both|off][/dim] - Control camera & screen capture vision
   [bold cyan]/avatar[/bold cyan] [dim][on|off|dock][/dim]          - Control floating desktop avatar
   [bold cyan]/live[/bold cyan] [dim][status|reconnect][/dim]        - Inspect or manage Gemini Live multimodal session
+  [bold cyan]/search[/bold cyan] [dim][web|tools|memory|github] <q>[/dim] - Query unified search & retrieval fabric
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
+
   [bold cyan]/debug[/bold cyan]                   - Inspect full execution/event trace from last turn
   [bold cyan]/debug live[/bold cyan]              - Toggle live step display on/off
   [bold cyan]/reset[/bold cyan]                   - Reset multi-turn conversation memory
@@ -1703,6 +1705,53 @@ def start_interactive_cli():
                     console.print(live_table)
                     console.print()
                 continue
+
+            if user_input.lower().startswith("/search"):
+                parts = user_input.split(maxsplit=2)
+                if len(parts) < 2:
+                    console.print("[yellow]Usage: /search <query> or /search <web|tools|memory|docs|github> <query>[/yellow]\n")
+                    continue
+
+                valid_targets = {"web", "tools", "memory", "docs", "github", "all"}
+                if parts[1].lower() in valid_targets and len(parts) > 2:
+                    target = parts[1].lower()
+                    query = parts[2].strip()
+                else:
+                    target = "web"
+                    query = user_input.split(maxsplit=1)[1].strip()
+
+                import asyncio
+                from kratos_agent.retrieval import get_retrieval_router, RetrievalQuery
+                router = get_retrieval_router()
+                console.print(f"\n[bold cyan]🔍 Searching {target.upper()} for:[/bold cyan] [bold white]'{query}'[/bold white]...")
+                try:
+                    res = asyncio.run(router.retrieve(RetrievalQuery(text=query, target=target, mode="standard")))
+                    if target == "tools":
+                        console.print(f"\n[bold green]🛠 Discovered Tools ({res.total} matches):[/bold green]")
+                        for idx, tool in enumerate(res.items, 1):
+                            t_name = getattr(tool, "name", str(tool.get("name") if isinstance(tool, dict) else tool))
+                            t_desc = getattr(tool, "description", str(tool.get("description", "") if isinstance(tool, dict) else ""))
+                            t_cat = getattr(tool, "category", "")
+                            console.print(f"  [bold gold1][{idx}][/bold gold1] [bold white]{t_name}[/bold white] [dim]({t_cat})[/dim]\n    [dim]{t_desc[:120]}...[/dim]")
+                    elif target == "memory":
+                        console.print(f"\n[bold green]🧠 Retrieved Context:[/bold green]")
+                        for item in res.items:
+                            console.print(f"[dim]{item.get('content', '')}[/dim]")
+                    else:
+                        console.print(f"\n[bold green]🌐 Results ({res.total} hits in {res.latency_ms:.0f}ms):[/bold green]")
+                        for idx, item in enumerate(res.items[:5], 1):
+                            title = getattr(item, "title", "Untitled")
+                            url = getattr(item, "url", "")
+                            snippet = getattr(item, "snippet", "") or getattr(item, "content", "")
+                            console.print(f"  [bold gold1][S{idx}][/bold gold1] [bold white]{title}[/bold white]")
+                            console.print(f"      [dim cyan]{url}[/dim cyan]")
+                            if snippet:
+                                console.print(f"      [dim]{snippet[:200]}...[/dim]")
+                    console.print()
+                except Exception as e:
+                    console.print(f"[bold red]Search error: {e}[/bold red]\n")
+                continue
+
 
             if user_input.lower().startswith("/debug"):
                 parts = user_input.split(maxsplit=1)

@@ -50,121 +50,197 @@ class LiveRouter:
         self.capture_screen_handler = capture_screen_handler
 
     def get_tool_declarations(self) -> List[types.Tool]:
-        """Returns the native Gemini Live tools declaration list."""
-        start_task_fn = types.FunctionDeclaration(
-            name="start_agent_task",
+        """Returns the small, dedicated Master-level tool declarations for Gemini Live Master."""
+        delegate_task_fn = types.FunctionDeclaration(
+            name="delegate_task",
             description=(
-                "Send an autonomous task to the Kratos agent brain for execution on the user's computer. "
-                "ALWAYS call this when the user wants to: open/close/launch any application (YouTube, Chrome, VS Code, Terminal, etc.), "
-                "browse/navigate/search/click/type on websites, play/pause/download/stream media or videos, "
-                "create/modify/delete/read/write files or code, run/execute/test/build/deploy/install commands or programs, "
-                "inspect/debug/fix/analyze projects or errors, automate workflows, or perform ANY computer action. "
-                "This includes requests in any language (Tamil, Hindi, English, mixed). "
-                "You MUST call this instead of refusing or claiming inability. Kratos has full computer control. "
-                "Include a concise visual_context summary if the task relates to what you see on their screen or camera."
+                "Delegate an autonomous execution command to the Slave agent (OmniRoute / Brain runtime). "
+                "Call this whenever the user wants to open/close/launch any application, browse/click/type/search "
+                "on websites, play videos/media, run terminal commands, write/edit code, or execute any computer action. "
+                "Do NOT execute desktop actions yourself. Provide explicit objective, action, parameters, constraints, "
+                "and expected results to the Slave."
             ),
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "task_description": types.Schema(
+                    "objective": types.Schema(
                         type="STRING",
-                        description="Clear, actionable description of what Kratos should do on the computer. Translate non-English requests into English for the task description.",
+                        description="High-level goal of what the Slave should achieve.",
                     ),
-                    "visual_context": types.Schema(
+                    "action": types.Schema(
                         type="STRING",
-                        description="Optional concise summary of relevant screen or camera details (e.g. error trace, file name, UI issue).",
+                        description="Target action (e.g. 'browser.youtube.play', 'open_application', 'browser.navigate', 'generic_task').",
+                    ),
+                    "parameters": types.Schema(
+                        type="OBJECT",
+                        description="Key-value arguments for the action (e.g. query, app_name, url).",
+                    ),
+                    "constraints": types.Schema(
+                        type="OBJECT",
+                        description="Execution constraints (e.g. reuse_existing_chrome_window, create_one_task_tab).",
+                    ),
+                    "expected_result": types.Schema(
+                        type="OBJECT",
+                        description="Expected physical evidence (e.g. video_playing, playback_advancing).",
                     ),
                     "priority": types.Schema(
                         type="STRING",
-                        description="Task priority: 'normal' or 'high'.",
+                        description="Priority: 'low', 'normal', 'high', 'urgent'.",
                     ),
                 },
-                required=["task_description"],
+                required=["objective"],
             ),
         )
 
-        capture_screen_fn = types.FunctionDeclaration(
-            name="capture_screen_context",
+        search_fn = types.FunctionDeclaration(
+            name="search",
             description=(
-                "Capture a fresh screenshot of the user's desktop screen immediately. "
-                "Call this whenever the user says 'look at this', 'what is this error', 'explain what I am seeing', "
-                "'fix this error', or refers to visual content on their screen. "
-                "The screen frame will be streamed into your visual perception so you can inspect it."
+                "Search the web, technical documentation, or GitHub via Kratos Search Fabric. "
+                "Use this to answer factual questions, find downloads, or look up information."
             ),
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "reason": types.Schema(
-                        type="STRING",
-                        description="Brief explanation of why screen capture is needed (e.g., 'Inspecting compiler error', 'Viewing web page layout').",
-                    ),
+                    "query": types.Schema(type="STRING", description="Search query string."),
+                    "mode": types.Schema(type="STRING", description="Search mode: 'fast', 'standard', 'deep', 'research'."),
                 },
+                required=["query"],
             ),
         )
 
-        cancel_task_fn = types.FunctionDeclaration(
-            name="cancel_active_task",
-            description="Cancel the currently running Kratos task. Call this when the user says stop, cancel, abort, or never mind.",
+        observe_fn = types.FunctionDeclaration(
+            name="observe",
+            description="Capture and inspect a fresh desktop screen frame or specific application window.",
             parameters=types.Schema(
                 type="OBJECT",
-                properties={},
+                properties={
+                    "reason": types.Schema(type="STRING", description="Reason for observation."),
+                },
             ),
         )
 
         get_status_fn = types.FunctionDeclaration(
             name="get_task_status",
-            description="Get the current status, plan, and progress of the active Kratos task. Call this when the user asks what you are currently doing.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={},
-            ),
-        )
-        
-        report_visual_status_fn = types.FunctionDeclaration(
-            name="report_visual_status",
-            description=(
-                "Send real-time visual feedback to Kratos while it is executing a task in the background. "
-                "Call this proactively when you observe the screen change (e.g. 'YouTube has opened', 'an error popped up', 'the video is playing'). "
-                "This helps Kratos know if its actions succeeded."
-            ),
+            description="Get the status, plan, and progress of the active Slave task.",
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "visual_summary": types.Schema(
-                        type="STRING",
-                        description="A clear description of what you currently see on the screen.",
-                    ),
+                    "task_id": types.Schema(type="STRING", description="Optional specific task ID."),
                 },
-                required=["visual_summary"],
+            ),
+        )
+
+        cancel_task_fn = types.FunctionDeclaration(
+            name="cancel_task",
+            description="Immediately stop and abort the active Slave execution task.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "reason": types.Schema(type="STRING", description="Reason for cancellation."),
+                },
+            ),
+        )
+
+        continue_task_fn = types.FunctionDeclaration(
+            name="continue_task",
+            description="Instruct the Slave to continue the active browser session or task tab without creating a new window.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "instructions": types.Schema(type="STRING", description="Continuation instructions."),
+                },
+                required=["instructions"],
+            ),
+        )
+
+        ask_user_fn = types.FunctionDeclaration(
+            name="ask_user",
+            description="Ask the user for confirmation or clarification before proceeding with high-impact actions.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "question": types.Schema(type="STRING", description="Clarification question for the user."),
+                },
+                required=["question"],
+            ),
+        )
+
+        # Legacy alias function for compatibility
+        start_task_fn = types.FunctionDeclaration(
+            name="start_agent_task",
+            description="Legacy alias for delegate_task. Submits task to Slave.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={
+                    "task_description": types.Schema(type="STRING", description="Task description."),
+                    "visual_context": types.Schema(type="STRING", description="Visual context."),
+                    "priority": types.Schema(type="STRING", description="Priority."),
+                },
+                required=["task_description"],
             ),
         )
 
         return [
             types.Tool(
                 function_declarations=[
-                    start_task_fn,
-                    capture_screen_fn,
-                    cancel_task_fn,
+                    delegate_task_fn,
+                    search_fn,
+                    observe_fn,
                     get_status_fn,
-                    report_visual_status_fn,
+                    cancel_task_fn,
+                    continue_task_fn,
+                    ask_user_fn,
+                    start_task_fn,
                 ]
             )
         ]
 
     async def handle_tool_call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Dispatches Gemini Live tool calls to KratosBridge or screen capture."""
-        logger.info(f"[LiveRouter] Received tool call: {name} with args: {args}")
+        """Dispatches Master tool calls to Bridge, SearchFabric, or Perception."""
+        logger.info(f"[LiveRouter] Received Master tool call: {name} with args: {args}")
 
-        if name == "start_agent_task":
-            desc = str(args.get("task_description", "")).strip()
-            visual_ctx = args.get("visual_context")
-            if not desc:
-                return {"status": "error", "message": "Missing task description."}
-            return await self.bridge.submit_task(desc, visual_context=visual_ctx)
+        if name in ("delegate_task", "start_agent_task"):
+            objective = str(args.get("objective") or args.get("task_description", "")).strip()
+            if not objective:
+                return {"status": "error", "message": "Missing task objective."}
 
-        elif name == "capture_screen_context":
-            reason = str(args.get("reason", "User requested visual inspection")).strip()
-            logger.info(f"[LiveRouter] Capturing screen on-demand. Reason: {reason}")
+            action = str(args.get("action", "generic_task"))
+            params = args.get("parameters") or {}
+            constrs = args.get("constraints") or {}
+            exp_res = args.get("expected_result") or {}
+            priority = str(args.get("priority", "normal"))
+            vis_ctx = args.get("visual_context")
+
+            return await self.bridge.submit_task(
+                task_description=objective,
+                visual_context=vis_ctx,
+                action=action,
+                parameters=params,
+                constraints=constrs,
+                expected_result=exp_res,
+                priority=priority,
+            )
+
+        elif name == "search":
+            query = str(args.get("query", "")).strip()
+            mode = str(args.get("mode", "standard"))
+            if not query:
+                return {"status": "error", "message": "Missing search query."}
+
+            from kratos_agent.search import get_search_router
+            router = get_search_router()
+            resp = await router.search(query, mode=mode)
+            return {
+                "status": "success",
+                "total_results": resp.total_results,
+                "answer": resp.answer,
+                "results": [r.to_dict() for r in resp.results[:5]],
+                "citations": resp.citations,
+            }
+
+        elif name in ("observe", "capture_screen_context"):
+            reason = str(args.get("reason", "Visual inspection requested")).strip()
+            logger.info(f"[LiveRouter] Observing screen on-demand. Reason: {reason}")
             if self.capture_screen_handler:
                 try:
                     if inspect.iscoroutinefunction(self.capture_screen_handler):
@@ -172,53 +248,34 @@ class LiveRouter:
                     else:
                         res = self.capture_screen_handler()
                     if res is False or (isinstance(res, dict) and res.get("status") == "error"):
-                        err_msg = res.get("message") or res.get("error") if isinstance(res, dict) else "Screen capture returned failure"
-                        return {
-                            "status": "error",
-                            "error_type": "SCREEN_CAPTURE_FAILURE",
-                            "message": f"Screen capture failed: {err_msg}",
-                            "recoverable": True,
-                        }
-                    return {
-                        "status": "success",
-                        "message": "Desktop screen captured and streamed to your visual perception. You can now inspect and analyze what the user is seeing.",
-                    }
+                        err_msg = res.get("message") or res.get("error") if isinstance(res, dict) else "Screen capture failed"
+                        return {"status": "error", "message": f"Screen capture failed: {err_msg}"}
+                    return {"status": "success", "message": "Desktop screen captured and streamed to your visual perception."}
                 except Exception as e:
-                    return {
-                        "status": "error",
-                        "error_type": "SCREEN_CAPTURE_FAILURE",
-                        "message": f"Screen capture failed: {type(e).__name__}: {e}",
-                        "recoverable": True,
-                    }
-            return {
-                "status": "error",
-                "error_type": "SCREEN_CAPTURE_UNAVAILABLE",
-                "message": "Screen capture handler not configured.",
-                "recoverable": False,
-            }
+                    return {"status": "error", "message": f"Screen capture exception: {e}"}
+            return {"status": "error", "message": "Screen capture handler not configured."}
 
-
-        elif name == "cancel_active_task":
-            return self.bridge.cancel_active_task()
+        elif name in ("cancel_task", "cancel_active_task"):
+            return await self.bridge.cancel_active_task()
 
         elif name == "get_task_status":
             return self.bridge.get_status()
 
-        elif name == "report_visual_status":
-            summary = str(args.get("visual_summary", "")).strip()
-            if not summary:
-                return {"status": "error", "message": "Missing visual summary."}
-            logger.info(f"[LiveRouter] Injecting visual status into Kratos: {summary}")
-            
-            # Inject into the active Kratos runtime history so the loop sees it next turn
-            from kratos_agent.core.runtime_contracts import ChatMessage
-            if hasattr(self.bridge, "runtime") and hasattr(self.bridge.runtime, "_history"):
-                self.bridge.runtime._history.append(ChatMessage("user", f"[VISUAL FEEDBACK FROM GEMINI]:\n{summary}"))
-                return {"status": "success", "message": "Visual feedback delivered to Kratos."}
-            return {"status": "error", "message": "Kratos runtime not active."}
+        elif name == "continue_task":
+            instructions = str(args.get("instructions", "")).strip()
+            return await self.bridge.submit_task(
+                task_description=instructions,
+                action="continue",
+                parameters={"instructions": instructions},
+            )
+
+        elif name == "ask_user":
+            q = str(args.get("question", "")).strip()
+            return {"status": "waiting_user_response", "question": q}
 
         else:
-            return {"status": "error", "message": f"Unknown tool: {name}"}
+            return {"status": "error", "message": f"Unknown Master tool: {name}"}
+
 
     def evaluate_request(
         self,

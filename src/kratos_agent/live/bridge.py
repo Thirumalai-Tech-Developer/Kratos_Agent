@@ -1,4 +1,4 @@
-"""Kratos Bridge connecting Gemini Live multimodal layer to existing Kratos runtime."""
+"""Kratos Bridge connecting Gemini Live Master to OmniRoute Slave execution bus."""
 from __future__ import annotations
 
 import asyncio
@@ -7,13 +7,16 @@ import threading
 import uuid
 from typing import Any, Dict, Optional
 
+from kratos_agent.master.protocol import MasterCommand, SlaveAck, SlaveResult, get_command_bus
+from kratos_agent.master.supervisor import MasterSupervisor, get_master_supervisor
+from kratos_agent.slave.executor import SlaveExecutor, get_slave_executor
 from .events import LiveState, LiveStatusHub
 
 logger = logging.getLogger(__name__)
 
 
 class KratosBridge:
-    """Bridge between Gemini Live perception and Kratos autonomous execution brain."""
+    """Upgraded bridge orchestrating MasterCommandQueue, SlaveResultQueue, and status."""
 
     def __init__(
         self,
@@ -27,22 +30,33 @@ class KratosBridge:
             self.runtime = runtime
 
         self.status_hub = status_hub
-        self.active_task_id: Optional[str] = None
-        self.active_task_desc: Optional[str] = None
-        self._lock = threading.Lock()
-        self._active_future: Optional[asyncio.Future[Any]] = None
+        self.supervisor = get_master_supervisor()
+        self.slave_executor = get_slave_executor()
+        self.slave_executor.runtime = self.runtime
+
+        # Ensure slave executor is running
+        try:
+            loop = asyncio.get_running_loop()
+            self.slave_executor.start()
+        except RuntimeError:
+            pass
 
     def is_busy(self) -> bool:
-        with self._lock:
-            return self.active_task_id is not None
+        return self.supervisor.is_busy()
 
     async def submit_task(
         self,
         task_description: str,
         visual_context: Optional[str] = None,
+        action: str = "generic_task",
+        parameters: Optional[Dict[str, Any]] = None,
+        constraints: Optional[Dict[str, Any]] = None,
+        expected_result: Optional[Dict[str, Any]] = None,
+        priority: str = "normal",
+        timeout: float = 60.0,
         force: bool = False,
     ) -> Dict[str, Any]:
-        """Submits an autonomous engineering task to Kratos runtime with echo & duplicate protection (§27, §30)."""
+        """Submits an actionable command from Master to Slave via CommandBus."""
         from kratos_agent.live.echo_guard import get_echo_guard
         from kratos_agent.core.task_deduplicator import get_task_deduplicator
 
@@ -54,92 +68,72 @@ class KratosBridge:
             logger.info(f"[LiveBridge] Suppressed duplicate task: {task_description}")
             return {"status": "duplicate_suppressed", "message": "Duplicate task received within 3s window."}
 
-        with self._lock:
-            if self.active_task_id is not None and not force:
-                logger.info("[GEMINI] Task rejected — Kratos is busy")
-                return {
-                    "status": "busy",
-                    "message": f"I'm already working on a task: '{self.active_task_desc}'. Would you like me to cancel it first?",
-                    "summary": f"Kratos is busy with: {self.active_task_desc}",
-                    "active_task_id": self.active_task_id,
-                }
+        # Auto-detect intent if not explicitly set
+        desc_lower = task_description.lower().strip()
+        params = dict(parameters or {})
+        constrs = dict(constraints or {})
+        exp_res = dict(expected_result or {})
 
-            task_id = str(uuid.uuid4())[:8]
-            self.active_task_id = task_id
-            self.active_task_desc = task_description
+        if action == "generic_task":
+            if any(w in desc_lower for w in ("youtube", "play video", "watch")):
+                action = "browser.youtube.play"
+                params["query"] = task_description.replace("open youtube and play", "").replace("play", "").replace("on youtube", "").strip()
+                constrs.update({"reuse_existing_chrome_window": True, "create_one_task_tab": True, "reuse_task_tab": True, "foreground_required": True})
+                exp_res.update({"video_playing": True, "playback_advancing": True})
+            elif desc_lower.startswith(("open chrome", "launch chrome", "open google chrome")):
+                action = "open_application"
+                params["app_name"] = "chrome"
+            elif desc_lower.startswith(("open ", "launch ", "start ")):
+                action = "open_application"
+                params["app_name"] = desc_lower.split(maxsplit=1)[-1].strip()
+            elif any(desc_lower.startswith(p) for p in ("search ", "find ", "who is ", "what is ")):
+                action = "search"
+                params["query"] = task_description
+
+        # Start slave background loop if not already started
+        self.slave_executor.start()
 
         if self.status_hub:
-            self.status_hub.update(active_task_id=task_id, current_state=LiveState.EXECUTING)
+            self.status_hub.update(current_state=LiveState.EXECUTING)
 
-        # Assemble task with visual context if present
-        full_query = task_description.strip()
-        if visual_context and visual_context.strip():
-            full_query = (
-                f"{full_query}\n\n"
-                f"[Visual Context from screen/camera]:\n{visual_context.strip()}"
-            )
-        logger.info(f"[GEMINI] Intent: AGENT_TASK")
-        logger.info(f"[GEMINI] Task handoff → Kratos Brain: {task_description[:80]}")
-        logger.info(f"[KRATOS] Task received [{task_id}]: {task_description[:80]}")
-        print(f"\n⚡ [Voice Task Received]: {task_description}\n", flush=True)
+        logger.info(f"[MASTER -> SLAVE] Delegating action='{action}', objective='{task_description[:80]}'")
+        print(f"\n⚡ [Master -> Slave Command]: {task_description} ({action})\n", flush=True)
 
-        def _execute_in_background() -> None:
-            try:
-                logger.info(f"[KRATOS] Execution started [{task_id}]")
-                if hasattr(self.runtime, "clear_cancel"):
-                    self.runtime.clear_cancel()
-                # Run agent completely autonomously
-                self.runtime.run_agent(full_query, agent_mode=True)
-                logger.info(f"[KRATOS] Task completed [{task_id}]")
-            except Exception as e:
-                logger.error(f"[KRATOS] Execution error in task {task_id}: {e}")
-            finally:
-                with self._lock:
-                    if self.active_task_id == task_id:
-                        self.active_task_id = None
-                        self.active_task_desc = None
-                if self.status_hub:
-                    self.status_hub.update(active_task_id=None, current_state=LiveState.IDLE)
+        res = await self.supervisor.submit_delegated_task(
+            objective=task_description,
+            action=action,
+            parameters=params,
+            constraints=constrs,
+            expected_result=exp_res,
+            priority=priority,
+            timeout=timeout,
+            context={"visual_context": visual_context} if visual_context else None,
+            force=force,
+        )
 
-        # Start execution in a background thread so Gemini is not blocked
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _execute_in_background)
+        if self.status_hub and res.get("task_id"):
+            self.status_hub.update(active_task_id=res["task_id"])
 
-        # Return instantly to Gemini
-        return {
-            "status": "started",
-            "task_id": task_id,
-            "summary": "Task started. I will monitor the screen.",
-        }
+        return res
 
-    def cancel_active_task(self) -> Dict[str, Any]:
-        """Cancels the currently running Kratos task."""
-        with self._lock:
-            task_id = self.active_task_id
-            self.active_task_id = None
-            self.active_task_desc = None
-
+    async def cancel_active_task(self) -> Dict[str, Any]:
+        """Cancels active task across the Master/Slave bus."""
+        res = await self.supervisor.cancel_active_task()
         if hasattr(self.runtime, "cancel"):
             self.runtime.cancel()
-
         if self.status_hub:
             self.status_hub.update(active_task_id=None, current_state=LiveState.IDLE)
-
-
-        if task_id:
-            logger.info(f"[KratosBridge] Cancelled active task {task_id}")
-            return {"status": "cancelled", "message": f"Task {task_id} has been cancelled."}
-        return {"status": "idle", "message": "No active task was running."}
+        return res
 
     def get_status(self) -> Dict[str, Any]:
-        """Returns the current Kratos execution status."""
+        """Returns the current Master/Slave execution status."""
         plan_dict = None
         if hasattr(self.runtime, "loop") and getattr(self.runtime.loop, "current_plan", None):
             plan_dict = self.runtime.loop.current_plan.to_dict()
 
         return {
             "is_busy": self.is_busy(),
-            "active_task_id": self.active_task_id,
-            "active_task_desc": self.active_task_desc,
+            "active_task_id": self.supervisor.active_task_id,
+            "active_task_desc": self.supervisor.active_objective,
             "plan": plan_dict,
         }

@@ -14,10 +14,14 @@ from .config import LiveConfig
 from .events import LiveState, LiveStatusHub
 from .router import LiveRouter
 
+from kratos_agent.master.prompts import KRATOS_MASTER_SYSTEM_PROMPT
+from kratos_agent.master.supervisor import get_master_supervisor
+
 logger = logging.getLogger(__name__)
 
-LIVE_SYSTEM_PROMPT = """KRATOS — VOICE & VISION INTERFACE
+LIVE_SYSTEM_PROMPT = KRATOS_MASTER_SYSTEM_PROMPT
 
+"""
 You are the voice, hearing, and vision interface of KRATOS AGENT — an autonomous computer agent that controls the user's desktop, browser, terminal, files, and applications.
 
 You are NOT a standalone assistant. You are the sensory layer of an autonomous execution system.
@@ -147,10 +151,17 @@ class LiveSession:
         self.is_running = False
         self._tasks: list[asyncio.Task[Any]] = []
         self._send_lock = asyncio.Lock()
-        self._last_logged_error: str = ""
-        self._last_logged_error_time: float = 0.0
         self._turn_complete_event: Optional[asyncio.Event] = None
         self._turn_transcript_chunks: list[str] = []
+
+        # Wire speech feedback from Slave execution to Gemini Master narration
+        get_master_supervisor().set_speech_callback(self._on_slave_result_feedback)
+
+    def _on_slave_result_feedback(self, text: str) -> None:
+        """Called when Slave finishes execution to let Gemini Master speak the verified outcome."""
+        if self.is_running and self.session is not None and text.strip():
+            asyncio.create_task(self.send_narration(text.strip()))
+
 
     def _build_connect_config(self) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
@@ -306,15 +317,19 @@ class LiveSession:
                             self.status_hub.update(current_state=LiveState.THINKING)
                         for call in tool_call.function_calls:
                             logger.info(f"[GEMINI] Tool call: {call.name}")
-                            if call.name in ("start_agent_task", "kratos_task"):
+                            if call.name in ("delegate_task", "start_agent_task", "kratos_task", "continue_task"):
                                 self._task_started_in_turn = True
                                 self._last_user_transcript = ""  # Cleared on tool invocation
+
+                            call_id = call.id or f"call_{uuid.uuid4().hex[:8]}"
                             res = await self.router.handle_tool_call(call.name, call.args or {})
+                            resp_dict = res if isinstance(res, dict) else {"result": str(res)}
+
                             # Send tool response back to Gemini
                             fn_resp = types.FunctionResponse(
                                 name=call.name,
-                                id=call.id,
-                                response=res,
+                                id=call_id,
+                                response=resp_dict,
                             )
                             try:
                                 async with self._send_lock:
@@ -323,6 +338,7 @@ class LiveSession:
                                     )
                             except Exception as e:
                                 logger.warning(f"[LiveSession] Failed to send tool response: {e}")
+
 
                     # 2. Check Server Content
                     server_content = getattr(response, "server_content", None)

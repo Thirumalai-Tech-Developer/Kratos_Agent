@@ -529,50 +529,43 @@ def fetch_url(url: str) -> str:
 
 def google_search(query: str) -> str:
     """
-    Performs a real-time web search and returns relevant titles, snippets, and links.
+    Performs a real-time web search using the Kratos Search Fabric with multi-engine
+    aggregation, deduplication, ranking, and citations.
     """
     step_tracker.start(f"Searching web for '{query}'...")
-    
-    # 1. Try DuckDuckGo Search (DDGS)
     try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=5))
-            if results:
-                formatted = []
-                for idx, r in enumerate(results, 1):
-                    title = r.get("title", "")
-                    snippet = r.get("body", "")
-                    href = r.get("href", "")
-                    formatted.append(f"[{idx}] {title}\nSummary: {snippet}\nURL: {href}")
-                step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", f"{len(formatted)} results", success=True)
-                return "\n\n".join(formatted)
-    except Exception:
-        pass
+        import asyncio
+        from kratos_agent.search import get_search_router, format_search_results_with_citations
 
-    # 2. Fallback to Wikipedia API Search
-    try:
-        import urllib.request
-        from urllib.parse import quote_plus
-        url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={quote_plus(query)}&format=json"
-        req = urllib.request.Request(url, headers={"User-Agent": "KratosAgent/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            search_items = data.get("query", {}).get("search", [])
-            if search_items:
-                formatted = []
-                for idx, item in enumerate(search_items[:4], 1):
-                    title = item.get("title", "")
-                    snippet = re.sub(r"<[^>]+>", "", item.get("snippet", ""))
-                    formatted.append(f"[{idx}] {title}\nSummary: {snippet}")
-                step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", f"{len(formatted)} results", success=True)
-                return "\n\n".join(formatted)
+        router = get_search_router()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                resp = pool.submit(lambda: asyncio.run(router.search(query))).result(timeout=15.0)
+        else:
+            resp = asyncio.run(router.search(query))
+
+        if resp and resp.results:
+            formatted = format_search_results_with_citations(resp.results)
+            step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", f"{len(resp.results)} results ({resp.provider})", success=True)
+            return formatted
+
+        step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", "0 results", success=True)
+        return "No search results found for query."
     except Exception as e:
         step_tracker.fail(f"[bold red]Web search error[/bold red]", str(e))
         return f"Search error: {e}"
 
-    step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", "0 results", success=True)
-    return "No search results found for query."
+
+def web_search(query: str) -> str:
+    """Alias for google_search routed through Kratos Search Fabric."""
+    return google_search(query)
+
 
 # --- Auto-generated tool: calculate_expression ---
 def calculate_expression(expression: str) -> str:

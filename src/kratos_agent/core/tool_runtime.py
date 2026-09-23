@@ -59,8 +59,37 @@ class ToolRegistry:
     def register(self, spec: ToolSpec, handler: Callable[..., str]) -> None:
         self._tools[spec.name] = RegisteredTool(spec=spec, handler=handler)
 
-    def get_tools(self, context: Optional[Any] = None, categories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Dynamically loads and returns only relevant tool schemas for the given context."""
+    def search(self, query: str, context: Optional[Any] = None, max_results: int = 15) -> List[Dict[str, Any]]:
+        """Performs semantic search across the tool catalog and returns top 5-15 candidate tool schemas."""
+        from kratos_agent.tools.discovery import get_tool_search
+        ts = get_tool_search()
+        ctx_dict = {"context": context} if context else {}
+        matched = ts.search(query, context=ctx_dict, max_results=max_results)
+        matched_names = {m.name for m in matched}
+
+        results = []
+        for name in matched_names:
+            item = self._tools.get(name)
+            if item:
+                results.append({
+                    "type": "function",
+                    "function": {
+                        "name": item.spec.name,
+                        "description": item.spec.description,
+                        "parameters": item.spec.parameters,
+                    },
+                    "source": item.spec.source,
+                })
+        return results
+
+    def get_tools(self, context: Optional[Any] = None, categories: Optional[List[str]] = None, max_tools: int = 15) -> List[Dict[str, Any]]:
+        """Dynamically loads and returns only relevant tool schemas (5-15 tools) for the given context."""
+        if context:
+            ctx_str = str(context)
+            searched = self.search(ctx_str, context=context, max_results=max_tools)
+            if searched:
+                return searched
+
         selected_cats = set()
         if categories:
             selected_cats.update(c.upper() for c in categories)
@@ -94,7 +123,7 @@ class ToolRegistry:
                 results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
             elif cat in selected_cats:
                 results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
-        return results
+        return results[:max_tools] if (categories or context) else results
 
     def schemas(self, categories: Optional[List[str]] = None, context: Optional[Any] = None) -> List[Dict[str, Any]]:
         if categories or context:
@@ -103,6 +132,7 @@ class ToolRegistry:
             {"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source}
             for item in self._tools.values()
         ]
+
 
     def specs(self) -> List[ToolSpec]:
         return [item.spec for item in self._tools.values()]
