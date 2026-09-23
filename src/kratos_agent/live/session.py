@@ -118,6 +118,7 @@ VISION:
 CONTROL:
 - "Stop" / "Cancel" / "Abort" → call `cancel_active_task`
 - "What are you doing?" / "Status" → call `get_task_status`
+- "What error occurred?", "Why did it fail?", "Is this a connection error?", "What happened?" → call `get_task_status` and report the latest sanitized `last_error`, `last_error_component`, and connection health. Do not refuse to explain an ordinary runtime error.
 - "Load past session" / "load" / "/load" → Route to `start_agent_task` with "Load previous session history."
 
 TONE:
@@ -166,6 +167,18 @@ class LiveSession:
         """Called when Slave finishes execution to let Gemini Master speak the verified outcome."""
         if self.is_running and self.session is not None and text.strip():
             asyncio.create_task(self.send_narration(text.strip()))
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Return the latest sanitized Live/Slave diagnostic state."""
+        return {
+            "model": self.config.model,
+            "connected": bool(self.session is not None),
+            "running": bool(self.is_running),
+            "last_error": self.status_hub.status.last_error if self.status_hub else None,
+            "last_error_component": self.status_hub.status.last_error_component if self.status_hub else None,
+            "last_task": get_master_supervisor().active_objective,
+            "active_task_id": get_master_supervisor().active_task_id,
+        }
 
 
     @staticmethod
@@ -356,14 +369,28 @@ class LiveSession:
                                 self._last_user_transcript = ""  # Cleared on tool invocation
 
                             call_id = call.id or f"call_{uuid.uuid4().hex[:8]}"
-                            res = await self.router.handle_tool_call(call.name, call.args or {})
-                            resp_dict = res if isinstance(res, dict) else {"result": str(res)}
+                            try:
+                                res = await self.router.handle_tool_call(call.name, call.args or {})
+                                resp_dict = res if isinstance(res, dict) else {"result": str(res)}
+                            except Exception as exc:
+                                err_text = re.sub(r"(AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,})", "[REDACTED]", str(exc)).strip()
+                                logger.exception("[LiveSession] Tool '%s' failed: %s", call.name, err_text)
+                                if self.status_hub:
+                                    self.status_hub.report_error("tool", f"{call.name}: {type(exc).__name__}: {err_text or 'tool execution failed'}")
+                                resp_dict = {
+                                    "status": "error",
+                                    "error_type": type(exc).__name__,
+                                    "message": err_text or "Tool execution failed.",
+                                }
 
-                            # Send tool response back to Gemini
+                            # NON_BLOCKING functions require a scheduling policy in FunctionResponse.
+                            scheduling = "INTERRUPT" if call.name in ("cancel_task", "cancel_active_task") else "WHEN_IDLE"
+                            response_payload = dict(resp_dict)
+                            response_payload["scheduling"] = scheduling
                             fn_resp = types.FunctionResponse(
                                 name=call.name,
                                 id=call_id,
-                                response=resp_dict,
+                                response=response_payload,
                             )
                             try:
                                 async with self._send_lock:

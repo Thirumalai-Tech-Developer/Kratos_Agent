@@ -126,7 +126,12 @@ class MasterSupervisor:
             if self._on_speech_feedback:
                 self._on_speech_feedback("The execution timed out before verifying the result.")
         except Exception as e:
-            logger.error(f"[MasterSupervisor] Error awaiting result for {cmd.command_id}: {e}")
+            logger.exception(f"[MasterSupervisor] Error awaiting result for {cmd.command_id}: {e}")
+            err_text = str(e).strip() or type(e).__name__
+            if self._on_speech_feedback:
+                self._on_speech_feedback(
+                    f"Execution error in the requested task: {type(e).__name__}: {err_text}"
+                )
         finally:
             with self._lock:
                 if self.active_command_id == cmd.command_id:

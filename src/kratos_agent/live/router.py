@@ -125,7 +125,11 @@ class LiveRouter:
         get_status_fn = types.FunctionDeclaration(
             name="get_task_status",
             behavior="NON_BLOCKING",
-            description="Get the status, plan, and progress of the active Slave task.",
+            description=(
+                "Get the active task status plus the latest sanitized execution/connection error. "
+                "Use this when the user asks what failed, why it failed, whether there is a connection error, "
+                "or what Kratos is currently doing."
+            ),
             parameters=types.Schema(
                 type="OBJECT",
                 properties={

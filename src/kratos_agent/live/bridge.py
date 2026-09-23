@@ -99,21 +99,32 @@ class KratosBridge:
         logger.info(f"[MASTER -> SLAVE] Delegating action='{action}', objective='{task_description[:80]}'")
         print(f"\n⚡ [Master -> Slave Command]: {task_description} ({action})\n", flush=True)
 
-        res = await self.supervisor.submit_delegated_task(
-            objective=task_description,
-            action=action,
-            parameters=params,
-            constraints=constrs,
-            expected_result=exp_res,
-            priority=priority,
-            timeout=timeout,
-            context={"visual_context": visual_context} if visual_context else None,
-            force=force,
-        )
+        try:
+            res = await self.supervisor.submit_delegated_task(
+                objective=task_description,
+                action=action,
+                parameters=params,
+                constraints=constrs,
+                expected_result=exp_res,
+                priority=priority,
+                timeout=timeout,
+                context={"visual_context": visual_context} if visual_context else None,
+                force=force,
+            )
+        except Exception as exc:
+            err_text = str(exc).strip() or type(exc).__name__
+            logger.exception("[LiveBridge] Task submission failed: %s", err_text)
+            if self.status_hub:
+                self.status_hub.report_error("slave", f"{type(exc).__name__}: {err_text}")
+            return {
+                "status": "error",
+                "accepted": False,
+                "error_type": type(exc).__name__,
+                "message": err_text,
+            }
 
         if self.status_hub and res.get("task_id"):
             self.status_hub.update(active_task_id=res["task_id"])
-
         return res
 
     async def cancel_active_task(self) -> Dict[str, Any]:
@@ -131,9 +142,23 @@ class KratosBridge:
         if hasattr(self.runtime, "loop") and getattr(self.runtime.loop, "current_plan", None):
             plan_dict = self.runtime.loop.current_plan.to_dict()
 
+        live_error = None
+        live_error_component = None
+        live_connected = None
+        live_health = None
+        if self.status_hub:
+            live_error = self.status_hub.status.last_error
+            live_error_component = self.status_hub.status.last_error_component
+            live_connected = self.status_hub.status.gemini_connected
+            live_health = self.status_hub.status.live_health
+
         return {
             "is_busy": self.is_busy(),
             "active_task_id": self.supervisor.active_task_id,
             "active_task_desc": self.supervisor.active_objective,
             "plan": plan_dict,
+            "live_connected": live_connected,
+            "live_health": live_health,
+            "last_error": live_error,
+            "last_error_component": live_error_component,
         }
