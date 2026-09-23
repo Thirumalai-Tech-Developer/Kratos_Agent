@@ -14,6 +14,12 @@ class TestAutonomyRegressions(unittest.TestCase):
         intent = parse_media_intent('open whatsapp and chat with தமிழ். send "hii" to him')
         self.assertNotEqual(intent.get("intent"), "open_whatsapp")
 
+    def test_whatsapp_message_extracts_contact_from_tail_language_clarification(self):
+        intent = parse_media_intent('can open whatsappweb and send msg hi to thirumalai the contact may be in tail language')
+        self.assertEqual(intent.get("intent"), "whatsapp_message")
+        self.assertEqual(intent.get("contact"), "thirumalai")
+        self.assertEqual(intent.get("message"), "hi")
+
     def test_memory_add_is_persistent(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "memory.json"

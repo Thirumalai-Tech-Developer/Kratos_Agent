@@ -62,8 +62,17 @@ def _extract_whatsapp_message(text: str) -> tuple[str, str] | None:
         stripped, re.IGNORECASE,
     )
     if generic:
-        message = generic.group(1).strip(' \'"“”')
-        target = generic.group(2).strip(' \'"“”')
+        message = generic.group(1).strip(' \'\"“”')
+        target = generic.group(2).strip(' \'\"“”')
+        # Natural speech often adds a clarification after the real contact:
+        # "send msg hi to thirumalai the contact may be in Tamil language".
+        target = re.split(
+            r'\s+(?:the\s+)?contact\b.*$',
+            target,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(' \'\"“”.,')
+        message = re.sub(r'^(?:msg|message)\s+', '', message, flags=re.IGNORECASE).strip()
         if target.lower() in {"him", "her", "them"} and hinted_contact:
             target = hinted_contact
         if message and target:

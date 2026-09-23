@@ -862,6 +862,165 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
     else:
         native_error=None
 
+    def windows_uia_whatsapp_fallback() -> Optional[Dict[str, Any]]:
+        """Use an already-open WhatsApp tab through Windows UI Automation when CDP is unavailable."""
+        if sys.platform != "win32":
+            return None
+        try:
+            from kratos_agent.computer.apps.windows import get_window_manager, enumerate_chrome_windows
+            from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
+            from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+
+            chrome_windows = enumerate_chrome_windows()
+            whatsapp_windows = [
+                w for w in chrome_windows
+                if "whatsapp" in str(w.get("title", "")).lower()
+            ]
+            if not whatsapp_windows:
+                return None
+
+            whatsapp_windows.sort(key=lambda w: (not bool(w.get("foreground")),))
+            win = whatsapp_windows[0]
+            hwnd = win.get("hwnd")
+            if hwnd:
+                get_window_manager().focus_window(handle=str(hwnd))
+
+            backend = WindowsUIABackend()
+            wanted_contact = " ".join(contact.lower().split())
+            wanted_message = " ".join(message.lower().split())
+
+            def element_text(el: Any) -> str:
+                return " ".join(
+                    str(v or "").strip()
+                    for v in (
+                        getattr(el, "name", None),
+                        getattr(el, "text", None),
+                        getattr(el, "value", None),
+                        getattr(el, "description", None),
+                    )
+                    if str(v or "").strip()
+                ).lower()
+
+            search = None
+            while time.monotonic() < deadline:
+                els = backend.dump_tree(max_nodes=1800, max_depth=14, visible_only=True)
+                candidates = [
+                    e for e in els
+                    if str(getattr(e, "role", "")).lower() in {"edit", "combobox"}
+                    and any(k in element_text(e) for k in ("search", "find or start", "search or start new chat"))
+                ]
+                if candidates:
+                    search = candidates[0]
+                    break
+                time.sleep(0.25)
+
+            if search is None:
+                return {
+                    "ok": False,
+                    "verified": False,
+                    "existing_whatsapp_tab": True,
+                    "error": "Existing WhatsApp Web tab was found, but its search control is not exposed through Windows UI Automation.",
+                }
+
+            backend.type_element(search, contact, clear_first=True)
+
+            selected = False
+            while time.monotonic() < deadline and not selected:
+                els = backend.dump_tree(max_nodes=2200, max_depth=14, visible_only=True)
+                candidates = []
+                for el in els:
+                    txt = element_text(el)
+                    if not txt or wanted_contact not in txt:
+                        continue
+                    role = str(getattr(el, "role", "")).lower()
+                    if role in {"edit", "combobox", "document", "group"}:
+                        continue
+                    candidates.append(el)
+
+                candidates.sort(key=lambda e: (
+                    element_text(e).strip() != wanted_contact,
+                    len(element_text(e)),
+                    -(getattr(e, "bounds", {}) or {}).get("y", 0),
+                ))
+                for el in candidates:
+                    res = backend.invoke_element(el, pattern="Invoke")
+                    if not res.ok:
+                        res = backend.invoke_element(el, pattern="SelectionItem")
+                    if res.ok:
+                        selected = True
+                        break
+                if not selected:
+                    time.sleep(0.25)
+
+            if not selected:
+                return {
+                    "ok": False,
+                    "verified": False,
+                    "existing_whatsapp_tab": True,
+                    "error": f"WhatsApp Web contact '{contact}' was not exposed/selectable through Windows UI Automation.",
+                }
+
+            editor = None
+            while time.monotonic() < deadline:
+                els = backend.dump_tree(max_nodes=2200, max_depth=14, visible_only=True)
+                edits = [
+                    e for e in els
+                    if str(getattr(e, "role", "")).lower() in {"edit", "textbox"} and e is not search
+                ]
+                named = [
+                    e for e in edits
+                    if any(k in element_text(e) for k in ("type a message", "write a message", "message"))
+                ]
+                pool = named or edits
+                if pool:
+                    pool.sort(key=lambda e: -(getattr(e, "bounds", {}) or {}).get("y", 0))
+                    editor = pool[0]
+                    break
+                time.sleep(0.25)
+
+            if editor is None:
+                return {
+                    "ok": False,
+                    "verified": False,
+                    "existing_whatsapp_tab": True,
+                    "error": "WhatsApp Web message composer was not exposed through Windows UI Automation.",
+                }
+
+            backend.type_element(editor, message, clear_first=False)
+            KeyboardEngine().key_tap(["enter"])
+
+            verified = True
+            evidence = {
+                "platform": "whatsapp_web_uia",
+                "contact": contact,
+                "message": message,
+                "window_handle": hwnd,
+                "same_existing_tab": True,
+            }
+            if verify:
+                verified = False
+                while time.monotonic() < deadline:
+                    els = backend.dump_tree(max_nodes=2400, max_depth=14, visible_only=True)
+                    visible_text = [element_text(e) for e in els]
+                    if any(wanted_message == t or wanted_message in t for t in visible_text[-250:]):
+                        verified = True
+                        break
+                    time.sleep(0.25)
+
+            return {
+                "ok": verified or not verify,
+                "verified": verified,
+                "existing_whatsapp_tab": True,
+                "evidence": evidence,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "verified": False,
+                "existing_whatsapp_tab": True,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
     # Reuse an existing WhatsApp Web tab before creating anything.
     from kratos_agent.ccs.browser.cdp import cdp_client
     try:
@@ -870,8 +1029,12 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
         if tab and tab.get("id"):
             cdp_client.activate_tab(str(tab["id"]))
         else:
+            # Use the existing WhatsApp Web window before opening or creating any tab.
+            uia_result = windows_uia_whatsapp_fallback()
+            if uia_result is not None:
+                return json.dumps(uia_result, indent=2, ensure_ascii=False)
             from kratos_agent.computer.browser.manager import get_browser_manager
-            # initialize_browser_task creates the URL tab. Do not call open_url afterwards: that action is terminal.
+            # No existing WhatsApp window was found, so creating a tab is appropriate.
             get_browser_manager().initialize_browser_task(initial_url="https://web.whatsapp.com")
 
         # Wait for the real WhatsApp application shell/login state.
@@ -889,6 +1052,9 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
             if logged_in: break
             time.sleep(0.3)
         if not logged_in:
+            uia_result = windows_uia_whatsapp_fallback()
+            if uia_result is not None:
+                return json.dumps(uia_result, indent=2, ensure_ascii=False)
             return json.dumps({"ok":False,"verified":False,"error":"WhatsApp Web did not finish loading or is not logged in.","native_error":native_error},indent=2,ensure_ascii=False)
 
         from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
