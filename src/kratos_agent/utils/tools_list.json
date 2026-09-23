@@ -1,647 +1,6 @@
 {
     "tools": [
         {
-            "name": "write_file",
-            "description": "Writes text or code directly to a file on disk in the workspace with UTF-8 encoding. Use this to create or overwrite complete files (Python scripts, HTML, CSS, React components, JSON, etc.).",
-            "func_name": "write_file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to create or overwrite (e.g. 'src/App.jsx' or 'index.html')"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Complete text/code content to write to the file"
-                    }
-                },
-                "required": [
-                    "file_path",
-                    "content"
-                ]
-            }
-        },
-        {
-            "name": "edit_file",
-            "description": "Surgical search-and-replace editor: Replaces exact target_text with replacement_text in a file. Preserves all other code, structure, and comments without rewriting the whole file.",
-            "func_name": "edit_file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to edit"
-                    },
-                    "target_text": {
-                        "type": "string",
-                        "description": "Exact text/lines to find and replace"
-                    },
-                    "replacement_text": {
-                        "type": "string",
-                        "description": "New replacement text/lines"
-                    }
-                },
-                "required": [
-                    "file_path",
-                    "target_text",
-                    "replacement_text"
-                ]
-            }
-        },
-        {
-            "name": "read_file",
-            "description": "Reads the text contents of a file in the workspace.",
-            "func_name": "read_file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to read"
-                    }
-                },
-                "required": [
-                    "file_path"
-                ]
-            }
-        },
-        {
-            "name": "list_directory",
-            "description": "Lists files and subdirectories in a workspace folder with tree depth control (e.g. to inspect codebase structure).",
-            "func_name": "list_directory",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "directory_path": {
-                        "type": "string",
-                        "description": "Directory to inspect (default '.')"
-                    },
-                    "max_depth": {
-                        "type": "integer",
-                        "description": "Maximum tree exploration depth (default 2)"
-                    }
-                }
-            }
-        },
-        {
-            "name": "grep_search",
-            "description": "Fast regex and text code search across all source files in the workspace (finds definitions, usages, imports).",
-            "func_name": "grep_search",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search string or regex pattern"
-                    },
-                    "directory_path": {
-                        "type": "string",
-                        "description": "Directory to search within (default '.')"
-                    },
-                    "is_regex": {
-                        "type": "boolean",
-                        "description": "True if query is a regular expression"
-                    }
-                },
-                "required": [
-                    "query"
-                ]
-            }
-        },
-        {
-            "name": "run_terminal_command",
-            "description": "Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly on the host system without asking for confirmation. Use this to install dependencies, run builds, launch servers, run tests, or execute scripts.",
-            "func_name": "run_terminal_command",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The exact shell command to execute in the terminal"
-                    }
-                },
-                "required": [
-                    "command"
-                ]
-            }
-        },
-        {
-            "name": "fetch_url",
-            "description": "Fetches and extracts clean readable text from a URL (useful for real-time library documentation, API specs, and online guides).",
-            "func_name": "fetch_url",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Web URL to fetch"
-                    }
-                },
-                "required": [
-                    "url"
-                ]
-            }
-        },
-        {
-            "name": "google_search",
-            "description": "Google search tool to query the web for real-time information, documentation, and answers.",
-            "func_name": "google_search",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    }
-                },
-                "required": [
-                    "query"
-                ]
-            }
-        },
-        {
-            "name": "self_tool_creator",
-            "description": "Autonomous Self Tool Creator: Call this tool whenever you need a tool/function that does not exist yet. You provide the python function code, function name, and description. It will automatically write to tools.py, register in tools_list.json, and hot-reload it into active memory so you can immediately use it.",
-            "func_name": "self_tool_creator",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tool_name": {
-                        "type": "string",
-                        "description": "Unique python function name (e.g. calculate_math, fetch_weather)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Clear description of what the new tool does and how to call it"
-                    },
-                    "python_code": {
-                        "type": "string",
-                        "description": "Complete Python function definition e.g. def calculate_math(expression: str) -> str: ..."
-                    },
-                    "parameters_json_str": {
-                        "type": "string",
-                        "description": "Optional JSON schema string for parameters"
-                    }
-                },
-                "required": [
-                    "tool_name",
-                    "description",
-                    "python_code"
-                ]
-            }
-        },
-        {
-            "name": "calculate_expression",
-            "description": "Evaluates mathematical expressions safely (e.g. '2 ** 10 + 50').",
-            "func_name": "calculate_expression",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "expression": {
-                        "type": "string",
-                        "description": "The math expression to evaluate"
-                    }
-                },
-                "required": [
-                    "expression"
-                ]
-            }
-        },
-        {
-            "name": "git_status",
-            "description": "Shows current git repository status: staged changes, unstaged modifications, and untracked files. Use before committing to understand the current state.",
-            "func_name": "git_status",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "git_diff",
-            "description": "Shows the git diff (file changes) in the repository. Set staged=true to see what would be committed (staged diff). Default shows unstaged working tree changes.",
-            "func_name": "git_diff",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "staged": {
-                        "type": "boolean",
-                        "description": "If true, shows staged diff (what would be committed). Default false shows working tree diff."
-                    }
-                }
-            }
-        },
-        {
-            "name": "git_commit",
-            "description": "Stages all current changes and creates a git commit. Automatically generates a Conventional Commits message if none is provided (feat/fix/refactor/chore etc).",
-            "func_name": "git_commit",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "Commit message. If empty, auto-generates from diff analysis."
-                    }
-                }
-            }
-        },
-        {
-            "name": "git_push",
-            "description": "Pushes the current branch to the remote origin repository.",
-            "func_name": "git_push",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "branch": {
-                        "type": "string",
-                        "description": "Branch name to push. Defaults to current branch."
-                    }
-                }
-            }
-        },
-        {
-            "name": "git_create_pr",
-            "description": "Creates a GitHub Pull Request via the gh CLI. Automatically pushes the branch first. Requires gh CLI to be installed and authenticated.",
-            "func_name": "git_create_pr",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "PR title. Auto-generated from diff if empty."
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": "PR description/body text."
-                    },
-                    "base": {
-                        "type": "string",
-                        "description": "Base branch to merge into (default: main)."
-                    }
-                }
-            }
-        },
-        {
-            "name": "save_memory",
-            "description": "Stores a record into cognitive memory across one of the 4 cognitive layers: 'working' (active scratchpad), 'episodic' (experiences & bug outcomes), 'semantic' (persistent project facts & conventions), or 'procedural' (workflows & recipes).",
-            "func_name": "save_memory",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "description": "Memory tier: 'working', 'episodic', 'semantic', or 'procedural'"
-                    },
-                    "key": {
-                        "type": "string",
-                        "description": "Identifier key for the memory entry (e.g. 'tech_stack', 'bug_fix_vite', 'active_task')"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Memory content or factual notes to store"
-                    }
-                },
-                "required": [
-                    "memory_type",
-                    "key",
-                    "content"
-                ]
-            }
-        },
-        {
-            "name": "read_memory",
-            "description": "Recalls cognitive memory records by type ('working', 'episodic', 'semantic', 'procedural'), key, or search query. Leave parameters empty to recall all memories.",
-            "func_name": "read_memory",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "description": "Optional memory tier filter: 'working', 'episodic', 'semantic', or 'procedural'"
-                    },
-                    "key": {
-                        "type": "string",
-                        "description": "Optional specific key to recall"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Optional search term to search in memory content"
-                    }
-                }
-            }
-        },
-        {
-            "name": "clear_memory",
-            "description": "Clears cognitive memory records for a specific layer ('working', 'episodic', 'semantic', 'procedural') or active scratchpad.",
-            "func_name": "clear_memory",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "description": "Optional memory tier to clear ('working', 'episodic', 'semantic', 'procedural'). Defaults to 'working'."
-                    }
-                }
-            }
-        },
-        {
-            "name": "spawn_subagent",
-            "description": "Spawns an isolated specialized subagent to perform focused work without polluting the main context. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns the subagent's structured report.",
-            "func_name": "spawn_subagent",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "role": {
-                        "type": "string",
-                        "description": "Specialized subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
-                    },
-                    "task": {
-                        "type": "string",
-                        "description": "Precise, self-contained description of the task for the subagent to perform"
-                    }
-                },
-                "required": [
-                    "role",
-                    "task"
-                ]
-            }
-        },
-        {
-            "name": "spawn_parallel_subagents",
-            "description": "Spawns multiple isolated specialized subagents concurrently in parallel threads to save time. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns a consolidated markdown report.",
-            "func_name": "spawn_parallel_subagents",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "subagents": {
-                        "type": "array",
-                        "description": "List of subagent task specifications to execute simultaneously in parallel",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "role": {
-                                    "type": "string",
-                                    "description": "Subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
-                                },
-                                "task": {
-                                    "type": "string",
-                                    "description": "Precise task description for this subagent"
-                                }
-                            },
-                            "required": [
-                                "role",
-                                "task"
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "subagents"
-                ]
-            }
-        },
-        {
-            "name": "list_skills",
-            "description": "Lists installed expert skills and domain playbooks available in Kratos (over 150 guides including frontend-design, theme-factory, api-sec, auth-sec, sound-audio-fx, etc.).",
-            "func_name": "list_skills",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "filter_tag": {
-                        "type": "string",
-                        "description": "Optional keyword or tag to filter skills (e.g. 'design', 'security', 'api', 'react')"
-                    }
-                }
-            }
-        },
-        {
-            "name": "read_skill",
-            "description": "Reads and returns the complete expert playbook and best-practice guidelines for an installed skill (e.g. 'frontend-design', 'theme-factory', 'api-sec', 'canvas-design').",
-            "func_name": "read_skill",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {
-                        "type": "string",
-                        "description": "The name or slug of the skill to read (e.g. 'frontend-design', 'theme-factory', 'api-sec')"
-                    }
-                },
-                "required": [
-                    "skill_name"
-                ]
-            }
-        },
-        {
-            "name": "todo_write",
-            "description": "Updates the dynamic todo list with whole-list replacement. Use this to track multi-step progress dynamically, update task statuses ('pending', 'in_progress', 'completed'), or adapt milestones as new information is discovered. Overwrites the full todo list.",
-            "func_name": "todo_write",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "todos": {
-                        "type": "array",
-                        "description": "Complete list of todo items reflecting current progress.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "Clear, actionable description of the task or milestone"
-                                },
-                                "status": {
-                                    "type": "string",
-                                    "enum": [
-                                        "pending",
-                                        "in_progress",
-                                        "completed"
-                                    ],
-                                    "description": "Current status of this task ('pending', 'in_progress', 'completed')"
-                                }
-                            },
-                            "required": [
-                                "content",
-                                "status"
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "todos"
-                ]
-            }
-        },
-        {
-            "name": "exit_plan_mode",
-            "description": "Exits Plan Mode and presents the complete implementation plan to the user for review and confirmation. Call this after thoroughly exploring the workspace and designing your implementation. The plan argument must be formatted as markdown starting with '#'.",
-            "func_name": "exit_plan_mode",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "plan": {
-                        "type": "string",
-                        "description": "The complete markdown implementation plan starting with a '#' header"
-                    }
-                },
-                "required": [
-                    "plan"
-                ]
-            }
-        },
-        {
-            "name": "role_play_answer",
-            "description": "Generate a deterministic in-character role-play response to a user query. Given a role/persona, a question or prompt, optional context, tone, and max length, it returns a formatted answer that stays in character. It uses templating and persona cues; for advanced responses, connect it to an LLM backend.",
-            "func_name": "role_play_answer",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The question or prompt to answer in character."
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "The character, persona, or role to embody."
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Optional background context for the role-play.",
-                        "default": ""
-                    },
-                    "tone": {
-                        "type": "string",
-                        "description": "Desired tone, e.g. neutral, dramatic, humorous, formal, friendly, mysterious, angry, sad.",
-                        "default": "neutral"
-                    },
-                    "max_length": {
-                        "type": "integer",
-                        "description": "Maximum length of the returned answer in characters.",
-                        "default": 300,
-                        "minimum": 1
-                    },
-                    "include_actions": {
-                        "type": "boolean",
-                        "description": "Whether to include role-play action cues like *pauses and considers*.",
-                        "default": false
-                    }
-                },
-                "required": [
-                    "query",
-                    "role"
-                ]
-            }
-        },
-        {
-            "name": "system_inspect",
-            "description": "Returns the capability map and system hardware/OS information.",
-            "func_name": "system_inspect",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "gui_mouse",
-            "description": "Controls the mouse on the host system. Actions: move, click, double_click, drag, scroll.",
-            "func_name": "gui_mouse",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string"
-                    },
-                    "x": {
-                        "type": "integer"
-                    },
-                    "y": {
-                        "type": "integer"
-                    },
-                    "button": {
-                        "type": "string",
-                        "default": "left"
-                    },
-                    "clicks": {
-                        "type": "integer",
-                        "default": 1
-                    }
-                },
-                "required": [
-                    "action"
-                ]
-            }
-        },
-        {
-            "name": "gui_keyboard",
-            "description": "Controls the host keyboard. Actions: type, press.",
-            "func_name": "gui_keyboard",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string"
-                    },
-                    "text": {
-                        "type": "string"
-                    },
-                    "keys": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "required": [
-                    "action"
-                ]
-            }
-        },
-        {
-            "name": "gui_vision",
-            "description": "Captures the screen and returns a base64 encoded PNG for multimodal visual verification.",
-            "func_name": "gui_vision",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "window_manager",
-            "description": "Manages windows on the host desktop. Actions: list, focus, close.",
-            "func_name": "window_manager",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string"
-                    },
-                    "window_id": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "action"
-                ]
-            }
-        },
-        {
-            "name": "application_manager",
-            "description": "Manages desktop applications. Actions: list, launch.",
-            "func_name": "application_manager",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string"
-                    },
-                    "app_name_or_path": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "action"
-                ]
-            }
-        },
-        {
             "name": "active_window_info",
             "description": "Returns the title and bounds of the foreground active window.",
             "func_name": "active_window_info",
@@ -862,6 +221,25 @@
                     }
                 },
                 "required": []
+            }
+        },
+        {
+            "name": "application_manager",
+            "description": "Manages desktop applications. Actions: list, launch.",
+            "func_name": "application_manager",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "app_name_or_path": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
             }
         },
         {
@@ -1159,6 +537,71 @@
             }
         },
         {
+            "name": "browser_whatsapp_send_message",
+            "description": "Finds a WhatsApp Web contact, sends a Unicode-safe message, and verifies it when requested.",
+            "func_name": "browser_whatsapp_send_message",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contact": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "verify": {
+                        "type": "boolean"
+                    },
+                    "timeout": {
+                        "type": "number"
+                    }
+                },
+                "required": [
+                    "contact",
+                    "message"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "calculate_expression",
+            "description": "Evaluates mathematical expressions safely (e.g. '2 ** 10 + 50').",
+            "func_name": "calculate_expression",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The math expression to evaluate"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            }
+        },
+        {
+            "name": "cleanup_screenshot_frames",
+            "description": "Prunes persisted screenshot evidence using bounded count, age, and total-size retention.",
+            "func_name": "cleanup_screenshot_frames",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_count": {
+                        "type": "integer"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    },
+                    "max_age_s": {
+                        "type": "integer"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }
+        },
+        {
             "name": "clear_blocker",
             "description": "Clears a detected blocker and returns evidence that it is gone.",
             "func_name": "clear_blocker",
@@ -1173,6 +616,20 @@
                 "required": [
                     "name"
                 ]
+            }
+        },
+        {
+            "name": "clear_memory",
+            "description": "Clears cognitive memory records for a specific layer ('working', 'episodic', 'semantic', 'procedural') or active scratchpad.",
+            "func_name": "clear_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Optional memory tier to clear ('working', 'episodic', 'semantic', 'procedural'). Defaults to 'working'."
+                    }
+                }
             }
         },
         {
@@ -1225,6 +682,458 @@
             }
         },
         {
+            "name": "computer_browser_click",
+            "description": "Clicks a web element semantically by role/name or CSS selector.",
+            "func_name": "computer_browser_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Role (e.g. 'button', 'link')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Element text or label"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_navigate",
+            "description": "Navigates the browser: goto URL, reload, back, or forward.",
+            "func_name": "computer_browser_navigate",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to navigate to"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Navigation action: 'goto', 'reload', 'back', 'forward' (default 'goto')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_read",
+            "description": "Reads visible text or HTML content from the browser page.",
+            "func_name": "computer_browser_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "Optional CSS selector to read"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Read mode: 'text' or 'html' (default 'text')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_browser_type",
+            "description": "Types text into an input or textarea on the active web page.",
+            "func_name": "computer_browser_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Role (e.g. 'textbox')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Input name or placeholder"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "computer_click",
+            "description": "Clicks a semantic UI element (button, link, tab, checkbox) by name or role without needing coordinates.",
+            "func_name": "computer_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Accessible name or label of the control"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role (button, checkbox, link, tab)"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Element ID from a previous inspection"
+                    },
+                    "button": {
+                        "type": "string",
+                        "description": "Mouse button: 'left', 'right', 'middle' (default 'left')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_clipboard_read",
+            "description": "Reads current text from the clipboard.",
+            "func_name": "computer_clipboard_read",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "computer_clipboard_write",
+            "description": "Copies text to the clipboard.",
+            "func_name": "computer_clipboard_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to write to clipboard"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "computer_close",
+            "description": "Closes an open window.",
+            "func_name": "computer_close",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window_id": {
+                        "type": "string",
+                        "description": "Window handle/ID"
+                    },
+                    "window_title": {
+                        "type": "string",
+                        "description": "Window title"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_file_copy",
+            "description": "Copies a file or directory.",
+            "func_name": "computer_file_copy",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "Source path"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "Destination path"
+                    }
+                },
+                "required": [
+                    "src",
+                    "dst"
+                ]
+            }
+        },
+        {
+            "name": "computer_file_delete",
+            "description": "Deletes a file or directory.",
+            "func_name": "computer_file_delete",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to delete"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "computer_file_list",
+            "description": "Lists files and folders with size and modification timestamp.",
+            "func_name": "computer_file_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to inspect (default '.')"
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to list recursively"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_file_move",
+            "description": "Moves or renames a file or directory.",
+            "func_name": "computer_file_move",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {
+                        "type": "string",
+                        "description": "Source path"
+                    },
+                    "dst": {
+                        "type": "string",
+                        "description": "Destination path"
+                    }
+                },
+                "required": [
+                    "src",
+                    "dst"
+                ]
+            }
+        },
+        {
+            "name": "computer_file_read",
+            "description": "Reads text content from a file.",
+            "func_name": "computer_file_read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            }
+        },
+        {
+            "name": "computer_file_write",
+            "description": "Writes text content to a file.",
+            "func_name": "computer_file_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text content"
+                    }
+                },
+                "required": [
+                    "path",
+                    "content"
+                ]
+            }
+        },
+        {
+            "name": "computer_find",
+            "description": "Finds a specific UI control by label, text, or accessibility name.",
+            "func_name": "computer_find",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text, name, or label to search for"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "UI role (e.g. 'button', 'edit', 'link')"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "computer_focus",
+            "description": "Brings a window into focus by title or handle.",
+            "func_name": "computer_focus",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window_title": {
+                        "type": "string",
+                        "description": "Title or title regex of the window to focus"
+                    },
+                    "window_id": {
+                        "type": "string",
+                        "description": "Window handle/ID"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_hotkey",
+            "description": "Executes a keyboard hotkey combination (e.g. 'ctrl+s', 'alt+tab', 'ctrl+shift+p').",
+            "func_name": "computer_hotkey",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "Key combination separated by '+' (e.g. 'ctrl+c')"
+                    }
+                },
+                "required": [
+                    "keys"
+                ]
+            }
+        },
+        {
+            "name": "computer_inspect",
+            "description": "Inspects the current UI to find controls matching semantic criteria without acting on them.",
+            "func_name": "computer_inspect",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text, name, or label to search for"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "UI role (e.g. 'button', 'edit', 'link')"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_launch",
+            "description": "Launches an application, executable, or URI.",
+            "func_name": "computer_launch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Executable name, command, or file path (e.g. 'notepad', 'calc', 'chrome')"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional command line arguments"
+                    }
+                },
+                "required": [
+                    "target"
+                ]
+            }
+        },
+        {
+            "name": "computer_observe",
+            "description": "Captures a complete, compact observation of the computer environment (windows, apps, interactive controls).",
+            "func_name": "computer_observe",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_interactive": {
+                        "type": "boolean",
+                        "description": "Whether to gather interactive GUI controls (default true)"
+                    },
+                    "max_elements": {
+                        "type": "integer",
+                        "description": "Maximum number of interactive controls to return (default 100)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_press",
+            "description": "Presses a single key (e.g. 'enter', 'escape', 'tab', 'backspace').",
+            "func_name": "computer_press",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Key to press"
+                    }
+                },
+                "required": [
+                    "key"
+                ]
+            }
+        },
+        {
+            "name": "computer_process_list",
+            "description": "Lists running processes with CPU and memory usage.",
+            "func_name": "computer_process_list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional name filter"
+                    }
+                }
+            }
+        },
+        {
+            "name": "computer_screenshot",
+            "description": "Captures a screenshot of the display.",
+            "func_name": "computer_screenshot",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "computer_scroll",
+            "description": "Scrolls vertically (dy) or horizontally (dx). Positive dy scrolls up, negative scrolls down.",
+            "func_name": "computer_scroll",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dy": {
+                        "type": "integer",
+                        "description": "Vertical scroll amount"
+                    },
+                    "dx": {
+                        "type": "integer",
+                        "description": "Horizontal scroll amount"
+                    }
+                },
+                "required": [
+                    "dy"
+                ]
+            }
+        },
+        {
             "name": "computer_task",
             "description": "Executes a multi-step GUI task with mandatory perception checkpoints.",
             "func_name": "computer_task",
@@ -1243,6 +1152,61 @@
                 "required": [
                     "goal"
                 ]
+            }
+        },
+        {
+            "name": "computer_type",
+            "description": "Enters text into an input field, textbox, or active editor.",
+            "func_name": "computer_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Target input field name or placeholder"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Target role (e.g. 'edit', 'textbox')"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Target element ID"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "computer_window_focus",
+            "description": "Focuses a window by title or handle.",
+            "func_name": "computer_window_focus",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Window title or handle"
+                    }
+                },
+                "required": [
+                    "target"
+                ]
+            }
+        },
+        {
+            "name": "computer_window_list",
+            "description": "Lists all open windows with their titles and IDs.",
+            "func_name": "computer_window_list",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         },
         {
@@ -1315,6 +1279,94 @@
             }
         },
         {
+            "name": "download_file",
+            "description": "Safely downloads an HTTP(S) resource with size limits, atomic writes, and SHA-256 verification.",
+            "func_name": "download_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string"
+                    },
+                    "destination_dir": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "overwrite": {
+                        "type": "boolean"
+                    },
+                    "timeout": {
+                        "type": "number"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "url"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "download_many",
+            "description": "Downloads multiple HTTP(S) resources concurrently with the same safety limits.",
+            "func_name": "download_many",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "urls": {
+                        "type": "array"
+                    },
+                    "destination_dir": {
+                        "type": "string"
+                    },
+                    "overwrite": {
+                        "type": "boolean"
+                    },
+                    "concurrency": {
+                        "type": "integer"
+                    },
+                    "max_bytes": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "urls"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "edit_file",
+            "description": "Surgical search-and-replace editor: Replaces exact target_text with replacement_text in a file. Preserves all other code, structure, and comments without rewriting the whole file.",
+            "func_name": "edit_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to edit"
+                    },
+                    "target_text": {
+                        "type": "string",
+                        "description": "Exact text/lines to find and replace"
+                    },
+                    "replacement_text": {
+                        "type": "string",
+                        "description": "New replacement text/lines"
+                    }
+                },
+                "required": [
+                    "file_path",
+                    "target_text",
+                    "replacement_text"
+                ]
+            }
+        },
+        {
             "name": "env_var",
             "description": "Gets or sets environment variables.",
             "func_name": "env_var",
@@ -1339,6 +1391,82 @@
                     }
                 },
                 "required": []
+            }
+        },
+        {
+            "name": "exit_plan_mode",
+            "description": "Exits Plan Mode and presents the complete implementation plan to the user for review and confirmation. Call this after thoroughly exploring the workspace and designing your implementation. The plan argument must be formatted as markdown starting with '#'.",
+            "func_name": "exit_plan_mode",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "type": "string",
+                        "description": "The complete markdown implementation plan starting with a '#' header"
+                    }
+                },
+                "required": [
+                    "plan"
+                ]
+            }
+        },
+        {
+            "name": "external_agent_discover",
+            "description": "Discover installed coding/agent CLIs available for delegation.",
+            "func_name": "external_agent_discover",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "external_agent_run",
+            "description": "Run an installed external coding agent through a non-interactive CLI interface.",
+            "func_name": "external_agent_run",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "description": "External agent name such as claude, codex, or gemini"
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Task to delegate"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional working directory"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum execution time in seconds"
+                    }
+                },
+                "required": [
+                    "agent",
+                    "prompt"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "fetch_url",
+            "description": "Fetches and extracts clean readable text from a URL (useful for real-time library documentation, API specs, and online guides).",
+            "func_name": "fetch_url",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Web URL to fetch"
+                    }
+                },
+                "required": [
+                    "url"
+                ]
             }
         },
         {
@@ -1453,6 +1581,143 @@
             }
         },
         {
+            "name": "git_commit",
+            "description": "Stages all current changes and creates a git commit. Automatically generates a Conventional Commits message if none is provided (feat/fix/refactor/chore etc).",
+            "func_name": "git_commit",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Commit message. If empty, auto-generates from diff analysis."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_create_pr",
+            "description": "Creates a GitHub Pull Request via the gh CLI. Automatically pushes the branch first. Requires gh CLI to be installed and authenticated.",
+            "func_name": "git_create_pr",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "PR title. Auto-generated from diff if empty."
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "PR description/body text."
+                    },
+                    "base": {
+                        "type": "string",
+                        "description": "Base branch to merge into (default: main)."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_diff",
+            "description": "Shows the git diff (file changes) in the repository. Set staged=true to see what would be committed (staged diff). Default shows unstaged working tree changes.",
+            "func_name": "git_diff",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "staged": {
+                        "type": "boolean",
+                        "description": "If true, shows staged diff (what would be committed). Default false shows working tree diff."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_push",
+            "description": "Pushes the current branch to the remote origin repository.",
+            "func_name": "git_push",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name to push. Defaults to current branch."
+                    }
+                }
+            }
+        },
+        {
+            "name": "git_status",
+            "description": "Shows current git repository status: staged changes, unstaged modifications, and untracked files. Use before committing to understand the current state.",
+            "func_name": "git_status",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "google_search",
+            "description": "Google search tool to query the web for real-time information, documentation, and answers.",
+            "func_name": "google_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "grep_search",
+            "description": "Fast regex and text code search across all source files in the workspace (finds definitions, usages, imports).",
+            "func_name": "grep_search",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search string or regex pattern"
+                    },
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Directory to search within (default '.')"
+                    },
+                    "is_regex": {
+                        "type": "boolean",
+                        "description": "True if query is a regular expression"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "gui_click",
+            "description": "Clicks a UI element semantically.",
+            "func_name": "gui_click",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Control name"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    },
+                    "element_id": {
+                        "type": "string",
+                        "description": "Element ID"
+                    }
+                }
+            }
+        },
+        {
             "name": "gui_explore",
             "description": "Walks menus and windows to map the UI structure of an application.",
             "func_name": "gui_explore",
@@ -1469,6 +1734,120 @@
                     }
                 },
                 "required": []
+            }
+        },
+        {
+            "name": "gui_find",
+            "description": "Finds a UI element matching query and/or role.",
+            "func_name": "gui_find",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Element name or label"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        },
+        {
+            "name": "gui_keyboard",
+            "description": "Controls the host keyboard. Actions: type, press.",
+            "func_name": "gui_keyboard",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "text": {
+                        "type": "string"
+                    },
+                    "keys": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "gui_mouse",
+            "description": "Controls the mouse on the host system. Actions: move, click, double_click, drag, scroll.",
+            "func_name": "gui_mouse",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "x": {
+                        "type": "integer"
+                    },
+                    "y": {
+                        "type": "integer"
+                    },
+                    "button": {
+                        "type": "string",
+                        "default": "left"
+                    },
+                    "clicks": {
+                        "type": "integer",
+                        "default": 1
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
+            "name": "gui_type",
+            "description": "Types text into a UI element semantically.",
+            "func_name": "gui_type",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Control name"
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Control role"
+                    },
+                    "element_id": {
+                        "type": "string",
+                        "description": "Element ID"
+                    }
+                },
+                "required": [
+                    "text"
+                ]
+            }
+        },
+        {
+            "name": "gui_vision",
+            "description": "Captures the screen and returns a base64 encoded PNG for multimodal visual verification.",
+            "func_name": "gui_vision",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         },
         {
@@ -1544,6 +1923,38 @@
                 "required": [
                     "keys"
                 ]
+            }
+        },
+        {
+            "name": "list_directory",
+            "description": "Lists files and subdirectories in a workspace folder with tree depth control (e.g. to inspect codebase structure).",
+            "func_name": "list_directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory_path": {
+                        "type": "string",
+                        "description": "Directory to inspect (default '.')"
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum tree exploration depth (default 2)"
+                    }
+                }
+            }
+        },
+        {
+            "name": "list_skills",
+            "description": "Lists installed expert skills and domain playbooks available in Kratos (over 150 guides including frontend-design, theme-factory, api-sec, auth-sec, sound-audio-fx, etc.).",
+            "func_name": "list_skills",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filter_tag": {
+                        "type": "string",
+                        "description": "Optional keyword or tag to filter skills (e.g. 'design', 'security', 'api', 'react')"
+                    }
+                }
             }
         },
         {
@@ -1880,6 +2291,62 @@
             }
         },
         {
+            "name": "read_file",
+            "description": "Reads the text contents of a file in the workspace.",
+            "func_name": "read_file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to read"
+                    }
+                },
+                "required": [
+                    "file_path"
+                ]
+            }
+        },
+        {
+            "name": "read_memory",
+            "description": "Recalls cognitive memory records by type ('working', 'episodic', 'semantic', 'procedural'), key, or search query. Leave parameters empty to recall all memories.",
+            "func_name": "read_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Optional memory tier filter: 'working', 'episodic', 'semantic', or 'procedural'"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Optional specific key to recall"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search term to search in memory content"
+                    }
+                }
+            }
+        },
+        {
+            "name": "read_skill",
+            "description": "Reads and returns the complete expert playbook and best-practice guidelines for an installed skill (e.g. 'frontend-design', 'theme-factory', 'api-sec', 'canvas-design').",
+            "func_name": "read_skill",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The name or slug of the skill to read (e.g. 'frontend-design', 'theme-factory', 'api-sec')"
+                    }
+                },
+                "required": [
+                    "skill_name"
+                ]
+            }
+        },
+        {
             "name": "record_macro",
             "description": "Records a user macro for subsequent playback.",
             "func_name": "record_macro",
@@ -1985,6 +2452,93 @@
                     "key",
                     "value",
                     "data"
+                ]
+            }
+        },
+        {
+            "name": "role_play_answer",
+            "description": "Generate a deterministic in-character role-play response to a user query. Given a role/persona, a question or prompt, optional context, tone, and max length, it returns a formatted answer that stays in character. It uses templating and persona cues; for advanced responses, connect it to an LLM backend.",
+            "func_name": "role_play_answer",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The question or prompt to answer in character."
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "The character, persona, or role to embody."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional background context for the role-play.",
+                        "default": ""
+                    },
+                    "tone": {
+                        "type": "string",
+                        "description": "Desired tone, e.g. neutral, dramatic, humorous, formal, friendly, mysterious, angry, sad.",
+                        "default": "neutral"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum length of the returned answer in characters.",
+                        "default": 300,
+                        "minimum": 1
+                    },
+                    "include_actions": {
+                        "type": "boolean",
+                        "description": "Whether to include role-play action cues like *pauses and considers*.",
+                        "default": false
+                    }
+                },
+                "required": [
+                    "query",
+                    "role"
+                ]
+            }
+        },
+        {
+            "name": "run_terminal_command",
+            "description": "Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly on the host system without asking for confirmation. Use this to install dependencies, run builds, launch servers, run tests, or execute scripts.",
+            "func_name": "run_terminal_command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The exact shell command to execute in the terminal"
+                    }
+                },
+                "required": [
+                    "command"
+                ]
+            }
+        },
+        {
+            "name": "save_memory",
+            "description": "Stores a record into cognitive memory across one of the 4 cognitive layers: 'working' (active scratchpad), 'episodic' (experiences & bug outcomes), 'semantic' (persistent project facts & conventions), or 'procedural' (workflows & recipes).",
+            "func_name": "save_memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_type": {
+                        "type": "string",
+                        "description": "Memory tier: 'working', 'episodic', 'semantic', or 'procedural'"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Identifier key for the memory entry (e.g. 'tech_stack', 'bug_fix_vite', 'active_task')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Memory content or factual notes to store"
+                    }
+                },
+                "required": [
+                    "memory_type",
+                    "key",
+                    "content"
                 ]
             }
         },
@@ -2118,6 +2672,37 @@
             }
         },
         {
+            "name": "self_tool_creator",
+            "description": "Autonomous Self Tool Creator: Call this tool whenever you need a tool/function that does not exist yet. You provide the python function code, function name, and description. It will automatically write to tools.py, register in tools_list.json, and hot-reload it into active memory so you can immediately use it.",
+            "func_name": "self_tool_creator",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Unique python function name (e.g. calculate_math, fetch_weather)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Clear description of what the new tool does and how to call it"
+                    },
+                    "python_code": {
+                        "type": "string",
+                        "description": "Complete Python function definition e.g. def calculate_math(expression: str) -> str: ..."
+                    },
+                    "parameters_json_str": {
+                        "type": "string",
+                        "description": "Optional JSON schema string for parameters"
+                    }
+                },
+                "required": [
+                    "tool_name",
+                    "description",
+                    "python_code"
+                ]
+            }
+        },
+        {
             "name": "service_control",
             "description": "Queries or controls OS background services.",
             "func_name": "service_control",
@@ -2135,6 +2720,62 @@
                 },
                 "required": [
                     "name"
+                ]
+            }
+        },
+        {
+            "name": "spawn_parallel_subagents",
+            "description": "Spawns multiple isolated specialized subagents concurrently in parallel threads to save time. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns a consolidated markdown report.",
+            "func_name": "spawn_parallel_subagents",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subagents": {
+                        "type": "array",
+                        "description": "List of subagent task specifications to execute simultaneously in parallel",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": {
+                                    "type": "string",
+                                    "description": "Subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
+                                },
+                                "task": {
+                                    "type": "string",
+                                    "description": "Precise task description for this subagent"
+                                }
+                            },
+                            "required": [
+                                "role",
+                                "task"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "subagents"
+                ]
+            }
+        },
+        {
+            "name": "spawn_subagent",
+            "description": "Spawns an isolated specialized subagent to perform focused work without polluting the main context. Standard roles: 'code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester'. Returns the subagent's structured report.",
+            "func_name": "spawn_subagent",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Specialized subagent role ('code_reviewer', 'security_auditor', 'researcher', 'debugger', 'architect', 'tester')"
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "Precise, self-contained description of the task for the subagent to perform"
+                    }
+                },
+                "required": [
+                    "role",
+                    "task"
                 ]
             }
         },
@@ -2190,6 +2831,15 @@
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        },
+        {
+            "name": "system_inspect",
+            "description": "Returns the capability map and system hardware/OS information.",
+            "func_name": "system_inspect",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         },
         {
@@ -2320,6 +2970,45 @@
                 },
                 "required": [
                     "session_id"
+                ]
+            }
+        },
+        {
+            "name": "todo_write",
+            "description": "Updates the dynamic todo list with whole-list replacement. Use this to track multi-step progress dynamically, update task statuses ('pending', 'in_progress', 'completed'), or adapt milestones as new information is discovered. Overwrites the full todo list.",
+            "func_name": "todo_write",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Complete list of todo items reflecting current progress.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "description": "Clear, actionable description of the task or milestone"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "completed"
+                                    ],
+                                    "description": "Current status of this task ('pending', 'in_progress', 'completed')"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "status"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "todos"
                 ]
             }
         },
@@ -2621,6 +3310,25 @@
             }
         },
         {
+            "name": "window_manager",
+            "description": "Manages windows on the host desktop. Actions: list, focus, close.",
+            "func_name": "window_manager",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "window_id": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            }
+        },
+        {
             "name": "window_move_resize",
             "description": "Moves and resizes a window.",
             "func_name": "window_move_resize",
@@ -2679,691 +3387,25 @@
             }
         },
         {
-            "name": "computer_observe",
-            "description": "Captures a complete, compact observation of the computer environment (windows, apps, interactive controls).",
-            "func_name": "computer_observe",
+            "name": "write_file",
+            "description": "Writes text or code directly to a file on disk in the workspace with UTF-8 encoding. Use this to create or overwrite complete files (Python scripts, HTML, CSS, React components, JSON, etc.).",
+            "func_name": "write_file",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "include_interactive": {
-                        "type": "boolean",
-                        "description": "Whether to gather interactive GUI controls (default true)"
-                    },
-                    "max_elements": {
-                        "type": "integer",
-                        "description": "Maximum number of interactive controls to return (default 100)"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_inspect",
-            "description": "Inspects the current UI to find controls matching semantic criteria without acting on them.",
-            "func_name": "computer_inspect",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
+                    "file_path": {
                         "type": "string",
-                        "description": "Text, name, or label to search for"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "UI role (e.g. 'button', 'edit', 'link')"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_find",
-            "description": "Finds a specific UI control by label, text, or accessibility name.",
-            "func_name": "computer_find",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Text, name, or label to search for"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "UI role (e.g. 'button', 'edit', 'link')"
-                    }
-                },
-                "required": [
-                    "query"
-                ]
-            }
-        },
-        {
-            "name": "computer_click",
-            "description": "Clicks a semantic UI element (button, link, tab, checkbox) by name or role without needing coordinates.",
-            "func_name": "computer_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Accessible name or label of the control"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Control role (button, checkbox, link, tab)"
-                    },
-                    "id": {
-                        "type": "string",
-                        "description": "Element ID from a previous inspection"
-                    },
-                    "button": {
-                        "type": "string",
-                        "description": "Mouse button: 'left', 'right', 'middle' (default 'left')"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_type",
-            "description": "Enters text into an input field, textbox, or active editor.",
-            "func_name": "computer_type",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to type"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Target input field name or placeholder"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Target role (e.g. 'edit', 'textbox')"
-                    },
-                    "id": {
-                        "type": "string",
-                        "description": "Target element ID"
-                    }
-                },
-                "required": [
-                    "text"
-                ]
-            }
-        },
-        {
-            "name": "computer_press",
-            "description": "Presses a single key (e.g. 'enter', 'escape', 'tab', 'backspace').",
-            "func_name": "computer_press",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Key to press"
-                    }
-                },
-                "required": [
-                    "key"
-                ]
-            }
-        },
-        {
-            "name": "computer_hotkey",
-            "description": "Executes a keyboard hotkey combination (e.g. 'ctrl+s', 'alt+tab', 'ctrl+shift+p').",
-            "func_name": "computer_hotkey",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keys": {
-                        "type": "string",
-                        "description": "Key combination separated by '+' (e.g. 'ctrl+c')"
-                    }
-                },
-                "required": [
-                    "keys"
-                ]
-            }
-        },
-        {
-            "name": "computer_scroll",
-            "description": "Scrolls vertically (dy) or horizontally (dx). Positive dy scrolls up, negative scrolls down.",
-            "func_name": "computer_scroll",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dy": {
-                        "type": "integer",
-                        "description": "Vertical scroll amount"
-                    },
-                    "dx": {
-                        "type": "integer",
-                        "description": "Horizontal scroll amount"
-                    }
-                },
-                "required": [
-                    "dy"
-                ]
-            }
-        },
-        {
-            "name": "computer_focus",
-            "description": "Brings a window into focus by title or handle.",
-            "func_name": "computer_focus",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "window_title": {
-                        "type": "string",
-                        "description": "Title or title regex of the window to focus"
-                    },
-                    "window_id": {
-                        "type": "string",
-                        "description": "Window handle/ID"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_launch",
-            "description": "Launches an application, executable, or URI.",
-            "func_name": "computer_launch",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target": {
-                        "type": "string",
-                        "description": "Executable name, command, or file path (e.g. 'notepad', 'calc', 'chrome')"
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Optional command line arguments"
-                    }
-                },
-                "required": [
-                    "target"
-                ]
-            }
-        },
-        {
-            "name": "computer_close",
-            "description": "Closes an open window.",
-            "func_name": "computer_close",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "window_id": {
-                        "type": "string",
-                        "description": "Window handle/ID"
-                    },
-                    "window_title": {
-                        "type": "string",
-                        "description": "Window title"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_window_list",
-            "description": "Lists all open windows with their titles and IDs.",
-            "func_name": "computer_window_list",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "computer_window_focus",
-            "description": "Focuses a window by title or handle.",
-            "func_name": "computer_window_focus",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target": {
-                        "type": "string",
-                        "description": "Window title or handle"
-                    }
-                },
-                "required": [
-                    "target"
-                ]
-            }
-        },
-        {
-            "name": "computer_screenshot",
-            "description": "Captures a screenshot of the display.",
-            "func_name": "computer_screenshot",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "computer_clipboard_read",
-            "description": "Reads current text from the clipboard.",
-            "func_name": "computer_clipboard_read",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "computer_clipboard_write",
-            "description": "Copies text to the clipboard.",
-            "func_name": "computer_clipboard_write",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to write to clipboard"
-                    }
-                },
-                "required": [
-                    "text"
-                ]
-            }
-        },
-        {
-            "name": "computer_browser_navigate",
-            "description": "Navigates the browser: goto URL, reload, back, or forward.",
-            "func_name": "computer_browser_navigate",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "URL to navigate to"
-                    },
-                    "action": {
-                        "type": "string",
-                        "description": "Navigation action: 'goto', 'reload', 'back', 'forward' (default 'goto')"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_browser_read",
-            "description": "Reads visible text or HTML content from the browser page.",
-            "func_name": "computer_browser_read",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {
-                        "type": "string",
-                        "description": "Optional CSS selector to read"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "description": "Read mode: 'text' or 'html' (default 'text')"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_browser_click",
-            "description": "Clicks a web element semantically by role/name or CSS selector.",
-            "func_name": "computer_browser_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Role (e.g. 'button', 'link')"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Element text or label"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_browser_type",
-            "description": "Types text into an input or textarea on the active web page.",
-            "func_name": "computer_browser_type",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to type"
-                    },
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Role (e.g. 'textbox')"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Input name or placeholder"
-                    }
-                },
-                "required": [
-                    "text"
-                ]
-            }
-        },
-        {
-            "name": "computer_file_list",
-            "description": "Lists files and folders with size and modification timestamp.",
-            "func_name": "computer_file_list",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to inspect (default '.')"
-                    },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "Whether to list recursively"
-                    }
-                }
-            }
-        },
-        {
-            "name": "computer_file_read",
-            "description": "Reads text content from a file.",
-            "func_name": "computer_file_read",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to file"
-                    }
-                },
-                "required": [
-                    "path"
-                ]
-            }
-        },
-        {
-            "name": "computer_file_write",
-            "description": "Writes text content to a file.",
-            "func_name": "computer_file_write",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to file"
+                        "description": "Path to the file to create or overwrite (e.g. 'src/App.jsx' or 'index.html')"
                     },
                     "content": {
                         "type": "string",
-                        "description": "Text content"
+                        "description": "Complete text/code content to write to the file"
                     }
                 },
                 "required": [
-                    "path",
+                    "file_path",
                     "content"
                 ]
-            }
-        },
-        {
-            "name": "computer_file_move",
-            "description": "Moves or renames a file or directory.",
-            "func_name": "computer_file_move",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "src": {
-                        "type": "string",
-                        "description": "Source path"
-                    },
-                    "dst": {
-                        "type": "string",
-                        "description": "Destination path"
-                    }
-                },
-                "required": [
-                    "src",
-                    "dst"
-                ]
-            }
-        },
-        {
-            "name": "computer_file_copy",
-            "description": "Copies a file or directory.",
-            "func_name": "computer_file_copy",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "src": {
-                        "type": "string",
-                        "description": "Source path"
-                    },
-                    "dst": {
-                        "type": "string",
-                        "description": "Destination path"
-                    }
-                },
-                "required": [
-                    "src",
-                    "dst"
-                ]
-            }
-        },
-        {
-            "name": "computer_file_delete",
-            "description": "Deletes a file or directory.",
-            "func_name": "computer_file_delete",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to delete"
-                    }
-                },
-                "required": [
-                    "path"
-                ]
-            }
-        },
-        {
-            "name": "computer_process_list",
-            "description": "Lists running processes with CPU and memory usage.",
-            "func_name": "computer_process_list",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "filter": {
-                        "type": "string",
-                        "description": "Optional name filter"
-                    }
-                }
-            }
-        },
-        {
-            "name": "gui_find",
-            "description": "Finds a UI element matching query and/or role.",
-            "func_name": "gui_find",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Element name or label"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Control role"
-                    }
-                },
-                "required": [
-                    "query"
-                ]
-            }
-        },
-        {
-            "name": "gui_click",
-            "description": "Clicks a UI element semantically.",
-            "func_name": "gui_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Control name"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Control role"
-                    },
-                    "element_id": {
-                        "type": "string",
-                        "description": "Element ID"
-                    }
-                }
-            }
-        },
-        {
-            "name": "gui_type",
-            "description": "Types text into a UI element semantically.",
-            "func_name": "gui_type",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to type"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Control name"
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "Control role"
-                    },
-                    "element_id": {
-                        "type": "string",
-                        "description": "Element ID"
-                    }
-                },
-                "required": [
-                    "text"
-                ]
-            }
-        },
-        {
-            "name": "download_file",
-            "description": "Safely downloads an HTTP(S) resource with size limits, atomic writes, and SHA-256 verification.",
-            "func_name": "download_file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string"
-                    },
-                    "destination_dir": {
-                        "type": "string"
-                    },
-                    "filename": {
-                        "type": "string"
-                    },
-                    "overwrite": {
-                        "type": "boolean"
-                    },
-                    "timeout": {
-                        "type": "number"
-                    },
-                    "max_bytes": {
-                        "type": "integer"
-                    }
-                },
-                "required": [
-                    "url"
-                ],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "download_many",
-            "description": "Downloads multiple HTTP(S) resources concurrently with the same safety limits.",
-            "func_name": "download_many",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "urls": {
-                        "type": "array"
-                    },
-                    "destination_dir": {
-                        "type": "string"
-                    },
-                    "overwrite": {
-                        "type": "boolean"
-                    },
-                    "concurrency": {
-                        "type": "integer"
-                    },
-                    "max_bytes": {
-                        "type": "integer"
-                    }
-                },
-                "required": [
-                    "urls"
-                ],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "cleanup_screenshot_frames",
-            "description": "Prunes persisted screenshot evidence using bounded count, age, and total-size retention.",
-            "func_name": "cleanup_screenshot_frames",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "max_count": {
-                        "type": "integer"
-                    },
-                    "max_bytes": {
-                        "type": "integer"
-                    },
-                    "max_age_s": {
-                        "type": "integer"
-                    }
-                },
-                "required": [],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "browser_whatsapp_send_message",
-            "description": "Finds a WhatsApp Web contact, sends a Unicode-safe message, and verifies it when requested.",
-            "func_name": "browser_whatsapp_send_message",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "contact": {
-                        "type": "string"
-                    },
-                    "message": {
-                        "type": "string"
-                    },
-                    "verify": {
-                        "type": "boolean"
-                    },
-                    "timeout": {
-                        "type": "number"
-                    }
-                },
-                "required": [
-                    "contact",
-                    "message"
-                ],
-                "additionalProperties": false
             }
         }
     ]

@@ -341,7 +341,6 @@ class BrowserManager:
                 active_task.current_url = url
                 self._target_mgr.update_target(url=url)
                 print(f"[ACTION]\nOperation: browser_open\nWindow: {window_handle}\nTab: {active_task.tab_id}\nTarget: {url}\nVerified: True")
-                print("[TERMINATION]\nSuccess: True\nVerified: True\nFurther actions blocked: True")
                 return ActionResult(
                     ok=success,
                     action="browser_open",

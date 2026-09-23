@@ -13,6 +13,8 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -777,84 +779,194 @@ def cleanup_screenshot_frames(max_count: Optional[int] = None, max_bytes: Option
 
 
 def browser_whatsapp_send_message(contact: str, message: str, verify: bool = True,
-                                  timeout: float = 15.0) -> str:
-    """Find a WhatsApp Web contact, send a Unicode-safe message, and verify it when requested."""
+                                  timeout: float = 30.0) -> str:
+    """Send a WhatsApp message via existing native WhatsApp first, then WhatsApp Web.
+
+    A compound message task remains non-terminal until the message is physically observed.
+    """
     contact, message = str(contact).strip(), str(message)
     if not contact or not message:
         return json.dumps({"ok": False, "verified": False, "error": "contact and message are required."}, indent=2)
+    deadline = time.monotonic() + max(5.0, float(timeout))
+
+    def native_window():
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes, psutil
+            from kratos_agent.computer.apps.windows import get_window_manager
+            user32 = ctypes.windll.user32
+            for w in get_window_manager().list_windows(include_minimized=False):
+                if "whatsapp" not in str(w.title or "").lower() or not str(w.id).isdigit():
+                    continue
+                hwnd = int(w.id)
+                pid = ctypes.c_ulong(); user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                try: proc = psutil.Process(pid.value).name().lower()
+                except Exception: proc = ""
+                if not any(x in proc for x in ("chrome", "msedge", "brave", "chromium")):
+                    return {"hwnd": hwnd, "pid": pid.value, "title": w.title, "bounds": getattr(w, "bounds", {})}
+        except Exception:
+            pass
+        return None
+
+    # Prefer a real Windows WhatsApp desktop window when one already exists.
+    native = native_window()
+    if native:
+        try:
+            from kratos_agent.computer.apps.windows import get_window_manager
+            from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
+            from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+            get_window_manager().focus_window(handle=str(native["hwnd"]))
+            backend = WindowsUIABackend()
+            search = None
+            while time.monotonic() < deadline:
+                for el in backend.find_elements(role="Edit", limit=100):
+                    nm = str(el.name or "").lower()
+                    if "search" in nm or "find" in nm:
+                        search = el; break
+                if search: break
+                time.sleep(0.25)
+            if search:
+                backend.click_element(search); backend.type_element(search, contact, clear_first=True)
+            else:
+                kb = KeyboardEngine(); kb.hotkey("ctrl", "f"); time.sleep(0.2); kb.type_text(contact); kb.key_tap(["enter"])
+            selected = False
+            while time.monotonic() < deadline and not selected:
+                for el in backend.dump_tree(max_nodes=1000, max_depth=10, visible_only=True):
+                    nm = str(el.name or "").strip().lower()
+                    if nm == contact.lower() or contact.lower() in nm:
+                        b = getattr(el, "bounds", {}) or {}
+                        if b.get("w", 0) > 0 and b.get("h", 0) > 0 and backend.click_element(el).ok:
+                            selected = True; break
+                if not selected: time.sleep(0.25)
+            if not selected:
+                return json.dumps({"ok": False, "verified": False, "error": f"WhatsApp Desktop contact '{contact}' was not found."}, ensure_ascii=False)
+            time.sleep(0.5)
+            edits = backend.find_elements(role="Edit", limit=100)
+            editor = next((e for e in edits if any(k in str(e.name or "").lower() for k in ("message", "type a message", "write a message"))), None)
+            if editor is None and edits:
+                editor = sorted(edits, key=lambda e: (getattr(e, "bounds", {}) or {}).get("y", 0))[-1]
+            if editor is None:
+                return json.dumps({"ok": False, "verified": False, "error": "WhatsApp Desktop message editor was not found."}, ensure_ascii=False)
+            backend.click_element(editor); backend.type_element(editor, message); KeyboardEngine().key_tap(["enter"])
+            verified = True
+            if verify:
+                verified = False
+                while time.monotonic() < deadline:
+                    texts=[str(e.name or "").strip() for e in backend.dump_tree(max_nodes=1400, max_depth=10, visible_only=True) if str(e.name or "").strip()]
+                    if any(message == t or message in t for t in texts[-150:]): verified=True; break
+                    time.sleep(0.25)
+            return json.dumps({"ok": verified or not verify, "verified": verified, "evidence":{"platform":"whatsapp_desktop","contact":contact,"message":message}}, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            native_error=f"{type(exc).__name__}: {exc}"
+    else:
+        native_error=None
+
+    # Reuse an existing WhatsApp Web tab before creating anything.
     from kratos_agent.ccs.browser.cdp import cdp_client
-    from kratos_agent.computer.browser.manager import get_browser_manager
-    from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
     try:
-        state = json.loads(browser_state())
-        if not state.get("connected") or "web.whatsapp.com" not in str(state.get("url", "")):
-            bm = get_browser_manager()
-            bm.initialize_browser_task(initial_url="https://web.whatsapp.com")
-            nav = bm.open_url("https://web.whatsapp.com")
-            if not nav.ok:
-                return json.dumps({"ok": False, "verified": False, "error": nav.detail or "Could not open WhatsApp Web."}, indent=2)
-            time.sleep(1.0)
-        deadline = time.monotonic() + timeout
-        search_ready = False
+        tabs = cdp_client.list_tabs() if cdp_client.is_available() else []
+        tab = next((t for t in tabs if "web.whatsapp.com" in str(t.get("url", "")).lower()), None)
+        if tab and tab.get("id"):
+            cdp_client.activate_tab(str(tab["id"]))
+        else:
+            from kratos_agent.computer.browser.manager import get_browser_manager
+            # initialize_browser_task creates the URL tab. Do not call open_url afterwards: that action is terminal.
+            get_browser_manager().initialize_browser_task(initial_url="https://web.whatsapp.com")
+
+        # Wait for the real WhatsApp application shell/login state.
+        logged_in=False
         while time.monotonic() < deadline:
-            ready = cdp_client.evaluate("""(() => {
-                const els = [...document.querySelectorAll('input, textarea')];
-                const el = els.find(e => {
-                    const meta = [e.getAttribute('placeholder'), e.getAttribute('aria-label'), e.getAttribute('title')].filter(Boolean).join(' ').toLowerCase();
-                    return meta.includes('search') && e.offsetParent !== null;
-                });
-                if (!el) return false;
-                el.focus(); el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); return true;
+            probe=cdp_client.evaluate("""(() => {
+                const vis=e=>e&&e.offsetParent!==null;
+                const els=[...document.querySelectorAll('input,textarea')];
+                const search=els.find(e=>[e.getAttribute('placeholder'),e.getAttribute('aria-label'),e.getAttribute('title')].filter(Boolean).join(' ').toLowerCase().includes('search')&&vis(e));
+                const body=(document.body?.innerText||'').toLowerCase();
+                const login=/scan.*qr|qr code|use whatsapp on your computer|log in/.test(body);
+                return {ready:document.readyState==='complete',search:!!search,login};
             })()""")
-            if ready:
-                search_ready = True
-                break
+            logged_in=bool(probe and probe.get("ready") and probe.get("search") and not probe.get("login"))
+            if logged_in: break
+            time.sleep(0.3)
+        if not logged_in:
+            return json.dumps({"ok":False,"verified":False,"error":"WhatsApp Web did not finish loading or is not logged in.","native_error":native_error},indent=2,ensure_ascii=False)
+
+        from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+        kb=KeyboardEngine()
+        search_ready=False
+        while time.monotonic() < deadline:
+            ok=cdp_client.evaluate("""(() => {const es=[...document.querySelectorAll('input,textarea')];const e=es.find(x=>[x.getAttribute('placeholder'),x.getAttribute('aria-label'),x.getAttribute('title')].filter(Boolean).join(' ').toLowerCase().includes('search')&&x.offsetParent!==null);if(!e)return false;e.focus();return true;})()""")
+            if ok: search_ready=True; break
             time.sleep(0.25)
-        if not search_ready:
-            return json.dumps({"ok": False, "verified": False, "error": "WhatsApp search box was not found."}, indent=2)
-        cdp_client.send_command("Input.insertText", {"text": contact})
-        KeyboardEngine().key_tap(["enter"])
-        time.sleep(0.8)
-        wanted = json.dumps(re.sub(r"\s+", " ", contact.lower()).strip())
-        clicked = cdp_client.evaluate(f"""(() => {{
-            const wanted = {wanted};
-            const norm = v => String(v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-            const nodes = [...document.querySelectorAll('[role="row"], [data-testid*="cell-frame"], [title], [aria-label]')];
-            for (const node of nodes.slice(0, 1500)) {{
-                const text = norm([node.innerText, node.getAttribute('title'), node.getAttribute('aria-label')].filter(Boolean).join(' '));
-                if (text === wanted || text.includes(wanted)) {{ node.click(); return true; }}
-            }}
-            return false;
-        }})()""")
-        if not clicked:
-            return json.dumps({"ok": False, "verified": False, "error": f"WhatsApp contact '{contact}' was not found."}, indent=2)
-        time.sleep(0.5)
-        ready = cdp_client.evaluate("""(() => {
-            const els = [...document.querySelectorAll('footer [contenteditable="true"], div[role="textbox"][contenteditable="true"]')];
-            const el = els.find(e => e.offsetParent !== null);
-            if (!el) return false; el.focus(); return true;
-        })()""")
-        if not ready:
-            return json.dumps({"ok": False, "verified": False, "error": "WhatsApp message box was not found."}, indent=2)
-        cdp_client.send_command("Input.insertText", {"text": message})
-        KeyboardEngine().key_tap(["enter"])
-        time.sleep(0.8)
-        verified = True
-        evidence = {"contact": contact, "message": message}
+        if not search_ready: return json.dumps({"ok":False,"verified":False,"error":"WhatsApp Web search box was not found."},indent=2)
+        kb.hotkey("ctrl","a"); kb.key_tap(["backspace"]); cdp_client.send_command("Input.insertText", {"text":contact})
+
+        clicked=False; wanted=json.dumps(re.sub(r"\\s+"," ",contact.lower()).strip())
+        while time.monotonic() < deadline:
+            clicked=bool(cdp_client.evaluate(f"""(() => {{const w={wanted};const n=v=>String(v||'').replace(/\\s+/g,' ').trim().toLowerCase();const ns=['[role="listitem"]','[role="row"]','[data-testid*="cell-frame-container"]','[data-testid*="cell-frame"]'].flatMap(s=>[...document.querySelectorAll(s)]);const best=ns.map(x=>({{x,s:n([x.innerText,x.getAttribute('title'),x.getAttribute('aria-label')].filter(Boolean).join(' '))}})).filter(o=>o.s.includes(w)).sort((a,b)=>(b.s===w)-(a.s===w))[0];if(!best)return false;best.x.click();return true;}})()"""))
+            if clicked: break
+            time.sleep(0.25)
+        if not clicked: return json.dumps({"ok":False,"verified":False,"error":f"WhatsApp Web contact '{contact}' was not found."},indent=2)
+
+        editor_ready=False
+        while time.monotonic() < deadline:
+            editor_ready=bool(cdp_client.evaluate("""(() => {const es=[...document.querySelectorAll('footer [contenteditable="true"],div[role="textbox"][contenteditable="true"]')];const e=es.find(x=>x.offsetParent!==null);if(!e)return false;e.focus();return true;})()"""))
+            if editor_ready: break
+            time.sleep(0.25)
+        if not editor_ready: return json.dumps({"ok":False,"verified":False,"error":"WhatsApp Web message editor was not found."},indent=2)
+        cdp_client.send_command("Input.insertText", {"text":message}); kb.key_tap(["enter"])
+
+        verified=True; evidence={"platform":"whatsapp_web","contact":contact,"message":message}
         if verify:
-            wanted_msg = json.dumps(re.sub(r"\s+", " ", message.strip()))
-            check = cdp_client.evaluate(f"""(() => {{
-                const wanted = {wanted_msg};
-                const norm = v => String(v || '').replace(/\\s+/g, ' ').trim();
-                const nodes = [...document.querySelectorAll('[data-testid*="msg-container"], div.copyable-text')];
-                const recent = nodes.slice(-30).map(n => norm(n.innerText || n.textContent || ''));
-                return {{found: recent.some(t => t === wanted || t.includes(wanted)), recent: recent.slice(-5)}};
-            }})()""")
-            verified = bool(check and check.get("found"))
-            evidence["verification"] = check
-        return json.dumps({"ok": True, "verified": verified, "evidence": evidence}, indent=2, ensure_ascii=False)
+            verified=False; wanted_msg=json.dumps(re.sub(r"\\s+"," ",message.strip()))
+            while time.monotonic() < deadline:
+                chk=cdp_client.evaluate(f"""(() => {{const w={wanted_msg};const n=v=>String(v||'').replace(/\\s+/g,' ').trim();const ns=[...document.querySelectorAll('[data-testid*="msg-container"],div.copyable-text,span.selectable-text')];const r=ns.slice(-100).map(x=>n(x.innerText||x.textContent||''));return {{found:r.some(t=>t===w||t.includes(w)),recent:r.slice(-8)}};}})()""")
+                if chk and chk.get("found"): verified=True; evidence["verification"]=chk; break
+                time.sleep(0.25)
+        return json.dumps({"ok":verified or not verify,"verified":verified,"evidence":evidence},indent=2,ensure_ascii=False)
     except Exception as exc:
-        return json.dumps({"ok": False, "verified": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2, ensure_ascii=False)
+        return json.dumps({"ok":False,"verified":False,"error":f"{type(exc).__name__}: {exc}","native_error":native_error},indent=2,ensure_ascii=False)
+
+def external_agent_discover() -> str:
+    """Discover installed coding/agent CLIs available for delegation."""
+    candidates={"claude":"Claude Code","codex":"OpenAI Codex CLI","gemini":"Gemini CLI","aider":"Aider","opencode":"OpenCode","goose":"Goose","openhands":"OpenHands CLI","cursor-agent":"Cursor Agent"}
+    found=[]
+    for exe,label in candidates.items():
+        path=shutil.which(exe)
+        if path:
+            version=""
+            try:
+                p=subprocess.run([path,"--version"],capture_output=True,text=True,timeout=4,check=False)
+                version=((p.stdout or p.stderr).strip().splitlines() or [""])[0]
+            except Exception: pass
+            found.append({"name":exe,"label":label,"path":path,"version":version})
+    return json.dumps({"ok":True,"agents":found},indent=2,ensure_ascii=False)
+
+
+def external_agent_run(agent: str, prompt: str, cwd: Optional[str] = None, timeout: int = 900) -> str:
+    """Run an installed external coding agent through a non-interactive CLI interface."""
+    agent=str(agent).strip().lower(); prompt=str(prompt)
+    if not agent or not prompt: return json.dumps({"ok":False,"error":"agent and prompt are required."},indent=2)
+    exe=shutil.which(agent)
+    if not exe: return json.dumps({"ok":False,"error":f"External agent '{agent}' is not installed."},indent=2)
+    commands={
+        "claude":[exe,"-p",prompt,"--output-format","json"],
+        "codex":[exe,"exec","--full-auto","--json",prompt],
+        "gemini":[exe,"-p",prompt,"--output-format","json","--yolo"],
+    }
+    custom=os.getenv(f"KRATOS_EXTERNAL_AGENT_COMMAND_{agent.upper().replace('-','_')}")
+    if custom:
+        import shlex; argv=shlex.split(custom)+[prompt]
+    elif agent in commands: argv=commands[agent]
+    else: return json.dumps({"ok":False,"error":f"'{agent}' is installed but its non-interactive command is not configured."},indent=2)
+    try:
+        p=subprocess.run(argv,cwd=str(Path(cwd).expanduser()) if cwd else None,capture_output=True,text=True,timeout=max(5,int(timeout)),check=False)
+        return json.dumps({"ok":p.returncode==0,"agent":agent,"returncode":p.returncode,"stdout":(p.stdout or "")[-20000:],"stderr":(p.stderr or "")[-12000:]},indent=2,ensure_ascii=False)
+    except subprocess.TimeoutExpired as exc:
+        return json.dumps({"ok":False,"agent":agent,"error":f"Timed out after {timeout}s.","stdout":str(exc.stdout or "")[-12000:]},indent=2,ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"ok":False,"agent":agent,"error":f"{type(exc).__name__}: {exc}"},indent=2,ensure_ascii=False)
+
 
 def browser_wait_for(condition: str, mode: str = "load", timeout: float = 20.0) -> str:
     """Wait for a real browser condition instead of returning a synthetic success."""

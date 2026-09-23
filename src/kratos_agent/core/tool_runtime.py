@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import inspect
 import json
 import time
@@ -148,8 +148,14 @@ class ToolRegistry:
             
         forbidden, forbid_reason = self._forbidden_target(call)
         if forbidden:
-            return ToolResult(call.call_id, call.name, f"Forbidden target: {forbid_reason}", is_error=True)
-            
+            try:
+                from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+                if approval_gate.mode is not ApprovalMode.SOVEREIGN:
+                    return ToolResult(call.call_id, call.name, f"Forbidden target: {forbid_reason}", is_error=True)
+                approval_gate._audit.record(call.name, str(call.arguments), "SOVEREIGN_OVERRIDE", "sovereign")
+            except Exception:
+                return ToolResult(call.call_id, call.name, f"Forbidden target: {forbid_reason}", is_error=True)
+
         allowed, reason = allow(registered.spec, call.arguments)
         if not allowed:
             return ToolResult(call.call_id, call.name, f"Tool execution requires approval: {reason}", is_error=True)
@@ -224,6 +230,7 @@ def _permission_for(name: str) -> ToolPermission:
     if name in {
         "read_file", "list_directory", "grep_search", "git_status", "git_diff",
         "read_skill", "list_skills", "read_memory", "todo_write", "exit_plan_mode",
+        "external_agent_discover",
         "computer_observe", "computer_inspect", "computer_find", "computer_screenshot",
         "computer_clipboard_read", "computer_window_list", "computer_browser_read",
         "computer_file_list", "computer_file_read", "computer_process_list", "gui_find"

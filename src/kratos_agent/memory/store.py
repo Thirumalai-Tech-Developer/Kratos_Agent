@@ -1,6 +1,8 @@
 """Memory storage abstraction with hot caching and TTL."""
 from __future__ import annotations
 import json
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,9 +19,10 @@ class MemoryStore:
         self.storage_path = storage_path or (Path.cwd() / ".kratos" / "memory_v2.json")
         self.cache_ttl = cache_ttl
         self._records: Dict[str, MemoryRecord] = {}
-
-        # Hot cache: (query_hash, timestamp, results)
-        self._hot_cache: Dict[str, Tuple[float, List[MemoryRecord]]] = {}
+        self._lock = threading.RLock()
+        self._cache_max_entries = 128
+        self._dirty_accesses = 0
+        self._last_save = 0.0
         self._load()
 
     def _load(self) -> None:
@@ -33,26 +36,45 @@ class MemoryStore:
                 pass
 
     def save(self) -> None:
+        """Atomically persist memory so recent facts survive crashes."""
         try:
-            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"records": [r.to_dict() for r in self._records.values()]}
-            self.storage_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            with self._lock:
+                self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+                data = {"version": 2, "saved_at": time.time(), "records": [r.to_dict() for r in self._records.values()]}
+                temp = self.storage_path.with_suffix(self.storage_path.suffix + ".tmp")
+                temp.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+                os.replace(temp, self.storage_path)
+                self._dirty_accesses = 0
+                self._last_save = time.time()
         except Exception:
             pass
 
     def add(self, record: MemoryRecord) -> None:
-        if should_store(record):
-            self._records[record.id] = record
+        if not should_store(record):
+            return
+        with self._lock:
+            norm = " ".join(record.content.lower().split())
+            existing = next((r for r in self._records.values() if " ".join(r.content.lower().split()) == norm), None)
+            if existing and existing.id != record.id:
+                existing.importance = max(existing.importance, record.importance)
+                existing.confidence = max(existing.confidence, record.confidence)
+                existing.recency = max(existing.recency, record.recency)
+                existing.frequency += 1
+            else:
+                self._records[record.id] = record
             self.invalidate_cache()
+        self.save()
 
     def get(self, record_id: str) -> Optional[MemoryRecord]:
         return self._records.get(record_id)
 
     def remove(self, record_id: str) -> bool:
-        if record_id in self._records:
-            del self._records[record_id]
-            self.invalidate_cache()
-            return True
+        with self._lock:
+            if record_id in self._records:
+                del self._records[record_id]
+                self.invalidate_cache()
+                self.save()
+                return True
         return False
 
     def list_records(
@@ -68,23 +90,40 @@ class MemoryStore:
         return results
 
     def query(self, query: MemoryQuery) -> List[MemoryRecord]:
-        cache_key = f"{query.text}|{query.task}|{query.application}|{query.limit}"
+        cache_key = json.dumps({
+            "text": query.text, "task": query.task, "application": query.application,
+            "project": query.project, "platform": query.platform, "scope": str(query.scope),
+            "layer": str(query.layer), "limit": query.limit, "min_confidence": query.min_confidence,
+        }, sort_keys=True)
         now = time.time()
-
-        if cache_key in self._hot_cache:
-            ts, cached_res = self._hot_cache[cache_key]
-            if (now - ts) < self.cache_ttl:
-                return cached_res
-
-        records = self.list_records(scope=query.scope, layer=query.layer)
-        ranked = rank_memories(query, records)
-        top = [rec for rec, _ in ranked[: query.limit]]
-
-        self._hot_cache[cache_key] = (now, top)
+        with self._lock:
+            cached = self._hot_cache.get(cache_key)
+            if cached and (now - cached[0]) < self.cache_ttl:
+                return list(cached[1])
+            records = list(self._records.values())
+            if query.scope:
+                records = [r for r in records if r.scope == query.scope]
+            if query.layer:
+                records = [r for r in records if r.layer == query.layer]
+            ranked = rank_memories(query, records)
+            top = [rec for rec, _ in ranked[: query.limit]]
+            for rec in top:
+                rec.last_used = now
+                rec.frequency += 1
+            self._hot_cache[cache_key] = (now, list(top))
+            if len(self._hot_cache) > self._cache_max_entries:
+                oldest = sorted(self._hot_cache.items(), key=lambda item: item[1][0])[:len(self._hot_cache)-self._cache_max_entries]
+                for key, _ in oldest:
+                    self._hot_cache.pop(key, None)
+            self._dirty_accesses += len(top)
+            dirty = self._dirty_accesses >= 10 or (now - self._last_save) > 30
+        if dirty:
+            self.save()
         return top
 
     def invalidate_cache(self) -> None:
-        self._hot_cache.clear()
+        with self._lock:
+            self._hot_cache.clear()
 
     def consolidate(self) -> int:
         initial_count = len(self._records)

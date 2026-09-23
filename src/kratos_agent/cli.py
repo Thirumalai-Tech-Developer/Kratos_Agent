@@ -2187,8 +2187,19 @@ def start_interactive_cli():
                     messages.append({"role": "assistant", "content": f"Done — sent the message to {contact} and verified it."})
                 else:
                     reason = result.get("error") or result.get("detail") or "Message could not be verified."
-                    console.print(f"[bold red]⚠️ WhatsApp message failed: {reason}[/bold red]\n")
-                    messages.append({"role": "assistant", "content": f"WhatsApp message failed: {reason}"})
+                    console.print(f"[bold yellow]↻ Deterministic WhatsApp path did not finish: {reason}. Falling back to Master/Slave visual execution...[/bold yellow]\n")
+                    try:
+                        fallback_prompt = (
+                            f"Complete this WhatsApp mission end-to-end: {clean_q}\n"
+                            "The specialized WhatsApp fast path failed. Reuse the existing WhatsApp/native window or browser session, "
+                            "wait for readiness, observe the current UI, resolve the contact semantically (including non-Latin/Tamil names), "
+                            "send the requested message, and verify the final message in the intended conversation."
+                        )
+                        fallback = runtime.run_agent(fallback_prompt)
+                        console.print(f"[bold green]{fallback}[/bold green]\n")
+                        messages.append({"role": "assistant", "content": str(fallback)})
+                    except Exception as exc:
+                        messages.append({"role": "assistant", "content": f"WhatsApp execution failed: {reason}; visual fallback error: {exc}"})
                 continue
 
             # Search Video (State: SEARCH_RESULTS, NOT VIDEO_PLAYING)

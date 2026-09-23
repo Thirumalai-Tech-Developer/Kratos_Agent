@@ -17,6 +17,7 @@ from .models import SearchResponse, SearchResult
 from .native import NativeWebSearchProvider
 from .provider import SearchProvider
 from .searxng import SearXNGProvider
+from .tavily import TavilySearchProvider
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,14 @@ class SearchRouter:
         self.cache = SearchCache(default_ttl_seconds=300.0)
         self.searxng = SearXNGProvider()
         self.agent_search = AgentSearchProvider()
+        self.tavily = TavilySearchProvider()
         self.github = GitHubSearchProvider()
         self.native = NativeWebSearchProvider()
 
-        # Hybrid aggregator combines primary self-hosted engines with native fallback
-        self.hybrid = HybridSearchProvider([self.searxng, self.agent_search, self.native])
+        providers = [self.searxng, self.agent_search, self.native]
+        if self.tavily.configured:
+            providers.insert(0, self.tavily)
+        self.hybrid = HybridSearchProvider(providers)
 
     def get_provider_for_query(self, query: str) -> SearchProvider:
         """Determines the appropriate provider based on query intent and configuration."""
@@ -57,9 +61,11 @@ class SearchRouter:
         env_provider = os.environ.get("KRATOS_SEARCH_PROVIDER", "hybrid").lower()
         if env_provider == "searxng":
             return self.searxng
-        elif env_provider == "agent_search":
+        if env_provider == "agent_search":
             return self.agent_search
-        elif env_provider == "native":
+        if env_provider == "tavily":
+            return self.tavily
+        if env_provider == "native":
             return self.native
         return self.hybrid
 

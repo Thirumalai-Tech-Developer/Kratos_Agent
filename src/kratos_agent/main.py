@@ -204,8 +204,15 @@ class KratosRuntime:
         if not active:
             return []
         history: List[ChatMessage] = []
-        for turn in active.turns:
+        turns = active.turns[-36:]
+        for turn in turns:
             agent_text = str(turn.get("agent", "")).strip()
+            if len(agent_text) > 8000:
+                agent_text = agent_text[:4000] + "\n...[restored history trimmed]...\n" + agent_text[-4000:]
+            user_text = str(turn.get("user", "")).strip()
+            if len(user_text) > 4000:
+                user_text = user_text[:4000] + "\n...[user history trimmed]..."
+
             # Do not restore network/provider failure messages as conversational history
             if (
                 agent_text.startswith("Model request failed:")
@@ -213,7 +220,7 @@ class KratosRuntime:
                 or turn.get("status") == "failed"
             ):
                 continue
-            history.extend([ChatMessage("user", str(turn.get("user", ""))), ChatMessage("assistant", agent_text)])
+            history.extend([ChatMessage("user", user_text), ChatMessage("assistant", agent_text)])
         return history
 
     def reset(self) -> None:
@@ -294,6 +301,10 @@ class KratosRuntime:
     def _allow_tool(self, spec: Any, arguments: Dict[str, Any]) -> tuple[bool, str]:
         if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):
             return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
+        # Sovereign mode is the explicit autonomous execution profile: harness presets and Plan Mode
+        # must not silently downgrade a user-directed action into a permission gate.
+        if approval_gate.mode is ApprovalMode.SOVEREIGN:
+            return True, "sovereign"
         if hasattr(self, "harness") and self.harness:
             tools_plugin = self.harness.get_plugin("tools")
             if tools_plugin and not tools_plugin.is_tool_allowed(spec.name):

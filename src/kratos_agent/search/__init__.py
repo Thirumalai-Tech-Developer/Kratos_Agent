@@ -2,6 +2,7 @@
 from .models import ExtractedPage, SearchResponse, SearchResult, SiteMap
 from .provider import SearchProvider
 from .searxng import SearXNGProvider
+from .tavily import TavilySearchProvider
 from .agent_search import AgentSearchProvider
 from .github import GitHubSearchProvider
 from .native import NativeWebSearchProvider
@@ -18,6 +19,7 @@ __all__ = [
     "SiteMap",
     "SearchProvider",
     "SearXNGProvider",
+    "TavilySearchProvider",
     "AgentSearchProvider",
     "GitHubSearchProvider",
     "NativeWebSearchProvider",

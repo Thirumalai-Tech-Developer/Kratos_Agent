@@ -28,6 +28,7 @@ class MemoryManager:
         self.procedural = ProceduralMemoryStore()
         self.application = ApplicationMemoryStore()
         self.errors = ErrorMemoryStore()
+        self._consolidate_lock = threading.Lock()
 
     def remember(
         self,
@@ -90,6 +91,7 @@ class MemoryManager:
         if confidence is not None:
             rec.confidence = confidence
         self.store.invalidate_cache()
+        self.store.save()
         return True
 
     def reinforce(self, record_id: str, success: bool = True, bonus: float = 0.1) -> bool:
@@ -114,9 +116,15 @@ class MemoryManager:
         return self.store.consolidate()
 
     def async_consolidate(self) -> None:
-        """Runs consolidation in a background thread to never block execution (§43)."""
-        thread = threading.Thread(target=self.store.consolidate, daemon=True)
-        thread.start()
+        """Run at most one consolidation worker at a time."""
+        if not self._consolidate_lock.acquire(blocking=False):
+            return
+        def worker() -> None:
+            try:
+                self.store.consolidate()
+            finally:
+                self._consolidate_lock.release()
+        threading.Thread(target=worker, name="kratos-memory-consolidate", daemon=True).start()
 
     def get_workflow(self, trigger_or_name: str) -> Optional[WorkflowRecord]:
         """Retrieves a learned procedural workflow (§24, §37)."""

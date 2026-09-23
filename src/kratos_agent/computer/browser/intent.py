@@ -38,21 +38,36 @@ def _extract_whatsapp_message(text: str) -> tuple[str, str] | None:
     )
     if quoted:
         return quoted.group(2).strip(), quoted.group(1).strip()
+
+    # Natural speech often identifies the contact before the message:
+    # "open whatsapp and chat with Thirumalai ... send hii to him"
+    contact_hint = re.search(
+        r'\b(?:chat|message|text)\s+with\s+(.+?)(?=\s+(?:may the contact|the contact|then|and then|send|message|text)\b|[.,!?]|$)',
+        stripped, re.IGNORECASE,
+    )
+    hinted_contact = contact_hint.group(1).strip(' \'"“”') if contact_hint else None
+
     quoted_message = re.search(
         r'\b(?:send|message|text)\s+["“]([^"”]+)["”]\s+(?:message\s+)?to\s+(.+?)\s*$',
         stripped, re.IGNORECASE,
     )
     if quoted_message:
-        return quoted_message.group(2).strip(' \'"“”'), quoted_message.group(1).strip()
+        target = quoted_message.group(2).strip(' \'"“”')
+        if target.lower() in {"him", "her", "them"} and hinted_contact:
+            target = hinted_contact
+        return target, quoted_message.group(1).strip()
+
     generic = re.search(
         r'\b(?:send|message|text)\s+(.+?)\s+(?:message\s+)?to\s+(.+?)\s*$',
         stripped, re.IGNORECASE,
     )
     if generic:
         message = generic.group(1).strip(' \'"“”')
-        contact = generic.group(2).strip(' \'"“”')
-        if message and contact:
-            return contact, message
+        target = generic.group(2).strip(' \'"“”')
+        if target.lower() in {"him", "her", "them"} and hinted_contact:
+            target = hinted_contact
+        if message and target:
+            return target, message
     return None
 
 def parse_media_intent(text: str) -> Dict[str, Any]:

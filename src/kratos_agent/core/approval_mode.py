@@ -138,7 +138,10 @@ class ApprovalGate:
         return Decision(allow=False, needs_confirmation=True, reason=f"requires approval in {self._mode.value} mode")
 
     def check_shell(self, command: str) -> bool:
-        """Legacy helper for simple string checks. Used by standard Kratos tools."""
+        """Shell policy check. Sovereign mode executes directly and records the decision for audit."""
+        if self._mode is ApprovalMode.SOVEREIGN:
+            self._audit.record("execute", command, "ALLOW_SOVEREIGN", "sovereign")
+            return True
         if is_dangerous_command(command):
             console.print(
                 f"\n[bold red]⛔ BLOCKED (dangerous command):[/bold red] [yellow]{command}[/yellow]\n"
