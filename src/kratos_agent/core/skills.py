@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import urllib
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from rich.console import Console
@@ -34,19 +35,102 @@ class SkillManager:
     def __init__(self, skills_dir: Optional[Path] = None):
         self.skills_dir = skills_dir or DEFAULT_SKILLS_DIR
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self.workspace = self.skills_dir.parent.parent.resolve()
+        self.extra_roots: List[Path] = []
+        self.source_config = self.skills_dir / "sources.json"
+        self._load_extra_roots()
         self.skills: Dict[str, Skill] = {}
         self.load_skills()
+
+    def set_workspace(self, workspace: Path) -> None:
+        """Point workspace skill discovery at the active project, not the launch directory."""
+        self.workspace = workspace.resolve()
+        self.skills_dir = self.workspace / ".kratos" / "skills"
+        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self.source_config = self.skills_dir / "sources.json"
+        self._load_extra_roots()
+        self.load_skills()
+
+    def _load_extra_roots(self) -> None:
+        self.extra_roots = []
+        if not self.source_config.exists():
+            return
+        try:
+            values = json.loads(self.source_config.read_text(encoding="utf-8")).get("roots", [])
+            self.extra_roots = [Path(value).expanduser().resolve() for value in values if isinstance(value, str)]
+        except (OSError, ValueError, TypeError):
+            self.extra_roots = []
+
+    def skill_roots(self) -> List[Path]:
+        """Return standard Agent Skills locations used by Claude Code, OpenClaw, and Codex."""
+        home = Path.home()
+        roots = [
+            self.skills_dir,
+            self.workspace / ".agents" / "skills",
+            self.workspace / ".claude" / "skills",
+            self.workspace / ".claude" / "commands",
+            self.workspace / ".codex" / "skills",
+            self.workspace / "skills",
+            home / ".agents" / "skills",
+            home / ".claude" / "skills",
+            home / ".claude" / "commands",
+            home / ".codex" / "skills",
+            home / ".openclaw" / "skills",
+            home / ".openclaw" / "workspace" / "skills",
+            *self.extra_roots,
+        ]
+        unique: List[Path] = []
+        seen = set()
+        for root in roots:
+            resolved = root.resolve()
+            if resolved not in seen:
+                unique.append(resolved)
+                seen.add(resolved)
+        return unique
+
+    def add_source_root(self, path: Path | str) -> int:
+        """Import a framework skill root or plugin bundle without copying its files."""
+        root = Path(path).expanduser().resolve()
+        if root.is_file() and root.name.lower() == "skill.md":
+            root = root.parent
+        if not root.is_dir():
+            raise FileNotFoundError(f"Skill source folder not found: {root}")
+        candidate_roots = []
+        for child in (root / "skills", root / "commands"):
+            if child.is_dir():
+                candidate_roots.append(child.resolve())
+        if not candidate_roots:
+            candidate_roots.append(root)
+        found = []
+        for candidate in candidate_roots:
+            found.extend(folder for folder in candidate.iterdir() if folder.is_dir() and (folder / "SKILL.md").is_file())
+            if (candidate / "SKILL.md").is_file():
+                found.append(candidate)
+            if candidate.name == "commands":
+                found.extend(candidate.glob("*.md"))
+        if not found:
+            raise ValueError(f"No Agent Skills or Claude command Markdown files found under {root}")
+        for candidate in candidate_roots:
+            if candidate not in self.extra_roots:
+                self.extra_roots.append(candidate)
+        if candidate_roots:
+            self.source_config.parent.mkdir(parents=True, exist_ok=True)
+            self.source_config.write_text(json.dumps({"roots": [str(item) for item in self.extra_roots]}, indent=2), encoding="utf-8")
+        self.load_skills()
+        return len(found)
 
     def load_skills(self) -> Dict[str, Skill]:
         """Loads all installed skills from the skills directory."""
         self.skills = {}
-        if not self.skills_dir.exists():
-            return self.skills
-
-        for item in self.skills_dir.iterdir():
-            if item.is_dir():
+        for root in self.skill_roots():
+            if not root.is_dir():
+                continue
+            folders = [item for item in root.iterdir() if item.is_dir()]
+            if (root / "SKILL.md").is_file():
+                folders.append(root)
+            for item in folders:
                 skill_md = item / "SKILL.md"
-                if skill_md.exists():
+                if skill_md.is_file():
                     try:
                         text = skill_md.read_text(encoding="utf-8", errors="replace")
                         name, desc, tags, source_url, body = self._parse_skill_md(item.name, text)
@@ -58,9 +142,21 @@ class SkillManager:
                             tags=tags,
                             source_url=source_url
                         )
-                        # Index by directory folder name and parsed name
-                        self.skills[item.name.lower()] = skill_obj
-                        self.skills[name.lower()] = skill_obj
+                        # Earlier roots have higher priority (managed, workspace, then user).
+                        if name.lower() not in self.skills:
+                            self.skills[name.lower()] = skill_obj
+                        if item.name.lower() not in self.skills:
+                            self.skills[item.name.lower()] = skill_obj
+                    except Exception:
+                        pass
+            if root.name == "commands":
+                for command_file in sorted(root.glob("*.md"), key=lambda path: path.name.lower()):
+                    try:
+                        raw = command_file.read_text(encoding="utf-8", errors="replace")
+                        name, desc, tags, source_url, body = self._parse_skill_md(command_file.stem, raw)
+                        command = Skill(name=name, description=desc, path=command_file, content=body or raw, tags=tags, source_url=source_url)
+                        if name.lower() not in self.skills:
+                            self.skills[name.lower()] = command
                     except Exception:
                         pass
         return self.skills

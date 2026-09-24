@@ -8,6 +8,7 @@ This folder is the developer reference for the Kratos Agent repository. It docum
 - [Python runtime reference](python-reference.md)
 - [Brain and model gateway reference](brain-reference.md)
 - [Tools, memory, persistence, and data contracts](tools-and-data.md)
+- [OpenClaw/Claude Code integration, plugins, Agent Skills, and MCP](tools-and-data.md#existing-agent-frameworks-plugins-and-mcp)
 - [Web servers and API reference](web-api.md)
 - [Frontend reference](frontend-reference.md)
 - [Testing, configuration, and build reference](testing-and-build.md)

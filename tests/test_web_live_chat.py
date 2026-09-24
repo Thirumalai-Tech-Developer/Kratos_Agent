@@ -1,11 +1,15 @@
 """Tests for Kratos Vice Web Server live chat, tools discovery, and telemetry."""
 
 import json
+import asyncio
 import tempfile
+import threading
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from kratos_agent.core.d1_client import D1DatabaseClient
 from kratos_agent.core.memory import AgenticMemory
@@ -111,6 +115,48 @@ class TestWebLiveChatAndTelemetry(unittest.TestCase):
             joined = "".join(chunks)
             self.assertIn("data: ", joined)
             self.assertIn('"type": "start"', joined)
+
+    def test_vision_control_waits_for_mode_change(self):
+        loop = asyncio.new_event_loop()
+        loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+        loop_thread.start()
+
+        def stop_loop():
+            loop.call_soon_threadsafe(loop.stop)
+            loop_thread.join(2)
+            loop.close()
+
+        self.addCleanup(stop_loop)
+
+        live = MagicMock()
+        live._loop = loop
+        status = {"video_mode": "camera"}
+
+        async def set_mode(mode):
+            status["video_mode"] = mode
+
+        live.set_vision_mode = set_mode
+        live.get_status.side_effect = lambda: SimpleNamespace(to_dict=lambda: dict(status))
+        request = urllib.request.Request(
+            f"{self.base_url}/api/live/control",
+            data=json.dumps({"action": "set_vision_mode", "value": "screen"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with patch("kratos_agent.live.get_live_runtime", return_value=live):
+            with urllib.request.urlopen(request, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read().decode("utf-8"))["video_mode"], "screen")
+
+    def test_vision_control_rejects_unknown_mode(self):
+        request = urllib.request.Request(
+            f"{self.base_url}/api/live/control",
+            data=json.dumps({"action": "set_vision_mode", "value": "desktop"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with patch("kratos_agent.live.get_live_runtime", return_value=MagicMock()):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(error.exception.code, 400)
 
 
 if __name__ == "__main__":

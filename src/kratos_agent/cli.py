@@ -87,6 +87,8 @@ HELP_TEXT = """
   [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set approval mode (Codex-style)
   [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Plan Mode (DeepSeek Harness & Claude Code)
   [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - DeepSeek Harness presets & plugins manager
+  [bold cyan]/integrations[/bold cyan] [dim][status|import <framework-or-bundle>][/dim] - Connect OpenClaw/Claude Code MCP tools and skills
+  [bold cyan]/mcp[/bold cyan] [dim][status|reload|import <framework-or-config>][/dim] - Manage MCP server connections
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
   [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse or search 500+ Claude Code system prompts
   [bold cyan]/review[/bold cyan] [dim][target][/dim]         - Run multi-angle senior code review (alias: /code-review)
@@ -128,21 +130,20 @@ HELP_TEXT = """
 """
 
 prompt_style = Style.from_dict({
-    "prompt": "bold #E63946",
-    "arrow": "bold #D4AF37",
+    "prompt": "bold #FF4FA3",
+    "arrow": "bold #42E8F5",
     # Autocompletion popup styling
-    "completion-menu.completion": "bg:#21252B #D7DAE0",
-    "completion-menu.completion.current": "bold bg:#E63946 #FFFFFF",
-    "completion-menu.meta.completion": "bg:#1E1E2E #61AFEF italic",
-    "completion-menu.meta.completion.current": "bold bg:#9B1C26 #FFFFFF",
-    "scrollbar.background": "bg:#1E1E2E",
-    "scrollbar.button": "bg:#E63946",
+    "completion-menu.completion": "bg:#171323 #DCE6F2",
+    "completion-menu.completion.current": "bold bg:#A52B70 #FFFFFF",
+    "completion-menu.meta.completion": "bg:#171323 #42C9D8 italic",
+    "completion-menu.meta.completion.current": "bold bg:#6E2452 #FFFFFF",
+    "scrollbar.background": "bg:#171323",
+    "scrollbar.button": "bg:#FF4FA3",
 })
 
 # Models sourced dynamically from Brain Gateway
 from kratos_agent.brain.config import (
     PUBLIC_MODELS as _PUBLIC_MODELS,
-    get_model as _get_model,
     get_available_models,
 )
 AVAILABLE_MODELS: List[str] = list(_PUBLIC_MODELS)
@@ -187,6 +188,10 @@ class KratosCompleter(Completer):
         ("/harness mode", "Switch harness preset (standard, code, minimal, creator)"),
         ("/harness plugins", "List all registered and active harness plugins"),
         ("/harness trace", "View recent execution trace and audit replay"),
+        ("/integrations", "Inspect installed agent frameworks and imported MCP servers"),
+        ("/integrations import", "Import MCP tools and Agent Skills from OpenClaw, Claude Code, or a plugin bundle"),
+        ("/mcp", "Inspect connected MCP servers and tools"),
+        ("/mcp import", "Import existing Claude Code/OpenClaw MCP config or a plugin bundle"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
         ("/web", "Launch interactive Cloudflare D1 Web Console & Trace viewer"),
@@ -702,6 +707,57 @@ def handle_harness_command(arg: str = ""):
         )
     )
     console.print("[dim]Subcommands: /harness mode <standard|code|minimal|creator> | /harness plugins | /harness trace [limit][/dim]\n")
+
+
+def handle_integrations_command(arg: str = ""):
+    """Inspect or import interoperable framework extensions without executing plugin code."""
+    parts = arg.strip().split(maxsplit=1)
+    subcmd = parts[0].lower() if parts else "status"
+    target = parts[1].strip() if len(parts) > 1 else ""
+    if subcmd in {"import", "add"}:
+        if not target:
+            console.print("[yellow]Usage: /integrations import <openclaw|claude-code|path-to-plugin-bundle>[/yellow]\n")
+            return
+        try:
+            result = runtime.import_integration(target)
+        except Exception as exc:
+            console.print(f"[bold red]Import failed:[/bold red] {type(exc).__name__}: {exc}\n")
+            return
+        console.print(Panel(
+            f"[bold green]Imported integration source:[/bold green] {result['source']}\n"
+            f"MCP servers registered: {result['mcp_servers']}\n"
+            f"Plugin MCP config files: {len(result['mcp_configs'])}\n"
+            f"Skills found in bundles: {result['skills']}\n"
+            "Native plugin code and hooks remain owned by their original runtime.",
+            title="[bold gold1]Framework Bridge[/bold gold1]", border_style="gold1"))
+        return
+    if subcmd in {"reload", "refresh"}:
+        runtime.reload_tools()
+    frameworks = runtime.frameworks.available()
+    table = Table(title="Agent Framework Integrations", border_style="gold1")
+    table.add_column("Framework", style="bold gold1")
+    table.add_column("CLI", style="white")
+    table.add_column("State", style="cyan")
+    for name, executable in frameworks.items():
+        table.add_row(name, executable or "not installed", "available" if executable else "unavailable")
+
+    mcp_table = Table(title="Imported MCP Servers", border_style="gold1")
+    mcp_table.add_column("Server", style="bold gold1")
+    mcp_table.add_column("Transport", style="cyan")
+    mcp_table.add_column("State", style="white")
+    mcp_table.add_column("Tools", justify="right")
+    mcp_table.add_column("Error", style="red")
+    for name, server in runtime.mcp.servers.items():
+        state = runtime.mcp.status.get(name, {})
+        mcp_table.add_row(name, server.transport or ("stdio" if server.command else "HTTP"), state.get("state", "not connected"), str(state.get("tools", 0)), state.get("error", ""))
+    if not runtime.mcp.servers:
+        console.print("[dim]No MCP servers imported yet.[/dim]")
+    else:
+        console.print(mcp_table)
+    console.print(table)
+    unique_skills = {str(skill.path) for skill in runtime.skill_manager.skills.values()}
+    console.print(f"Agent Skills discovered: {len(unique_skills)}")
+    console.print("[dim]Use /integrations import openclaw | claude-code | <bundle path>, then /integrations reload.[/dim]\n")
 
 
 def handle_accounts_command():
@@ -1503,9 +1559,7 @@ def start_interactive_cli():
         console.print(f"[dim yellow]⚠ Could not create a fresh session; continuing with current runtime: {exc}[/dim yellow]")
 
     from kratos_agent.live import get_live_runtime
-    from kratos_agent.output.terminal import get_terminal_renderer
     live_runtime = get_live_runtime()
-    terminal_renderer = get_terminal_renderer()
 
     def _on_live_user_speech(text: str) -> None:
         console.print(f"\n[bold green]🎤 [Voice] You:[/bold green] [white]{text}[/white]")
@@ -1527,7 +1581,7 @@ def start_interactive_cli():
             code_reloader.auto_reload_if_changed()
 
             user_input = session.prompt(
-                HTML("<prompt>kratos</prompt> <arrow>❯</arrow> ")
+                HTML("<prompt>KRATOS</prompt> <arrow>›</arrow> ")
             ).strip()
 
             # 2. Automatically identify and normalize multiple leading slashes (// -> /)
@@ -2033,6 +2087,20 @@ def start_interactive_cli():
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
                 handle_harness_command(arg)
+                continue
+
+            # /integrations [status|import <framework-or-bundle>|reload]
+            if user_input.lower().startswith("/integrations"):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_integrations_command(arg)
+                continue
+
+            # /mcp is a short alias for the framework bridge's server controls.
+            if user_input.lower() == "/mcp" or user_input.lower().startswith("/mcp "):
+                parts = user_input.split(maxsplit=1)
+                arg = parts[1] if len(parts) > 1 else ""
+                handle_integrations_command(arg)
                 continue
 
             # /bg-run <prompt> — Background agent loop (Kimi swarm / Claude Code)

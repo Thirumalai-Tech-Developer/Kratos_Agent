@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Database, MessageSquare, Trash2, CornerUpRight, Clock, ShieldCheck, User } from 'lucide-react';
+import { Search, Database, MessageSquare, Trash2, CornerUpRight, User } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
 
 export default function SessionsExplorer({

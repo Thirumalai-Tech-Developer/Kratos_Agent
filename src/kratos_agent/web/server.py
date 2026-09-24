@@ -221,8 +221,16 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 else:
                     live_rt.mute()
             elif action == "set_vision_mode" and isinstance(val, str):
+                mode = val.lower().strip()
+                if mode not in {"camera", "screen", "both", "none", "off"}:
+                    self._send_json({"error": "Vision mode must be camera, screen, both, or off."}, status=HTTPStatus.BAD_REQUEST)
+                    return
                 if live_rt._loop and live_rt._loop.is_running():
-                    asyncio.run_coroutine_threadsafe(live_rt.set_vision_mode(val), live_rt._loop)
+                    future = asyncio.run_coroutine_threadsafe(live_rt.set_vision_mode(mode), live_rt._loop)
+                    future.result(timeout=15)
+                else:
+                    self._send_json({"error": "Live vision runtime is not running."}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
             elif action == "reconnect":
                 live_rt.stop_background()
                 live_rt.start_in_background()

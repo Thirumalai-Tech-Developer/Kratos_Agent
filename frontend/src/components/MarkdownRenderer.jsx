@@ -47,7 +47,7 @@ function highlightCode(codeText, lang) {
           displayLang = autoRes.language.toUpperCase();
         }
       }
-    } catch (_) {
+    } catch {
       highlighted = escapeHtml(codeText);
     }
   } else {
@@ -278,7 +278,7 @@ export default function MarkdownRenderer({ content, isStreaming }) {
   if (!content && !isStreaming) return null;
 
   // Match complete or in-progress code blocks
-  const codeBlockRegex = /```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)(?:```|$)/g;
+  const codeBlockRegex = /```([a-zA-Z0-9_\-+]*)\r?\n([\s\S]*?)(?:```|$)/g;
   const segments = [];
   let lastIndex = 0;
   let match;

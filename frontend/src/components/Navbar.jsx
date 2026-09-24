@@ -1,25 +1,18 @@
 import React, { useState } from 'react';
 import { 
-  Shield, 
-  Database, 
-  RotateCw, 
-  Info, 
-  Plus, 
-  Menu, 
-  X, 
-  Zap, 
-  Terminal, 
-  MessageSquare, 
-  Clock, 
-  Lock, 
-  Unlock,
-  Sliders,
+  Database,
+  RotateCw,
+  Info,
+  Plus,
+  Menu,
+  X,
+  Zap,
+  MessageSquare,
   Cpu
 } from 'lucide-react';
 
 export default function Navbar({ 
   stats, 
-  telemetry, 
   isAgentMode, 
   onToggleAgentMode, 
   onRefresh, 
@@ -27,7 +20,6 @@ export default function Navbar({
   onOpenTechSpecs,
   isHudOpen,
   onToggleHud,
-  activeTab,
   onSelectTab
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -60,7 +52,7 @@ export default function Navbar({
                 </span>
               </div>
               <p className="text-[10px] sm:text-[11px] font-rajdhani font-medium text-slate-400 hidden xl:block truncate max-w-[240px] 2xl:max-w-none">
-                Autonomous Protocol & Cloudflare D1 Intelligence
+                Agent console & connected tools
               </p>
             </div>
           </div>
@@ -116,18 +108,18 @@ export default function Navbar({
                   ? 'bg-pink-600/25 border-pink-500 text-white shadow-[0_0_15px_rgba(255,0,127,0.4)]' 
                   : 'bg-slate-900/60 border-slate-700 text-slate-300 hover:border-slate-500'
               }`}
-              title={isAgentMode ? "Autonomous Agent Mode Active (Zero Sandbox Restrictions)" : "Click to switch mode"}
+              title={isAgentMode ? "Autonomous task mode. Tools follow Kratos's configured permissions." : "Switch to autonomous task mode"}
             >
               <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${isAgentMode ? 'bg-pink-500 animate-pulse' : 'bg-slate-500'}`}></span>
               {isAgentMode ? (
                 <>
-                  <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-pink-400 flex-shrink-0" />
-                  <span className="tracking-wider sm:inline hidden">AGENT: UNRESTRICTED</span>
+                  <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-pink-400 flex-shrink-0" />
+                  <span className="tracking-wider sm:inline hidden">AGENT MODE</span>
                   <span className="tracking-wider sm:hidden inline">AGENT</span>
                 </>
               ) : (
                 <>
-                  <Unlock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
+                  <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 flex-shrink-0" />
                   <span className="tracking-wider sm:inline hidden">DIRECT CHAT</span>
                   <span className="tracking-wider sm:hidden inline">CHAT</span>
                 </>

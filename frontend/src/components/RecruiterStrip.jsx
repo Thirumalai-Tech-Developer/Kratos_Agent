@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Sparkles } from 'lucide-react';
+import { Flame } from 'lucide-react';
 
 const SHORTCUTS = [
   {

@@ -77,7 +77,7 @@ export default function TraceReplay({ events, onInspectPayload, isLoading }) {
             let payloadObj = null;
             try {
               payloadObj = typeof evt.payload_json === 'string' ? JSON.parse(evt.payload_json) : evt.payload_json;
-            } catch (_) {
+    } catch {
               payloadObj = evt.payload_json;
             }
 

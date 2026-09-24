@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import inspect
 import json
+import re
 import time
 
 from .runtime_contracts import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -67,10 +68,27 @@ class ToolRegistry:
         matched = ts.search(query, context=ctx_dict, max_results=max_results)
         matched_names = {m.name for m in matched}
 
-        results = []
+        query_tokens = set(re.findall(r"\w+", query.lower()))
+        dynamic_matches = []
+        for name, item in self._tools.items():
+            if item.spec.source == "builtin":
+                continue
+            searchable = f"{name} {item.spec.description} {item.spec.source}".lower()
+            overlap = sum(token in searchable for token in query_tokens if len(token) > 2)
+            if overlap:
+                dynamic_matches.append((overlap, name, item))
+        dynamic_matches.sort(key=lambda entry: (-entry[0], entry[1]))
+        results = [
+            {
+                "type": "function",
+                "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters},
+                "source": item.spec.source,
+            }
+            for _, _, item in dynamic_matches[:max_results]
+        ]
         for name in matched_names:
             item = self._tools.get(name)
-            if item:
+            if item and name not in {entry[1] for entry in dynamic_matches}:
                 results.append({
                     "type": "function",
                     "function": {
@@ -80,15 +98,14 @@ class ToolRegistry:
                     },
                     "source": item.spec.source,
                 })
-        return results
+        return results[:max_results]
 
     def get_tools(self, context: Optional[Any] = None, categories: Optional[List[str]] = None, max_tools: int = 15) -> List[Dict[str, Any]]:
         """Dynamically loads and returns only relevant tool schemas (5-15 tools) for the given context."""
+        searched: List[Dict[str, Any]] = []
         if context:
             ctx_str = str(context)
             searched = self.search(ctx_str, context=context, max_results=max_tools)
-            if searched:
-                return searched
 
         selected_cats = set()
         if categories:
@@ -115,14 +132,36 @@ class ToolRegistry:
         # Always include GENERAL category
         selected_cats.add(ToolCategory.GENERAL.value)
 
-        results = []
+        def schema(item: RegisteredTool) -> Dict[str, Any]:
+            return {
+                "type": "function",
+                "function": {
+                    "name": item.spec.name,
+                    "description": item.spec.description,
+                    "parameters": item.spec.parameters,
+                },
+                "source": item.spec.source,
+            }
+
+        if not categories and not context:
+            return [schema(item) for item in self._tools.values()]
+
+        # Semantic search ranks the best matches but may omit tools required for
+        # the inferred task (for example, file writers for a pytest repair).
+        # Merge its ranked results with all tools in the relevant categories.
+        results: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for result in searched:
+            name = result.get("function", {}).get("name")
+            item = self._tools.get(name)
+            if item and categorize_tool(name).value in selected_cats and name not in seen:
+                results.append(schema(item))
+                seen.add(name)
         for item in self._tools.values():
-            cat = categorize_tool(item.spec.name).value
-            if not categories and not context:
-                # No filter provided, return all
-                results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
-            elif cat in selected_cats:
-                results.append({"type": "function", "function": {"name": item.spec.name, "description": item.spec.description, "parameters": item.spec.parameters}, "source": item.spec.source})
+            name = item.spec.name
+            if categorize_tool(name).value in selected_cats and name not in seen:
+                results.append(schema(item))
+                seen.add(name)
         return results[:max_tools] if (categories or context) else results
 
     def schemas(self, categories: Optional[List[str]] = None, context: Optional[Any] = None) -> List[Dict[str, Any]]:
@@ -161,9 +200,12 @@ class ToolRegistry:
             return ToolResult(call.call_id, call.name, f"Tool execution requires approval: {reason}", is_error=True)
         try:
             result = registered.handler(**call.arguments)
-            return ToolResult(call.call_id, call.name, str(result), duration_ms=int((time.monotonic() - started) * 1000))
+            content = str(result)
+            is_error = call.name == "run_terminal_command" and _terminal_command_failed(content)
+            return ToolResult(call.call_id, call.name, content, is_error=is_error, duration_ms=int((time.monotonic() - started) * 1000))
         except Exception as exc:
             return ToolResult(call.call_id, call.name, f"Tool failed: {type(exc).__name__}: {exc}", is_error=True, duration_ms=int((time.monotonic() - started) * 1000))
+
 
     @staticmethod
     def _validate(spec: ToolSpec, arguments: Dict[str, Any]) -> tuple[bool, str]:
@@ -203,6 +245,18 @@ class ToolRegistry:
             if target.startswith("\\\\.\\physicaldrive") or target.startswith("/dev/sd") or target.startswith("/dev/nvme"):
                 return True, "Cannot write to raw block devices."
         return False, ""
+
+
+def _terminal_command_failed(content: str) -> bool:
+    """Promote structured and textual nonzero shell exits to tool errors."""
+    try:
+        result = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        result = None
+    if isinstance(result, dict) and result.get("ok") is False:
+        return True
+    match = re.search(r"(?m)^\s*Exit Code:\s*(-?\d+)\s*$", content)
+    return bool(match and int(match.group(1)) != 0)
 
 
 

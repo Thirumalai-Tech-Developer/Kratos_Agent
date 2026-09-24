@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import RecruiterStrip from './components/RecruiterStrip';
 import AgentArena from './components/AgentArena';
@@ -43,6 +43,68 @@ export default function App() {
   const [payloadModalOpen, setPayloadModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
+  const fetchStats = async () => {
+    try {
+      const res = await fetch('/api/stats');
+      if (res.ok) setStats(await res.json());
+    } catch {}
+  };
+
+  const fetchTelemetry = async () => {
+    try {
+      const res = await fetch('/api/telemetry');
+      if (res.ok) setTelemetry(await res.json());
+    } catch {}
+  };
+
+  const fetchTools = async () => {
+    try {
+      const res = await fetch('/api/tools');
+      if (res.ok) setTools(await res.json());
+    } catch {}
+  };
+
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch('/api/sessions');
+      if (res.ok) {
+        const data = await res.json();
+        setSessions(data || []);
+      }
+    } catch {}
+  };
+
+  const fetchSessionDetail = async (id) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/sessions/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setActiveSessionData(data);
+      }
+    } catch {}
+  };
+
+  const fetchEvents = async (sId = null) => {
+    try {
+      const url = sId ? `/api/events/${sId}` : '/api/events';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data || []);
+      }
+    } catch {}
+  };
+
+  const fetchLiveStatus = async () => {
+    try {
+      const res = await fetch('/api/live/status');
+      if (res.ok) {
+        setLiveStatus(await res.json());
+      }
+    } catch {}
+  };
+
   const refreshAll = async () => {
     await Promise.all([
       fetchStats(),
@@ -56,72 +118,13 @@ export default function App() {
 
   // Initial Load & polling
   useEffect(() => {
-    refreshAll();
+    const initialRefresh = setTimeout(refreshAll, 0);
     const interval = setInterval(fetchLiveStatus, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialRefresh);
+      clearInterval(interval);
+    };
   }, []);
-
-  const fetchStats = async () => {
-    try {
-      const res = await fetch('/api/stats');
-      if (res.ok) setStats(await res.json());
-    } catch (_) {}
-  };
-
-  const fetchTelemetry = async () => {
-    try {
-      const res = await fetch('/api/telemetry');
-      if (res.ok) setTelemetry(await res.json());
-    } catch (_) {}
-  };
-
-  const fetchTools = async () => {
-    try {
-      const res = await fetch('/api/tools');
-      if (res.ok) setTools(await res.json());
-    } catch (_) {}
-  };
-
-  const fetchSessions = async () => {
-    try {
-      const res = await fetch('/api/sessions');
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data || []);
-      }
-    } catch (_) {}
-  };
-
-  const fetchSessionDetail = async (id) => {
-    if (!id) return;
-    try {
-      const res = await fetch(`/api/sessions/${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setActiveSessionData(data);
-      }
-    } catch (_) {}
-  };
-
-  const fetchEvents = async (sId = null) => {
-    try {
-      const url = sId ? `/api/events/${sId}` : '/api/events';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setEvents(data || []);
-      }
-    } catch (_) {}
-  };
-
-  const fetchLiveStatus = async () => {
-    try {
-      const res = await fetch('/api/live/status');
-      if (res.ok) {
-        setLiveStatus(await res.json());
-      }
-    } catch (_) {}
-  };
 
   const handleLiveControl = async (action, value = null) => {
     try {
@@ -133,10 +136,22 @@ export default function App() {
       if (res.ok) {
         setLiveStatus(await res.json());
       }
-    } catch (_) {}
+    } catch {}
   };
 
-  // Agent Mode Toggle (Unrestricted, No Passcode Required)
+  const setVisionMode = async (mode) => {
+    const response = await fetch('/api/live/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_vision_mode', value: mode }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Vision mode request failed (${response.status})`);
+    setLiveStatus(data);
+    return data.video_mode || mode;
+  };
+
+  // Toggle between autonomous task execution and direct chat.
   const handleToggleAgentMode = () => {
     setIsAgentMode(prev => !prev);
   };
@@ -175,6 +190,53 @@ function parseThinkTags(rawContent, currentReasoning = '') {
   const handleSendPrompt = async (customPrompt = null) => {
     const text = (customPrompt || inputPrompt).trim();
     if (!text || isExecuting) return;
+
+    const visionCommand = text.match(/^\/vision(?:\s+(.*))?$/i);
+    if (visionCommand) {
+      const modes = ['camera', 'screen', 'both', 'none'];
+      const requestedMode = visionCommand[1]?.toLowerCase().trim();
+      const nextMode = requestedMode || modes[(modes.indexOf(liveStatus?.video_mode || 'camera') + 1) % modes.length];
+      const userMessage = { role: 'user', content: text, timestamp: new Date().toLocaleTimeString() };
+      setInputPrompt('');
+      setMessages((prev) => [...prev, userMessage, {
+        role: 'agent',
+        content: 'Updating vision source…',
+        timestamp: new Date().toLocaleTimeString(),
+      }]);
+      if (requestedMode && ![...modes, 'off'].includes(requestedMode)) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastIndex = updated.length - 1;
+          updated[lastIndex] = { ...updated[lastIndex], content: 'Usage: `/vision camera`, `/vision screen`, `/vision both`, or `/vision off`.' };
+          return updated;
+        });
+        return;
+      }
+      try {
+        const activeMode = await setVisionMode(nextMode === 'off' ? 'none' : nextMode);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'agent') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: `Vision source ${activeMode === 'none' || activeMode === 'off' ? 'disabled' : `set to **${activeMode}**`}.`,
+            };
+          }
+          return updated;
+        });
+      } catch (error) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'agent') {
+            updated[updated.length - 1] = { ...last, content: `Could not change vision mode: ${error.message}` };
+          }
+          return updated;
+        });
+      }
+      return;
+    }
 
     setInputPrompt('');
     setIsExecuting(true);
@@ -339,7 +401,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 if (data.tool_result) {
                   setActiveTool(null);
                 }
-              } catch (_) {}
+              } catch {}
             }
           }
         }
@@ -413,7 +475,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
             if (t.timestamp) {
               try {
                 timeStr = new Date(t.timestamp).toLocaleTimeString();
-              } catch (_) {
+              } catch {
                 timeStr = String(t.timestamp);
               }
             }
@@ -440,7 +502,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
           setMessages(restoredMessages);
         }
       }
-    } catch (_) {}
+    } catch {}
   };
 
   // Delete Session
@@ -456,7 +518,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         }
         fetchSessions();
       }
-    } catch (_) {}
+    } catch {}
   };
 
   // SQL Execution
@@ -489,7 +551,6 @@ function parseThinkTags(rawContent, currentReasoning = '') {
       <div className="flex-shrink-0 z-40">
         <Navbar
           stats={stats}
-          telemetry={telemetry}
           isAgentMode={isAgentMode}
           onToggleAgentMode={handleToggleAgentMode}
           onRefresh={refreshAll}
@@ -502,7 +563,6 @@ function parseThinkTags(rawContent, currentReasoning = '') {
           onOpenTechSpecs={() => setTechSpecsOpen(true)}
           isHudOpen={isHudOpen}
           onToggleHud={() => setIsHudOpen(!isHudOpen)}
-          activeTab={activeTab}
           onSelectTab={(tab) => setActiveTab(tab)}
         />
       </div>
@@ -640,6 +700,8 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 inputPrompt={inputPrompt}
                 setInputPrompt={setInputPrompt}
                 onSend={() => handleSendPrompt()}
+                onVisionMode={setVisionMode}
+                visionMode={liveStatus?.video_mode || 'camera'}
                 onClear={() => setMessages([])}
                 isExecuting={isExecuting}
                 currentStep={currentStep}
@@ -658,7 +720,6 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               onRefreshTools={fetchTools}
               isOpen={isHudOpen}
               onClose={() => setIsHudOpen(false)}
-              telemetry={telemetry}
             />
           </div>
         )}

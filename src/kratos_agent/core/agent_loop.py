@@ -4,6 +4,7 @@ live task tree progression, workspace tracking, verification, and resilient inte
 from __future__ import annotations
 
 import json
+import inspect
 import re
 import threading
 import uuid
@@ -83,6 +84,10 @@ READ_ONLY_TOOLS = {
     "ui_find",
     "ui_find_all",
     "ui_read_element",
+}
+
+ARTIFACT_INSPECTION_TOOLS = {
+    "read_file", "list_directory", "grep_search", "search_symbol", "read_symbol", "view_outline",
 }
 
 # Tools that must run in isolation (sequential barriers)
@@ -235,6 +240,24 @@ def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
 def _format_tool_substep(name: str, args: Dict[str, Any]) -> str:
     action = format_tool_action_label(name, args)
     return f"[tool call] {action}"
+
+
+def explicitly_requested_reusable_tool(user_request: str) -> bool:
+    """Only allow persistent tool-catalog changes when the user asked for one."""
+    request = str(user_request or "").lower().replace("_", " ")
+    action = r"\b(?:create|add|build|make|implement|register|forge)\b"
+    tool = r"\b(?:(?:a|an|the|new|custom|reusable|kratos|agent|general-purpose)\s+){0,4}tool\b"
+    return bool(
+        re.search(action + r"\s+" + tool, request)
+        or re.search(r"\b(?:self tool creator|custom tool|reusable tool|new tool)\b", request)
+    )
+
+
+def user_requested_artifact(user_request: str) -> bool:
+    request = str(user_request or "").lower()
+    asks_to_create = re.search(r"\b(?:create|build|make|write|generate|implement|finish|complete)\b", request)
+    names_artifact = re.search(r"\b(?:website|web\s?page|site|app|application|file|report|deliverable|component|script|project)\b", request)
+    return bool(asks_to_create and names_artifact)
 
 
 def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -> str:
@@ -419,6 +442,24 @@ class AgentLoop:
         except Exception:
             pass
 
+    def _tool_schemas(self, context: str, categories: Optional[List[str]]) -> List[Dict[str, Any]]:
+        """Call context-aware registries while preserving the legacy schemas() contract."""
+        schema_method = self.tools.schemas
+        try:
+            parameters = inspect.signature(schema_method).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        kwargs: Dict[str, Any] = {}
+        if "context" in parameters or accepts_kwargs:
+            kwargs["context"] = context
+        if "categories" in parameters or accepts_kwargs:
+            kwargs["categories"] = categories
+        return schema_method(**kwargs)
+
     def _check_task_completion_gate(self, task: TaskItem, turn_id: str) -> tuple[bool, Optional[str]]:
         """Checks completion gate for a task. Returns (allowed, correction)."""
         if not getattr(task, "requires_observable_evidence", False):
@@ -537,6 +578,59 @@ class AgentLoop:
     ) -> ToolResult:
         """Executes a single tool call and prunes its result text."""
         try:
+            if (
+                call.name in ARTIFACT_INSPECTION_TOOLS
+                and self.current_run is not None
+                and user_requested_artifact(self.current_run.user_request)
+                and not self.current_run.written_files
+            ):
+                inspections = sum(
+                    item.get("name") in ARTIFACT_INSPECTION_TOOLS
+                    for item in self.current_run.completed_tools
+                )
+                if inspections >= 12:
+                    return ToolResult(
+                        call_id=call.call_id,
+                        name=call.name,
+                        content=(
+                            "Inspection loop limit reached: stop searching and create the requested deliverable "
+                            "with the existing write_file/edit_file tools using the information already inspected."
+                        ),
+                        is_error=True,
+                    )
+            if call.name == "run_terminal_command" and self.current_run is not None:
+                command = str(call.arguments.get("command", "")).strip()
+                previously_failed = any(
+                    item.get("name") == call.name
+                    and item.get("is_error")
+                    and str((item.get("args") or {}).get("command", "")).strip() == command
+                    for item in self.current_run.completed_tools
+                )
+                if previously_failed:
+                    return ToolResult(
+                        call_id=call.call_id,
+                        name=call.name,
+                        content=(
+                            "Repeated identical failed command blocked. Do not retry it unchanged. "
+                            "Use the error output to correct the command or use an appropriate existing tool."
+                        ),
+                        is_error=True,
+                    )
+            if (
+                call.name == "self_tool_creator"
+                and self.current_run is not None
+                and not explicitly_requested_reusable_tool(self.current_run.user_request)
+            ):
+                return ToolResult(
+                    call_id=call.call_id,
+                    name=call.name,
+                    content=(
+                        "Rejected self_tool_creator: this changes Kratos's persistent source and tool catalog. "
+                        "The user's task did not request a reusable Kratos tool. Use existing workspace tools "
+                        "such as write_file/edit_file, then verify the deliverable."
+                    ),
+                    is_error=True,
+                )
             result = self.tools.execute(call, allow_tool)
             # If writing a relative deliverable and target_dir is configured, mirror to target_dir as well
             if not result.is_error and call.name in ("write_file", "edit_file") and self.current_run and self.current_run.target_dir:
@@ -710,9 +804,9 @@ class AgentLoop:
             built = self.context.assemble(
                 self.instructions.build(),
                 history,
-                self.tools.schemas(
-                    context=user_query,
-                    categories=route_decision.target_tool_categories if route_decision.target_tool_categories else None,
+                self._tool_schemas(
+                    user_query,
+                    route_decision.target_tool_categories if route_decision.target_tool_categories else None,
                 ),
                 {"cwd": str(self.workspace), "platform": "windows"},
                 run_state=self.current_run,

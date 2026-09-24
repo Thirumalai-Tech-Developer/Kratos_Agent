@@ -1,15 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Send, Trash2, Shield, Zap, Sparkles, Terminal, CornerDownLeft, Bot, User, ChevronDown } from 'lucide-react';
+import { Send, Trash2, Zap, Sparkles, Terminal, User, ChevronDown, Eye, Wrench } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
 
 function ReasoningAccordion({ reasoning, isThinking, duration }) {
-  const [isOpen, setIsOpen] = useState(isThinking || false);
-
-  useEffect(() => {
-    if (isThinking) {
-      setIsOpen(true);
-    }
-  }, [isThinking]);
+  const [manuallyOpen, setManuallyOpen] = useState(false);
+  const isOpen = isThinking || manuallyOpen;
 
   if (!reasoning && !isThinking) return null;
 
@@ -17,7 +12,7 @@ function ReasoningAccordion({ reasoning, isThinking, duration }) {
     <div className="reasoning-box mb-3 rounded-xl border border-cyan-500/25 bg-[#0a1120]/70 overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.3)] transition-all">
       <button
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
+        onClick={() => setManuallyOpen(!isOpen)}
         className="w-full flex items-center justify-between px-3.5 py-2 text-left bg-black/40 hover:bg-cyan-950/40 transition-colors cursor-pointer select-none group"
       >
         <div className="flex items-center gap-2 text-xs font-rajdhani font-semibold text-cyan-300">
@@ -70,11 +65,23 @@ export default function AgentArena({
   activeTool,
   isAgentMode,
   modelName,
-  sessionId
+  sessionId,
+  onVisionMode,
+  visionMode = 'none'
 }) {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const textareaRef = useRef(null);
+  const [visionError, setVisionError] = useState('');
+
+  const changeVisionMode = async (mode) => {
+    setVisionError('');
+    try {
+      await onVisionMode?.(mode);
+    } catch (error) {
+      setVisionError(error.message || 'Could not change vision mode.');
+    }
+  };
 
   useEffect(() => {
     if (messagesContainerRef.current) {
@@ -112,6 +119,12 @@ export default function AgentArena({
         </div>
 
         <div className="flex items-center gap-2">
+          {activeTool && (
+            <span className="hidden md:inline-flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/5 px-2 py-1 text-[10px] font-code text-cyan-200" title="Tool currently running">
+              <Wrench className="h-3 w-3" />
+              {typeof activeTool === 'string' ? activeTool : activeTool.name || activeTool.tool || 'TOOL RUNNING'}
+            </span>
+          )}
           <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-code bg-black/50 border border-slate-700/80 text-cyan-300">
             Model: <strong className="text-white font-pixl">{modelName || 'Auto'}</strong>
           </span>
@@ -152,7 +165,7 @@ export default function AgentArena({
             </div>
 
             <p className="text-sm text-slate-300 leading-relaxed font-sans mb-6">
-              Welcome to the Kratos Agent web console. This platform integrates multi-step reasoning, autonomous tool execution loops, self-healing test verification, and global Cloudflare D1 persistence.
+              Welcome to the Kratos Agent console. Plan multi-step tasks, use configured tools, and review session history and execution events.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -169,10 +182,10 @@ export default function AgentArena({
               <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 hover:border-cyan-500/40 transition">
                 <div className="flex items-center gap-2 mb-1.5 text-cyan-400 font-rajdhani font-bold text-xs uppercase tracking-wider">
                   <Terminal className="w-4 h-4" />
-                  <span>Edge Socket Tunnel</span>
+                  <span>Connected Tools</span>
                 </div>
                 <p className="text-xs text-slate-400">
-                  Direct raw TCP socket communication for seamless bypass of edge port limits.
+                  Use browser, terminal, and desktop tools through Kratos's configured runtimes.
                 </p>
               </div>
 
@@ -182,13 +195,13 @@ export default function AgentArena({
                   <span>Cloudflare D1</span>
                 </div>
                 <p className="text-xs text-slate-400">
-                  All conversations, turns, and agentic trace events are permanently indexed.
+                  Explore saved sessions, turns, and execution events in the console.
                 </p>
               </div>
             </div>
 
             <div className="mt-6 text-center text-xs font-rajdhani text-slate-400">
-              Click a demo shortcut above or enter your instruction below to command Kratos Agent.
+              Click a demo shortcut above, type <code className="inline-code">/vision screen</code>, or enter an instruction below.
             </div>
           </div>
         ) : (
@@ -286,6 +299,36 @@ export default function AgentArena({
 
       {/* Input Dock */}
       <div className="flex-shrink-0 p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
+        <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1" aria-label="Vision controls">
+          <span className="inline-flex items-center gap-1.5 mr-1 text-[11px] font-code text-cyan-300">
+            <Eye className="w-3.5 h-3.5" />
+            <code>/vision</code>
+          </span>
+          {[
+            ['camera', 'CAM'],
+            ['screen', 'SCREEN'],
+            ['both', 'BOTH'],
+            ['none', 'OFF'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => changeVisionMode(mode)}
+              disabled={isExecuting}
+              aria-pressed={visionMode === mode || (mode === 'none' && visionMode === 'off')}
+              title={`/vision ${mode === 'none' ? 'off' : mode}`}
+              className={`rounded-md border px-2 py-1 text-[9px] font-code tracking-wider transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:opacity-50 ${
+                visionMode === mode || (mode === 'none' && visionMode === 'off')
+                  ? 'border-cyan-400/60 bg-cyan-400/15 text-cyan-200 shadow-[0_0_10px_rgba(0,243,255,0.12)]'
+                  : 'border-white/10 bg-black/20 text-slate-400 hover:border-cyan-400/40 hover:text-cyan-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="ml-auto text-[10px] font-code text-slate-500">type /vision [mode]</span>
+        </div>
+        {visionError && <p role="status" className="mb-2 px-1 text-xs text-rose-300">{visionError}</p>}
         <div className="relative flex items-end gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-700/80 focus-within:border-pink-500/60 focus-within:shadow-[0_0_20px_rgba(255,0,127,0.25)] transition duration-200">
           
           <div className="pb-2.5 pl-2 text-pink-400 font-code text-xs select-none flex items-center gap-1">
@@ -342,7 +385,7 @@ export default function AgentArena({
           <div className="flex items-center gap-1.5 ml-auto">
             <span className="text-slate-500">MODE:</span>
             <span className={`font-bold tracking-wider ${isAgentMode ? 'text-pink-400' : 'text-cyan-400'}`}>
-              {isAgentMode ? 'FULL AUTONOMOUS (AGENT)' : 'NORMAL CHAT (EDGE)'}
+              {isAgentMode ? 'AGENT TASK MODE' : 'DIRECT CHAT'}
             </span>
           </div>
         </div>

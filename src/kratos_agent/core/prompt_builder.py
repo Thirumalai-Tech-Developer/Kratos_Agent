@@ -45,6 +45,8 @@ On Windows, generate PowerShell-compatible commands when PowerShell is active.
 
 For creating or modifying text/code/files, ALWAYS prefer the direct file tools (write_file, edit_file) instead of shell echo, cmd /c echo, redirection, or large inline PowerShell strings.
 Never pipe large HTML/CSS/JS/JSON payloads through cmd.exe.
+Use self_tool_creator only when the user explicitly asks for a new reusable Kratos tool. Never use it to create one-off project files or to work around a rejected shell command when existing file tools can do the job.
+For artifact tasks, inspect only what is needed and begin writing once requirements are clear. Do not repeat searches for individual selectors; after a few relevant inspections, use write_file/edit_file to produce the requested deliverable.
 Use terminal tools for process execution, package installs, builds, tests, and other operations that genuinely require a shell.
 Never execute a script until its file exists and has been verified.
 

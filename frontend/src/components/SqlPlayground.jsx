@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Database, Table, Clock, AlertCircle } from 'lucide-react';
+import { Play, Database, Table, AlertCircle } from 'lucide-react';
 
 const PRESETS = [
   { label: 'Recent Sessions', sql: 'SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 10;' },

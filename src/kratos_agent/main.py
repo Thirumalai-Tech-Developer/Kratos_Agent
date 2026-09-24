@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import logging
 import threading
 from pathlib import Path
 from typing import Any, Dict, List
@@ -20,6 +21,7 @@ from kratos_agent.core.event_store import EventStore
 from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
 from kratos_agent.core.memory import memory
 from kratos_agent.core.mcp_runtime import McpManager
+from kratos_agent.core.framework_runtime import ExternalAgentFrameworks
 from kratos_agent.core.provider_runtime import BrainAdapter
 from kratos_agent.core.runtime_contracts import ChatMessage, EventKind, RuntimeEvent, ToolPermission
 from kratos_agent.core.skills import skill_manager
@@ -40,6 +42,8 @@ from kratos_agent.core.harness.plugins import (
 
 from kratos_agent.core.prompt_builder import CORE_PROMPT_V2
 from kratos_agent.memory import get_memory_manager
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 DEFAULT_MODEL = get_default_model()
@@ -152,13 +156,19 @@ class KratosRuntime:
         self.workspace = (workspace or Path.cwd()).resolve()
         self.model_name = model_name
         self.skill_manager = skill_manager
+        self.skill_manager.set_workspace(self.workspace)
         self.memory = memory
         self.d1_db = getattr(self.memory, "d1_db", None) or getattr(self.memory, "db", None)
         self.instructions = InstructionEngine()
         self._register_instruction_modules()
         self.context = ContextBuilder(ContextBudget())
         self.tools_registry = legacy_tool_registry(self.workspace)
-        self.mcp = McpManager(self.workspace / ".kratos" / "mcp.json")
+        self.mcp = McpManager(self.workspace / ".kratos" / "mcp.json", self.workspace)
+        self.frameworks = ExternalAgentFrameworks(self.workspace)
+        self.frameworks.register_tools(self.tools_registry)
+        for server_name, status in self.mcp.discover_enabled(self.tools_registry).items():
+            if status.get("state") == "error":
+                logger.warning("MCP server %s unavailable (%s); Kratos will continue startup.", server_name, status.get("error"))
         self.tools = self.tools_registry.specs()  # Existing CLI compatibility.
         self.brain = BrainChatModel(model=self.model_name)
         self.model = BrainAdapter(self.model_name, self.brain.client)
@@ -210,6 +220,8 @@ class KratosRuntime:
         self.instructions.register(InstructionModule("core-safety", "system", lambda: (
             "You are Kratos, an autonomous terminal coding agent. You directly execute actions using tools. "
             "CRITICAL: Never output statements describing what you will do or intend to do (e.g. 'I will inspect the workspace', 'I am going to create the files') without immediately providing the corresponding tool call in the same response. "
+            "Use self_tool_creator only when the user explicitly requests a new reusable Kratos tool; never use it for one-off project files or as a workaround when existing file tools can complete the task. "
+            "Use delegate_to_framework only when the user explicitly asks to use OpenClaw or Claude Code; external frameworks run with their own configured permissions and credentials. "
             "Directly invoke tools to perform inspection, file creation, code edits, terminal commands, and verification."
         ), 10))
         self.instructions.register(InstructionModule("plan-mode-directive", "system", lambda: (
@@ -342,8 +354,18 @@ class KratosRuntime:
 
     def reload_tools(self) -> None:
         self.tools_registry = legacy_tool_registry(self.workspace)
+        self.frameworks.register_tools(self.tools_registry)
+        self.mcp.load()
+        self.mcp.discover_enabled(self.tools_registry)
         self.tools = self.tools_registry.specs()
         self.loop.tools = self.tools_registry
+
+    def import_integration(self, source: str) -> Dict[str, Any]:
+        """Import interoperable MCP/Agent Skills surfaces from a framework bundle."""
+        imported = self.frameworks.import_integration(source, self.mcp, self.skill_manager)
+        self.reload_tools()
+        imported["connected_servers"] = dict(self.mcp.status)
+        return imported
 
     def set_model(self, model_name: str) -> None:
         self.model_name = model_name

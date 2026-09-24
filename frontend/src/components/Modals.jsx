@@ -194,7 +194,7 @@ export function PayloadModal({ isOpen, onClose, event }) {
   try {
     const payload = typeof event.payload_json === 'string' ? JSON.parse(event.payload_json) : event.payload_json;
     formattedJson = JSON.stringify(payload, null, 2);
-  } catch (_) {
+    } catch {
     formattedJson = String(event.payload_json || '');
   }
 

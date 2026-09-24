@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, Wrench, Terminal, Database, Server, RefreshCw, X, Shield, Search } from 'lucide-react';
+import { Cpu, Wrench, Terminal, RefreshCw, X, Search } from 'lucide-react';
 
 export default function AgentHud({
   currentStep,
@@ -7,8 +7,7 @@ export default function AgentHud({
   tools,
   onRefreshTools,
   isOpen,
-  onClose,
-  telemetry
+  onClose
 }) {
   const [toolSearch, setToolSearch] = useState('');
 

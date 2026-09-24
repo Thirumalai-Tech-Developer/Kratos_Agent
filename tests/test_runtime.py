@@ -19,6 +19,30 @@ class ScriptedModel:
 
 
 class RuntimeLoopTests(unittest.TestCase):
+    def test_nonzero_terminal_exit_is_a_tool_error(self):
+        tools = ToolRegistry()
+        tools.register(
+            ToolSpec("run_terminal_command", "run command", {}, ToolPermission.EXECUTE),
+            lambda: "ParserError: bad quote\nExit Code: 1",
+        )
+        result = tools.execute(
+            ToolCall("run_terminal_command", {}),
+            lambda spec, args: (True, "allowed"),
+        )
+        self.assertTrue(result.is_error)
+
+    def test_structured_terminal_rejection_is_a_tool_error(self):
+        tools = ToolRegistry()
+        tools.register(
+            ToolSpec("run_terminal_command", "run command", {}, ToolPermission.EXECUTE),
+            lambda: '{"ok": false, "code": "SOURCE_AS_COMMAND"}',
+        )
+        result = tools.execute(
+            ToolCall("run_terminal_command", {}),
+            lambda spec, args: (True, "allowed"),
+        )
+        self.assertTrue(result.is_error)
+
     def test_tool_result_is_fed_back_before_final_response(self):
         instructions = InstructionEngine()
         instructions.register(InstructionModule("base", "system", lambda: "test"))
