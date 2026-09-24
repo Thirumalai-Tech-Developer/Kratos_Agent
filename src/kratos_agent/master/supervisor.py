@@ -179,6 +179,12 @@ class MasterSupervisor:
                     MissionState.VERIFYING,
                     message="Master received Slave result; verifying evidence.",
                 )
+                if result.status == "success" and result.verified:
+                    mission.transition(MissionState.COMPLETED, message="Slave result was verified successfully.")
+                elif result.status == "cancelled":
+                    mission.transition(MissionState.CANCELLED, message="Mission was cancelled.")
+                elif result.status == "failed":
+                    mission.transition(MissionState.FAILED, message="Slave execution failed.")
             with self._lock:
                 self.last_result = result_dict
                 self.last_completed_at = time.time()
