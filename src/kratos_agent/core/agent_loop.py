@@ -579,7 +579,7 @@ class AgentLoop:
         self,
         history: List[ChatMessage],
         allow_tool: Callable[..., tuple[bool, str]],
-        max_steps: int = 24,
+        max_steps: Optional[int] = None,
         resume_plan: Optional[ExecutionPlan] = None,
     ) -> tuple[str, List[ChatMessage]]:
         turn_id = uuid.uuid4().hex
@@ -673,7 +673,9 @@ class AgentLoop:
         conversational_nudge_count = 0
 
         # 3. Execution Phase Loop
-        for step in range(max_steps):
+        step = 0
+        while max_steps is None or step < max_steps:
+            step += 1
             # Check cancellation flag
             if self.cancellation_flag.is_set():
                 if self.current_plan:
@@ -1079,7 +1081,11 @@ class AgentLoop:
                         metadata={"is_error": result.is_error, "truncated": result.truncated},
                     ))
 
-        message = f"Stopped after {max_steps} agent steps to prevent an unbounded tool loop."
+        message = (
+            f"Stopped after {max_steps} agent steps to prevent an unbounded tool loop."
+            if max_steps is not None
+            else "Agent execution stopped before completion."
+        )
         if self.current_plan:
             self.current_plan.pause_running_tasks("Step limit reached")
             self.current_plan.state = AgentState.FAILED
