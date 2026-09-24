@@ -7,6 +7,9 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
+# Load .env before modules that initialize global configuration.
+load_dotenv()
+
 from kratos_agent.brain import BrainChatModel, get_default_model
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
