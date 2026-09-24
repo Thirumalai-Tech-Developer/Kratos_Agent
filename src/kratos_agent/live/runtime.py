@@ -145,7 +145,7 @@ class LiveRuntime:
                 self._loop,
             )
 
-    def send_chat_turn_sync(self, text: str, timeout: float = 45.0) -> Optional[str]:
+    def send_chat_turn_sync(self, text: str, timeout: float = 600.0) -> Optional[str]:
         """Sends user text to Gemini Live synchronously, waits for turn completion, and returns the spoken text."""
         if not self._loop or not self._loop.is_running() or not self.session:
             return None

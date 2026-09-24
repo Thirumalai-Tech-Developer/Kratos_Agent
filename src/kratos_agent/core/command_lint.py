@@ -21,6 +21,29 @@ class QuoteBalanceError:
     quote: str
     index: int
 
+INLINE_SOURCE_PATTERNS = [
+    (re.compile(r"(?i)@(?:keyframes|property)\s+[a-zA-Z_-]+\s*\{"), "CSS source was embedded in the shell command."),
+    (re.compile(r"(?i)\b(?:import|export)\s+(?:React|default|const|function)\b"), "JavaScript/TypeScript source was embedded in the shell command."),
+    (re.compile(r"(?i)\b(?:createRoot|document\.querySelector|document\.createElement)\s*\("), "Browser JavaScript source was embedded in the shell command."),
+    (re.compile(r"(?i)<(?:html|head|body|div|script|style)\b"), "HTML source was embedded in the shell command."),
+    (re.compile(r"(?i)\b(?:Set-Content|Out-File|Add-Content)\b.*(?:\{|function|<script|@keyframes)"), "Source code was being transported through a PowerShell file-writing command."),
+]
+
+
+def contains_inline_source_code(cmd: str) -> Optional[str]:
+    """Detect source-code payloads that should use write_file/edit_file instead of a shell."""
+    stripped = cmd.strip()
+    if len(stripped) < 280:
+        return None
+    for pattern, reason in INLINE_SOURCE_PATTERNS:
+        if pattern.search(stripped):
+            return reason
+    if re.search(r"(?i)\b(?:node|node\.exe)\s+-e\s+|\b(?:python|python3|py)(?:\.exe)?\s+-c\s+", stripped):
+        return "A long inline script was embedded in the shell command."
+    if len(stripped) > 1800 and any(tok in stripped for tok in ("{", "}", "=>", "function", "const ", "let ", "var ")):
+        return "The command is large enough to be source transport rather than a normal shell command."
+    return None
+
 KNOWN_BAD = [
     (re.compile(r"\brm\s+-[a-zA-Z]*rf?\s+/\s*$", re.IGNORECASE), "Dangerous command: recursive root removal 'rm -rf /' is forbidden."),
     (re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE), "Dangerous command: disk formatting is forbidden."),
@@ -119,7 +142,25 @@ def lint_command(cmd: str, shell: str = "powershell") -> LintResult:
                 hint="Do not execute destructive commands targeting system roots or formatting drives.",
             )
 
-    # 2. Quote balance, per dialect
+    # 2. Reject source-code transport before the shell parser sees it.
+    inline_source = contains_inline_source_code(cmd)
+    if inline_source:
+        return LintResult(
+            ok=False,
+            problems=[inline_source],
+            shell=shell,
+            code="SOURCE_AS_COMMAND",
+            suggestion={
+                "recommended_tools": ["write_file", "edit_file"],
+                "reason": "Write source directly to a UTF-8 file, then run a short build/test command.",
+            },
+            hint=(
+                "Do not transport application source through PowerShell, cmd.exe, node -e, or python -c. "
+                "Use write_file/edit_file for the source, then run a short verification command."
+            ),
+        )
+
+    # 3. Quote balance, per dialect
     bal = quote_balance(cmd, shell)
     if bal is not None:
         idx = bal.index

@@ -455,7 +455,7 @@ class LiveSession:
         except Exception as e:
             logger.warning(f"[LiveSession] Error sending text input: {e}")
 
-    async def send_text_turn(self, text: str, timeout: float = 30.0) -> str:
+    async def send_text_turn(self, text: str, timeout: float = 600.0) -> str:
         """Sends user text as a complete turn to Gemini Live and waits for model turn completion."""
         if self.session is None or not text.strip():
             return ""

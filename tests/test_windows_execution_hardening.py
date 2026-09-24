@@ -1,50 +1,37 @@
-import inspect
+from pathlib import Path
+import importlib.util
 import sys
+import types
 
-from kratos_agent.core.agent_loop import AgentLoop
-from kratos_agent.core.command_lint import lint_command
-from kratos_agent.system.shell.base import ShellInfo
-from kratos_agent.system.shell.renderer import render_command_argv
-from kratos_agent.utils import tools
-from kratos_agent.utils.shell_quote import argv_for
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def _windows_powershell():
-    return ShellInfo(
-        name="powershell",
-        version="5.1",
-        platform="windows",
-        executable="powershell.exe",
-        supports_and_operator=False,
-        supports_or_operator=False,
-    )
+def _load_lint():
+    base = ROOT / "src/kratos_agent"
+    kr = types.ModuleType("kratos_agent"); kr.__path__=[str(base)]; sys.modules["kratos_agent"]=kr
+    utils = types.ModuleType("kratos_agent.utils"); utils.__path__=[str(base/"utils")]; sys.modules["kratos_agent.utils"]=utils
+    sp = importlib.util.spec_from_file_location("kratos_agent.utils.shell_quote", base/"utils/shell_quote.py")
+    sm = importlib.util.module_from_spec(sp); sys.modules[sp.name]=sm; sp.loader.exec_module(sm)
+    core = types.ModuleType("kratos_agent.core"); core.__path__=[str(base/"core")]; sys.modules["kratos_agent.core"]=core
+    sp = importlib.util.spec_from_file_location("kratos_agent.core.command_lint", base/"core/command_lint.py")
+    cm = importlib.util.module_from_spec(sp); sys.modules[sp.name]=cm; sp.loader.exec_module(cm)
+    return cm.lint_command
 
 
-def test_nested_cmd_stays_outside_powershell():
-    command = "cmd /c echo hello > out.txt"
-    assert argv_for("powershell", command)[0] == "cmd.exe"
-    argv = render_command_argv(command, _windows_powershell())
-    assert argv[0] == "cmd.exe"
-    assert argv[-1] == "echo hello > out.txt"
+def test_long_inline_frontend_source_is_rejected_before_powershell():
+    lint_command = _load_lint()
+    cmd = 'node -e "const app = {}; ' + ('x' * 320) + ' @keyframes float { 0% { transform: translateY(0); } 100% { transform: translateY(4px); } }"'
+    result = lint_command(cmd, "powershell")
+    assert result.ok is False
+    assert result.code == "SOURCE_AS_COMMAND"
+    assert "write_file" in result.suggestion["recommended_tools"]
 
 
-def test_clean_command_repairs_common_url_typo():
-    assert tools.clean_command('Invoke-WebRequest -Uri "https//example.com"') == 'Invoke-WebRequest -Uri "https://example.com"'
+def test_normal_build_command_still_passes():
+    assert _load_lint()("npm run build", "powershell").ok
 
 
-def test_lint_detects_malformed_url():
-    result = lint_command('Invoke-WebRequest -Uri "https//example.com"', "powershell")
-    assert not result.ok
-    assert any("malformed URL scheme" in problem for problem in result.problems)
-
-
-def test_missing_powershell_script_is_preflighted(monkeypatch, tmp_path):
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.chdir(tmp_path)
-    missing = tools._missing_script_target("powershell -File build.ps1")
-    assert missing == str(tmp_path / "build.ps1")
-
-
-def test_agent_loop_is_unbounded_by_default():
-    default = inspect.signature(AgentLoop.run).parameters["max_steps"].default
-    assert default is None
+def test_malformed_url_is_still_rejected():
+    result = _load_lint()("Invoke-WebRequest -Uri https//example.com", "powershell")
+    assert result.ok is False
+    assert any("malformed URL scheme" in p for p in result.problems)

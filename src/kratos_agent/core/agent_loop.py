@@ -63,6 +63,26 @@ READ_ONLY_TOOLS = {
     "list_skills",
     "spawn_subagent",
     "get_web_trace",
+    # Desktop/browser read-only perception can run together; they do not mutate workspace state.
+    "active_window_info",
+    "app_list_running",
+    "computer_file_list",
+    "computer_file_read",
+    "computer_process_list",
+    "computer_browser_read",
+    "computer_window_list",
+    "computer_observe",
+    "computer_inspect",
+    "computer_find",
+    "browser_read",
+    "browser_state",
+    "browser_snapshot_dom",
+    "detect_blockers",
+    "disk_info",
+    "display_info",
+    "ui_find",
+    "ui_find_all",
+    "ui_read_element",
 }
 
 # Tools that must run in isolation (sequential barriers)

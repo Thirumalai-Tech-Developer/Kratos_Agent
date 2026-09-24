@@ -6,6 +6,8 @@ import json
 import re
 import time
 import difflib
+import shutil
+from typing import Any, Callable, Dict, List, Optional, Tuple
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from pathlib import Path
@@ -65,8 +67,6 @@ def clean_command(cmd_str: str) -> str:
     cleaned = re.sub(r'^[a-zA-Z0-9_-]+\s*[:=]\s*\{?', '', cleaned).strip()
     cleaned = re.sub(r'^\{?\s*["\']?(?:command|direct_command|package_name)["\']?\s*[:=]\s*["\']?', '', cleaned).strip()
     cleaned = cleaned.strip()
-    cleaned = re.sub(r"(?i)\bhttps//", "https://", cleaned)
-    cleaned = re.sub(r"(?i)\bhttp//", "http://", cleaned)
     return cleaned
 
 def is_persistent_server_command(command: str) -> bool:
@@ -236,8 +236,16 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
             "error :",
             "is not recognized as an internal or external command",
         ]
-        if any(p in full_output for p in parse_error_patterns):
+        parse_error_detected = any(p in full_output for p in parse_error_patterns)
+        if parse_error_detected:
             output_parts.append("[PARSE_ERROR DETECTED]: The shell reported a syntax, terminator, or parser error.")
+            output_parts.append(
+                "[RECOVERY]: Stop retrying the same shell string. Inspect the current UI with computer_visual_diagnose "
+                "when the failure is visible, use write_file/edit_file for source code, then re-run a short build/test command."
+            )
+            output_parts.append(
+                "[TOOL_TRACE]: command -> terminal_result -> (computer_visual_diagnose | read_file | write_file/edit_file) -> verify_project -> retry"
+            )
 
         output_parts.append(f"Exit Code: {proc.returncode}")
         
@@ -261,6 +269,134 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
     except Exception as e:
         step_tracker.fail(f"[bold red]Execution error[/bold red]", str(e))
         return f"Error executing terminal command: {e}"
+
+def verify_project(project_path: str = ".", timeout: int = 300) -> str:
+    """Run deterministic project-level build/typecheck/test checks without shell interpolation."""
+    target = Path(project_path).expanduser().resolve()
+    if not target.exists() or not target.is_dir():
+        return json.dumps({"ok": False, "code": "PROJECT_NOT_FOUND", "project": str(target)}, indent=2)
+
+    commands: list[tuple[str, list[str]]] = []
+    package = target / "package.json"
+    if package.exists():
+        try:
+            data = json.loads(package.read_text(encoding="utf-8"))
+            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+        except Exception as exc:
+            return json.dumps({"ok": False, "code": "INVALID_PACKAGE_JSON", "error": str(exc)}, indent=2)
+        npm = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+        if "typecheck" in scripts:
+            commands.append(("npm run typecheck", [npm, "run", "typecheck"]))
+        elif (target / "tsconfig.json").exists():
+            npx = shutil.which("npx.cmd") or shutil.which("npx")
+            if npx:
+                commands.append(("npx tsc --noEmit", [npx, "tsc", "--noEmit"]))
+        if "lint" in scripts:
+            commands.append(("npm run lint", [npm, "run", "lint"]))
+        if "build" in scripts:
+            commands.append(("npm run build", [npm, "run", "build"]))
+        if "test" in scripts:
+            commands.append(("npm test", [npm, "test"]))
+
+    if not commands:
+        pyproject = target / "pyproject.toml"
+        if pyproject.exists():
+            python = shutil.which("python") or shutil.which("python3") or "python"
+            commands.append(("python -m compileall -q .", [python, "-m", "compileall", "-q", "."]))
+            if (target / "tests").exists():
+                pytest_bin = shutil.which("pytest")
+                if pytest_bin:
+                    commands.append(("pytest -q", [pytest_bin, "-q"]))
+
+    if not commands:
+        return json.dumps({
+            "ok": False,
+            "code": "NO_VERIFICATION_SCRIPT",
+            "project": str(target),
+            "hint": "No deterministic build/test entry point was discovered. Inspect the project manifest first.",
+        }, indent=2)
+
+    report = []
+    all_ok = True
+    for label, argv in commands:
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=str(target),
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                env={**os.environ, "CI": "1", "NO_COLOR": "1"},
+            )
+            out = (proc.stdout or proc.stderr or "").strip()
+            ok = proc.returncode == 0
+            all_ok = all_ok and ok
+            report.append({
+                "command": label,
+                "argv": argv,
+                "ok": ok,
+                "exit_code": proc.returncode,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "output": out[-5000:],
+            })
+            if not ok:
+                break
+        except subprocess.TimeoutExpired as exc:
+            all_ok = False
+            report.append({
+                "command": label,
+                "argv": argv,
+                "ok": False,
+                "code": "TIMEOUT",
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "output": str(exc),
+            })
+            break
+        except Exception as exc:
+            all_ok = False
+            report.append({"command": label, "argv": argv, "ok": False, "code": type(exc).__name__, "output": str(exc)})
+            break
+
+    return json.dumps({
+        "ok": all_ok,
+        "code": "VERIFIED" if all_ok else "VERIFICATION_FAILED",
+        "project": str(target),
+        "checks": report,
+        "recovery_tools": [] if all_ok else ["read_file", "write_file", "edit_file", "run_terminal_command", "computer_visual_diagnose"],
+    }, indent=2)
+
+
+def computer_visual_diagnose(include_ocr: bool = True) -> str:
+    """Build a fresh multimodal desktop diagnostic bundle for visual problem solving."""
+    result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
+    try:
+        result["active_window"] = json.loads(active_window_info())
+    except Exception as exc:
+        result["active_window_error"] = str(exc)
+    try:
+        result["display"] = json.loads(display_info())
+    except Exception as exc:
+        result["display_error"] = str(exc)
+    try:
+        result["screenshot"] = json.loads(screenshot_capture(downscale=0))
+    except Exception as exc:
+        result["screenshot_error"] = str(exc)
+    if include_ocr:
+        try:
+            text_out = screen_read_text()
+            result["screen_text"] = text_out[:6000]
+        except Exception as exc:
+            result["ocr_error"] = str(exc)
+    try:
+        result["ui_tree"] = json.loads(ui_tree_dump(max_nodes=200))
+    except Exception as exc:
+        result["ui_tree_error"] = str(exc)
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
 
 def clean_file_path(fp_str: str) -> str:
     """Cleans file paths from raw string prefixes, URL schemes, and quote artifacts, redirecting any scratch paths into the active workspace."""

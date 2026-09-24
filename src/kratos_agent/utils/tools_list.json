@@ -3407,6 +3407,42 @@
                     "content"
                 ]
             }
+        },
+        {
+            "name": "verify_project",
+            "description": "Runs deterministic project build/typecheck/test checks from the project manifest and returns structured failures for repair.",
+            "func_name": "verify_project",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_path": {
+                        "type": "string",
+                        "description": "Project directory to verify"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Per-check timeout in seconds"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "computer_visual_diagnose",
+            "description": "Captures a fresh visual diagnostic bundle: active window, display, screenshot reference, OCR text, and accessibility tree for visual problem solving.",
+            "func_name": "computer_visual_diagnose",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_ocr": {
+                        "type": "boolean",
+                        "description": "Include fresh OCR text from the screen"
+                    }
+                },
+                "required": [],
+                "additionalProperties": false
+            }
         }
     ]
 }

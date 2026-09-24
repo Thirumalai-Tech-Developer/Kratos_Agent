@@ -33,6 +33,33 @@ def screenshot_capture(monitor: int = 1, region: Optional[Dict[str, int]] = None
     data, ref = take_screenshot(monitor=monitor, region=r, include_cursor=include_cursor)
     return json.dumps({"ok": True, "frame_ref": ref, "bytes": len(data), "monitor": monitor, "width": 1920, "height": 1080}, indent=2)
 
+def computer_visual_diagnose(include_ocr: bool = True) -> str:
+    """Captures a fresh visual diagnostic bundle for semantic visual problem solving."""
+    result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
+    try:
+        result["active_window"] = json.loads(active_window_info())
+    except Exception as exc:
+        result["active_window_error"] = str(exc)
+    try:
+        result["display"] = json.loads(display_info())
+    except Exception as exc:
+        result["display_error"] = str(exc)
+    try:
+        result["screenshot"] = json.loads(screenshot_capture())
+    except Exception as exc:
+        result["screenshot_error"] = str(exc)
+    if include_ocr:
+        try:
+            result["screen_text"] = screen_read_text()[:6000]
+        except Exception as exc:
+            result["ocr_error"] = str(exc)
+    try:
+        result["ui_tree"] = json.loads(ui_tree_dump(max_nodes=200))
+    except Exception as exc:
+        result["ui_tree_error"] = str(exc)
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 def screen_read_text(region: Optional[Dict[str, int]] = None, monitor: int = 1,
                      lang: str = "en", dedupe: bool = False) -> str:
     """Runs OCR on the current screen or specified region."""
