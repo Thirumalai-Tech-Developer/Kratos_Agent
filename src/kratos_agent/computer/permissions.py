@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import sys
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from kratos_agent.computer.state import ComputerAction
 
@@ -29,7 +29,16 @@ class ComputerPermissionPolicy:
     ]
 
     def check_permission(self, action: ComputerAction) -> Tuple[bool, str]:
-        """Checks whether the requested computer action is permitted under current policy."""
+        """Checks computer actions; Sovereign removes app-level permission gates."""
+        try:
+            from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+            if approval_gate.mode is ApprovalMode.SOVEREIGN:
+                approval_gate._audit.record(action.action, str(action.parameters), "ALLOW", "sovereign")
+                return True, "sovereign"
+        except Exception:
+            pass
+
+        # Non-Sovereign modes retain the existing policy.
         # 1. Self-preservation and system corruption checks
         params_str = str(action.parameters).lower()
         for forbidden in self.FORBIDDEN_PATTERNS:
