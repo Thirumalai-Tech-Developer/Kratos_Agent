@@ -85,6 +85,10 @@ def argv_for(shell: str, script_or_command: str, *, prefer_encoded: bool = True)
     """Build a shell=False argv for `script_or_command` in the given dialect."""
     s = shell.lower().removesuffix(".exe")
     if s in ("powershell", "pwsh") and prefer_encoded:
+        # An explicit nested cmd.exe must not be parsed by the outer PowerShell.
+        nested_cmd = re.match(r"^\s*cmd(?:\.exe)?\s+(?:/d\s+)?/c\s+(.+)$", script_or_command, re.IGNORECASE | re.DOTALL)
+        if nested_cmd:
+            return ["cmd.exe", "/d", "/s", "/c", nested_cmd.group(1)]
         return (powershell_encoded if s == "powershell" else pwsh_encoded)(script_or_command)
     if s in ("bash", "sh", "zsh"):
         return [s, "-c", script_or_command]
