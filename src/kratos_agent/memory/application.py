@@ -1,7 +1,7 @@
 """Application memory for app-specific facts, shortcuts, and quirks."""
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
