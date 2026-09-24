@@ -64,8 +64,9 @@ def clean_command(cmd_str: str) -> str:
     cleaned = re.split(r'\n?\s*(?:Tool Inputs:?|```)', cleaned)[0].strip()
     cleaned = re.sub(r'^[a-zA-Z0-9_-]+\s*[:=]\s*\{?', '', cleaned).strip()
     cleaned = re.sub(r'^\{?\s*["\']?(?:command|direct_command|package_name)["\']?\s*[:=]\s*["\']?', '', cleaned).strip()
-    cleaned = cleaned.rstrip('"} \t\n').lstrip('"{ \t\n')
-    cleaned = re.sub(r'^\s*[`"\']+|[`"\']+\s*$', '', cleaned).strip()
+    cleaned = cleaned.strip()
+    cleaned = re.sub(r"(?i)\bhttps//", "https://", cleaned)
+    cleaned = re.sub(r"(?i)\bhttp//", "http://", cleaned)
     return cleaned
 
 def is_persistent_server_command(command: str) -> bool:
@@ -113,6 +114,14 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
         command = " ".join(argv)
     else:
         command = clean_command(command)
+        missing_script = _missing_script_target(command)
+        if missing_script:
+            return json.dumps({
+                "ok": False,
+                "code": "SCRIPT_NOT_FOUND",
+                "problems": [f"Script target does not exist: {missing_script}"],
+                "hint": "Create the script with write_file first, verify it exists, then execute it.",
+            }, indent=2)
         # Pre-flight command linter before execution
         lint = lint_command(command, shell_dialect)
         if not lint.ok:
@@ -280,6 +289,22 @@ def clean_file_path(fp_str: str) -> str:
         cleaned = norm_path
 
     return cleaned.lstrip("/")
+
+def _missing_script_target(command: str) -> Optional[str]:
+    """Detect an explicit PowerShell -File target that does not exist yet."""
+    if sys.platform != "win32":
+        return None
+    match = re.search(r"""(?i)(?:^|\s)-(?:file|f)\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))""", command)
+    if not match:
+        return None
+    target = next((group for group in match.groups() if group), "").strip()
+    if not target:
+        return None
+    target_path = Path(target).expanduser()
+    if not target_path.is_absolute():
+        target_path = Path.cwd() / target_path
+    return str(target_path) if not target_path.exists() else None
+
 
 def write_file(file_path: str, content: str) -> str:
     """

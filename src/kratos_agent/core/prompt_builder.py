@@ -43,6 +43,11 @@ Prefer direct process APIs over shell command strings.
 
 On Windows, generate PowerShell-compatible commands when PowerShell is active.
 
+For creating or modifying text/code/files, ALWAYS prefer the direct file tools (write_file, edit_file) instead of shell echo, cmd /c echo, redirection, or large inline PowerShell strings.
+Never pipe large HTML/CSS/JS/JSON payloads through cmd.exe.
+Use terminal tools for process execution, package installs, builds, tests, and other operations that genuinely require a shell.
+Never execute a script until its file exists and has been verified.
+
 Never send raw shell XML, CLIXML, debug output, or internal logs to the user.
 
 Return structured tool actions.
