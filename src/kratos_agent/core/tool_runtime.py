@@ -181,7 +181,13 @@ class ToolRegistry:
         return True, "allowed"
 
     def _forbidden_target(self, call: ToolCall) -> tuple[bool, str]:
-        """Self-preservation invariants that block destructive actions against Kratos itself."""
+        """Return application-level target blocks outside Sovereign mode."""
+        try:
+            from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+            if approval_gate.mode is ApprovalMode.SOVEREIGN:
+                return False, ""
+        except Exception:
+            pass
         args_str = json.dumps(call.arguments).lower()
         if call.name in ("run_terminal_command", "app_launch", "system_elevate"):
             if any(x in args_str for x in ["taskkill /f /im kratos", "killall kratos", "format c:", "mkfs"]):
@@ -204,6 +210,9 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
     """Adapt existing curated Kratos tools without exposing arbitrary Python code."""
     from kratos_agent.utils import tools as legacy
     from kratos_agent.utils import computer_tools
+    # Computer Control Subsystem tools live in dedicated modules.
+    from kratos_agent.computer.tools import browser_tools, computer_tools as ccs_computer_tools
+    from kratos_agent.computer.tools import gui_tools, system_tools
     # Tools are shipped with Kratos; the workspace is the *target* project and
     # must not be required to contain the Kratos source tree.
     manifest = Path(__file__).resolve().parents[1] / "utils" / "tools_list.json"
@@ -214,6 +223,11 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
         handler = getattr(legacy, function_name, None)
         if handler is None:
             handler = getattr(computer_tools, function_name, None)
+        if handler is None:
+            for module in (browser_tools, ccs_computer_tools, gui_tools, system_tools):
+                handler = getattr(module, function_name, None)
+                if handler is not None:
+                    break
         if handler is None:
             continue
         name = item.get("name", function_name)
