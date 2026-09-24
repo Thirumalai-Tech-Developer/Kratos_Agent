@@ -83,7 +83,7 @@ class KratosBridge:
                 constraints=constrs,
                 expected_result=exp_res,
                 priority=priority,
-                timeout=timeout,
+                timeout=(max(timeout, 600.0) if (wait_for_result and capability in {"", "generic_task", "auto", "null", "none"}) else timeout),
                 context={
                     "visual_context": visual_context,
                     "request_id": request_id,
@@ -91,6 +91,7 @@ class KratosBridge:
                     "tool_call_id": tool_call_id,
                 },
                 force=force,
+                wait_for_result=wait_for_result,
             )
         except Exception as exc:
             error = error_from_exception(
