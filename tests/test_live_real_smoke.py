@@ -3,9 +3,9 @@
 Run on a real Kratos host with Python 3.14+ and Gemini credentials:
     KRATOS_RUN_LIVE_TESTS=1 pytest -q tests/test_live_real_smoke.py -s
 
-The smoke test uses a harmless `observe` tool backed by synthetic dimensions, so it
-verifies the real Gemini Live connection, function-call round trip, async tool
-response, and Extended Thinking interaction lifecycle without changing the desktop.
+The smoke test sends text and checks that Gemini returns its requested spoken
+transcript and playable PCM audio. It does not open the microphone or screen
+capture devices.
 """
 import asyncio
 import os
@@ -19,7 +19,7 @@ import unittest
     "Set KRATOS_RUN_LIVE_TESTS=1 to run the opt-in network smoke test",
 )
 class RealGeminiLiveSmokeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_real_gemini_live_observe_roundtrip(self):
+    async def test_real_gemini_live_audio_roundtrip(self):
         from kratos_agent.live.config import LiveConfig
         from kratos_agent.live.events import LiveStatusHub
         from kratos_agent.live.router import LiveRouter
@@ -57,11 +57,24 @@ class RealGeminiLiveSmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.fail(f"Gemini Live did not connect: {status.get_status().last_error}")
 
             reply = await live.send_text_turn(
-                "Run the observe tool once, then reply with the exact token LIVE_SMOKE_OK.",
+                "Reply aloud with exactly the words LIVE_SMOKE_OK and no other words.",
                 timeout=35.0,
             )
-            self.assertIn("LIVE_SMOKE_OK", reply)
+            self.assertIn(
+                "LIVE_SMOKE_OK",
+                reply,
+                msg=f"Gemini Live turn failed: diagnostics={live.get_diagnostics()} errors={status.get_status().errors}",
+            )
             self.assertTrue(live.get_diagnostics()["connected"])
+
+            generated_chunks = []
+            while not audio.audio_in_queue.empty():
+                generated_chunks.append(audio.audio_in_queue.get_nowait())
+            generated_audio = b"".join(
+                chunk if isinstance(chunk, bytes) else bytes(chunk)
+                for chunk in generated_chunks
+            )
+            self.assertTrue(generated_audio, "Gemini Live should return playable speech audio")
         finally:
             await live.stop()
             await asyncio.gather(connection_task, return_exceptions=True)

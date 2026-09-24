@@ -225,11 +225,8 @@ class LiveSession:
         return "extended-thinking" in self.config.model.lower()
 
     def _build_connect_config(self) -> types.LiveConnectConfig:
-        return types.LiveConnectConfig(
+        config: Dict[str, Any] = dict(
             response_modalities=["AUDIO"],
-            thinking_config=types.ThinkingConfig(
-                thinking_level=self.config.thinking_level,
-            ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -250,6 +247,13 @@ class LiveSession:
                 parts=[types.Part.from_text(text=LIVE_SYSTEM_PROMPT)]
             ),
         )
+        # thinking_config is only accepted by Live models that expose extended
+        # thinking. Keep the same app config usable with the standard Live model.
+        if self._requires_interaction_status():
+            config["thinking_config"] = types.ThinkingConfig(
+                thinking_level=self.config.thinking_level,
+            )
+        return types.LiveConnectConfig(**config)
 
     async def send_realtime(self) -> None:
         """Sends microphone audio and video frames from out_queue to Gemini."""

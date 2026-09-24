@@ -77,7 +77,7 @@ class GUIBackend(abc.ABC):
         button: str = "left",
         clicks: int = 1,
     ) -> ActionResult:
-        """Clicks an element using its semantic bounds or native click."""
+        """Activates an element through a native semantic action."""
         pass
 
     @abc.abstractmethod

@@ -7,13 +7,11 @@ from dataclasses import dataclass, field
 from kratos_agent.computer.state import ComputerAction, ActionResult
 from kratos_agent.computer.gui.resolver import get_resolver
 from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
-from kratos_agent.computer.gui.input.mouse import MouseEngine
 from kratos_agent.computer.browser.manager import get_browser_manager
 from kratos_agent.computer.apps.launcher import get_launcher
 from kratos_agent.computer.apps.windows import get_window_manager
 from kratos_agent.computer.apps.adapters import find_adapter
 from kratos_agent.computer.apps.focus import get_active_window
-from kratos_agent.computer.vision.grounding import get_vision_grounding
 from kratos_agent.computer.recovery import get_recovery_engine
 from kratos_agent.computer.permissions import get_permission_policy
 from kratos_agent.core.errors import KratosError, create_kratos_error
@@ -62,13 +60,11 @@ class ActionExecutor:
     4. Semantic UI element
     5. Keyboard navigation
     6. Application-specific automation
-    7. Vision
-    8. Coordinate mouse
+    7. Vision for observation only (never for input positioning)
     """
 
     def __init__(self) -> None:
         self._keyboard = KeyboardEngine()
-        self._mouse = MouseEngine()
 
     def execute(self, action: ComputerAction) -> ActionResult:
         """Executes a computer action with permission checking, GUI lock, and automated multi-tier recovery (§33)."""
@@ -161,8 +157,12 @@ class ActionExecutor:
                     elif element.backend == "playwright":
                         from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
                         return PlaywrightBackend().click_element(element, button=params.get("button", "left"))
-                    elif element.center:
-                        return self._mouse.click(x=element.center.x, y=element.center.y, button=params.get("button", "left"))
+                    else:
+                        return ActionResult(
+                            ok=False,
+                            action=action.action,
+                            detail="Resolved control has no semantic action backend; coordinate input is disabled.",
+                        )
                 else:
                     # Type into element
                     if element.backend == "windows_uia":
@@ -171,9 +171,12 @@ class ActionExecutor:
                     elif element.backend == "playwright":
                         from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
                         return PlaywrightBackend().type_element(element, text=params.get("text", ""))
-                    elif element.center:
-                        self._mouse.click(x=element.center.x, y=element.center.y)
-                        return self._keyboard.type_text(params.get("text", ""))
+                    else:
+                        return ActionResult(
+                            ok=False,
+                            action=action.action,
+                            detail="Resolved control has no semantic text-entry backend; coordinate input is disabled.",
+                        )
 
             # Tier 3: Keyboard navigation
             elif tier == 3:
@@ -195,29 +198,6 @@ class ActionExecutor:
                         for action_key, shortcut in shortcuts.items():
                             if t_name in action_key or action_key in t_name:
                                 return self._keyboard.key_tap(shortcut.split("+"))
-
-            # Tier 5: Vision Grounding
-            elif tier == 5:
-                q = target.get("name") or target.get("text") or ""
-                if q:
-                    v_elem = get_vision_grounding().find_visual_target(q)
-                    if v_elem and v_elem.center:
-                        if act_name == "click":
-                            return self._mouse.click(x=v_elem.center.x, y=v_elem.center.y, button=params.get("button", "left"))
-                        else:
-                            self._mouse.click(x=v_elem.center.x, y=v_elem.center.y)
-                            return self._keyboard.type_text(params.get("text", ""))
-
-            # Tier 6: Coordinate fallback (only if coordinates explicitly present in target or params)
-            elif tier == 6:
-                x = params.get("x") or (target.get("center") or {}).get("x")
-                y = params.get("y") or (target.get("center") or {}).get("y")
-                if x is not None and y is not None:
-                    if act_name == "click":
-                        return self._mouse.click(x=x, y=y, button=params.get("button", "left"))
-                    else:
-                        self._mouse.click(x=x, y=y)
-                        return self._keyboard.type_text(params.get("text", ""))
 
         return ActionResult(ok=False, action=action.action, detail=f"Action could not be executed at tier {tier}")
 

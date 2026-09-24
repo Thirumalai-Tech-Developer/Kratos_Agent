@@ -26,6 +26,7 @@ export default function App() {
   const [sqlLoading, setSqlLoading] = useState(false);
   const [sqlError, setSqlError] = useState(null);
   const [liveStatus, setLiveStatus] = useState(null);
+  const [liveControlError, setLiveControlError] = useState(null);
 
   // Chat & Execution State
   const [messages, setMessages] = useState([]);
@@ -135,8 +136,14 @@ export default function App() {
       });
       if (res.ok) {
         setLiveStatus(await res.json());
+        setLiveControlError(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setLiveControlError(data.error || `Live control failed (${res.status})`);
       }
-    } catch {}
+    } catch (error) {
+      setLiveControlError(error.message || 'Could not reach the Live runtime.');
+    }
   };
 
   const setVisionMode = async (mode) => {
@@ -148,6 +155,7 @@ export default function App() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Vision mode request failed (${response.status})`);
     setLiveStatus(data);
+    setLiveControlError(null);
     return data.video_mode || mode;
   };
 
@@ -636,7 +644,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${liveStatus?.gemini_connected ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`}></span>
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${liveStatus?.gemini_connected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
               </span>
-              <span className={`font-pixl font-bold text-[10px] ${liveStatus?.gemini_connected ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <span title={liveControlError || liveStatus?.errors?.gemini || liveStatus?.last_error || 'Gemini Live status'} className={`font-pixl font-bold text-[10px] ${liveStatus?.gemini_connected ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {liveStatus?.gemini_connected ? 'LIVE' : 'LIVE IDLE'}
               </span>
             </div>
@@ -645,7 +653,8 @@ function parseThinkTags(rawContent, currentReasoning = '') {
 
             <button
               onClick={() => handleLiveControl('toggle_mute')}
-              title="Click to toggle microphone mute"
+              title={liveControlError || liveStatus?.errors?.microphone || (liveStatus?.muted ? 'Microphone muted. Click to unmute.' : 'Microphone is controlled by Gemini Live. Click to mute or unmute.')}
+              aria-label={liveStatus?.muted ? 'Unmute microphone' : 'Mute microphone'}
               className={`px-2 py-0.5 rounded text-[10px] font-pixl flex items-center gap-1 transition ${
                 liveStatus?.muted
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
@@ -653,8 +662,11 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               }`}
             >
               <span>🎤</span>
-              <span>{liveStatus?.muted ? 'MUTED' : (liveStatus?.microphone_active ? 'VOICE ON' : 'VOICE OFF')}</span>
+              <span>{liveStatus?.muted ? 'MUTED' : (liveStatus?.microphone_active ? (liveStatus?.gemini_connected ? 'MIC LIVE' : 'MIC LOCAL') : 'MIC OFF')}</span>
             </button>
+            <span className={`text-[9px] font-pixl ${liveStatus?.speaker_active ? 'text-emerald-300' : 'text-slate-500'}`} title={liveStatus?.errors?.speaker || 'Gemini speech playback'}>
+              OUT {liveStatus?.speaker_active ? 'ON' : 'OFF'}
+            </span>
 
             <button
               onClick={() => {
@@ -663,11 +675,12 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 const nextMode = modes[(currentIdx + 1) % modes.length];
                 handleLiveControl('set_vision_mode', nextMode);
               }}
-              title="Click to cycle vision source (camera -> screen -> both -> off)"
+              title={liveControlError || liveStatus?.errors?.camera || liveStatus?.errors?.screen || 'Click to cycle vision source (camera, screen, both, off)'}
+              aria-label={`Vision mode ${liveStatus?.video_mode || 'camera'}. Cycle camera, screen, both, or off.`}
               className="px-2 py-0.5 rounded text-[10px] font-pixl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 hover:bg-cyan-500/30 transition"
             >
               <span>👁</span>
-              <span>VISION: {liveStatus?.video_mode?.toUpperCase() || 'OFF'}</span>
+              <span>VISION: {liveStatus?.video_mode?.toUpperCase() || 'OFF'} · {liveStatus?.video_mode === 'camera' ? (liveStatus?.camera_active ? (liveStatus?.gemini_connected ? 'STREAM' : 'LOCAL') : 'OFF') : liveStatus?.video_mode === 'screen' ? (liveStatus?.screen_active ? (liveStatus?.gemini_connected ? 'STREAM' : 'LOCAL') : 'OFF') : liveStatus?.video_mode === 'both' ? (liveStatus?.camera_active && liveStatus?.screen_active ? (liveStatus?.gemini_connected ? 'STREAM' : 'LOCAL') : 'PARTIAL') : 'OFF'}</span>
             </button>
 
             <button

@@ -114,7 +114,7 @@ class LiveRuntime:
 
     def set_microphone_device(self, device: Optional[int | str]) -> str:
         """Dynamically switches active microphone device."""
-        if self._loop and self._loop.is_running():
+        if self._loop and self._loop.is_running() and self._is_running and self.config.is_valid():
             future = asyncio.run_coroutine_threadsafe(self.audio.set_device(device), self._loop)
             try:
                 return future.result(timeout=3.0)
@@ -216,14 +216,16 @@ class LiveRuntime:
         if self._is_running:
             return
 
-        if not self.config.is_valid():
-            err = "Gemini Live disabled or GEMINI_API_KEY / GOOGLE_API_KEY not found."
-            logger.warning(f"[LiveRuntime] {err}")
-            self.status_hub.update(last_error=err)
-            return
-
-        self._is_running = True
         self._loop = asyncio.get_running_loop()
+        self._is_running = True
+        if not self.config.is_valid():
+            if not self.config.enabled:
+                err = "Gemini Live is disabled by KRATOS_LIVE_ENABLED."
+            else:
+                err = "Gemini Live needs GEMINI_API_KEY or GOOGLE_API_KEY before audio can stream."
+            logger.warning(f"[LiveRuntime] {err}")
+            self.status_hub.report_error("gemini", err)
+            return
 
         logger.info("[LiveRuntime] Starting audio and vision subsystems...")
         await self.audio.start()
@@ -290,13 +292,20 @@ class LiveRuntime:
 
     def stop_background(self) -> None:
         """Signals the background LiveRuntime thread to stop."""
-        if self._loop and self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self.stop(), self._loop)
+        loop = self._loop
+        thread = self._thread
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(self.stop(), loop)
             try:
                 future.result(timeout=5.0)
             except Exception:
                 pass
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            loop.call_soon_threadsafe(loop.stop)
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=5.0)
+            if not thread.is_alive():
+                self._thread = None
+                self._loop = None
 
 
 # Global runtime instance

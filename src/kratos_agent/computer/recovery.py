@@ -16,8 +16,7 @@ class RecoveryEngine:
     Attempt 2: Refresh state
     Attempt 3: Keyboard navigation
     Attempt 4: Application-specific adapter
-    Attempt 5: Vision grounding
-    Attempt 6: Coordinate fallback
+    Attempt 5: stop with a diagnostic when semantic/keyboard recovery is unavailable
     """
 
     def classify_failure(self, error: Exception | str) -> FailureType:

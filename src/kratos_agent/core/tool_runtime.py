@@ -274,6 +274,12 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
     registry = ToolRegistry()
     for item in data.get("tools", []):
         function_name = item.get("func_name")
+        name = item.get("name", function_name)
+        # Pointer coordinates are outside Kratos' computer-use contract. Keep
+        # legacy mouse helpers out of model-visible registries even when a
+        # generated or stale catalog still contains them.
+        if str(name or function_name or "").lower().startswith(("mouse_", "gui_mouse")) or str(name or function_name or "").lower() == "cursor_position":
+            continue
         handler = getattr(legacy, function_name, None)
         if handler is None:
             handler = getattr(computer_tools, function_name, None)
@@ -284,7 +290,6 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
                     break
         if handler is None:
             continue
-        name = item.get("name", function_name)
         permission = _permission_for(name)
         params = item.get("parameters") or _signature_schema(handler)
         registry.register(

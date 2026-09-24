@@ -648,12 +648,14 @@ def browser_tab(action: str = "list", index: Optional[int] = None, url: Optional
 
 def browser_click(selector: Optional[str] = None, ref: Optional[str] = None,
                   x: Optional[int] = None, y: Optional[int] = None) -> str:
-    """Clicks an element in the browser via CDP."""
+    """Clicks a browser element by DOM selector; coordinates are not supported."""
+    if x is not None or y is not None:
+        return json.dumps({"ok": False, "action": "browser_click", "detail": "Coordinate input is disabled; provide a DOM selector."}, indent=2)
     from kratos_agent.ccs.browser import browser_click as b_click
     if selector:
         res = b_click(selector)
         return json.dumps({"ok": res.ok, "selector": selector}, indent=2)
-    return mouse_click(x=x, y=y)
+    return json.dumps({"ok": False, "action": "browser_click", "detail": "A DOM selector is required; pointer fallback is disabled."}, indent=2)
 
 def browser_type(text: str, selector: Optional[str] = None, ref: Optional[str] = None, clear: bool = True) -> str:
     """Types text into an input field in the browser."""
@@ -1345,21 +1347,8 @@ def system_inspect() -> str:
     return json.dumps({"system": info, "capabilities": caps}, indent=2)
 
 def gui_mouse(action: str, x: int = 0, y: int = 0, button: str = "left", clicks: int = 1) -> str:
-    """Controls the mouse on the host system. Actions: move, click, double_click, drag, scroll."""
-    ctrl = get_computer_controller()
-    if action == "move":
-        res = ctrl.mouse_move(x, y)
-    elif action == "click":
-        res = ctrl.mouse_click(x, y, button=button, clicks=clicks)
-    elif action == "double_click":
-        res = ctrl.mouse_click(x, y, button=button, clicks=2)
-    elif action == "drag":
-        res = ctrl.mouse_drag(x, y)
-    elif action == "scroll":
-        res = ctrl.mouse_scroll(dx=0, dy=y)
-    else:
-        res = ctrl.mouse_click(x, y, button=button, clicks=clicks)
-    return json.dumps({"ok": res.ok, "action": action, "x": x, "y": y}, indent=2)
+    """Deprecated: raw host pointer input is disabled; use semantic controls or keyboard tools."""
+    return json.dumps({"ok": False, "action": action, "detail": "Raw pointer control is disabled; use accessible controls or keyboard input."}, indent=2)
 
 def gui_keyboard(action: str, text: str = "", keys: Optional[List[str]] = None) -> str:
     """Controls the host keyboard. Actions: type, press."""

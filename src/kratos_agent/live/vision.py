@@ -30,7 +30,8 @@ class VisionManager:
         self.out_queue = out_queue
         self.mode = mode.lower()
         self.status_hub = status_hub
-        self.fps = fps
+        # Gemini Live accepts video at up to one frame per second.
+        self.fps = min(1.0, max(0.1, float(fps)))
 
         self.camera = CameraCapture(
             out_queue=self.out_queue,

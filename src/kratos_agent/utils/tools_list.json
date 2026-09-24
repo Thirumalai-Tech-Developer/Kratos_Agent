@@ -770,7 +770,7 @@
         },
         {
             "name": "computer_click",
-            "description": "Clicks a semantic UI element (button, link, tab, checkbox) by name or role without needing coordinates.",
+            "description": "Activates a semantic UI control with native accessibility, browser DOM, or keyboard input; no pointer coordinates.",
             "func_name": "computer_click",
             "parameters": {
                 "type": "object",
@@ -1114,7 +1114,7 @@
         },
         {
             "name": "computer_scroll",
-            "description": "Scrolls vertically (dy) or horizontally (dx). Positive dy scrolls up, negative scrolls down.",
+            "description": "Scrolls the focused control with Page Up/Down keys; positive dy is up. Horizontal coordinate scrolling is unavailable.",
             "func_name": "computer_scroll",
             "parameters": {
                 "type": "object",
@@ -1207,16 +1207,6 @@
             "parameters": {
                 "type": "object",
                 "properties": {}
-            }
-        },
-        {
-            "name": "cursor_position",
-            "description": "Returns the current mouse cursor coordinates.",
-            "func_name": "cursor_position",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
             }
         },
         {
@@ -1783,36 +1773,6 @@
             }
         },
         {
-            "name": "gui_mouse",
-            "description": "Controls the mouse on the host system. Actions: move, click, double_click, drag, scroll.",
-            "func_name": "gui_mouse",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string"
-                    },
-                    "x": {
-                        "type": "integer"
-                    },
-                    "y": {
-                        "type": "integer"
-                    },
-                    "button": {
-                        "type": "string",
-                        "default": "left"
-                    },
-                    "clicks": {
-                        "type": "integer",
-                        "default": 1
-                    }
-                },
-                "required": [
-                    "action"
-                ]
-            }
-        },
-        {
             "name": "gui_type",
             "description": "Types text into a UI element semantically.",
             "func_name": "gui_type",
@@ -2018,190 +1978,6 @@
                     }
                 },
                 "required": []
-            }
-        },
-        {
-            "name": "mouse_click",
-            "description": "Clicks the mouse button at current position or specified coordinates.",
-            "func_name": "mouse_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "string",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "string",
-                        "description": "y"
-                    },
-                    "ref": {
-                        "type": "string",
-                        "description": "ref"
-                    },
-                    "button": {
-                        "type": "string",
-                        "description": "button"
-                    },
-                    "clicks": {
-                        "type": "string",
-                        "description": "clicks"
-                    },
-                    "modifiers": {
-                        "type": "array",
-                        "description": "modifiers"
-                    },
-                    "style": {
-                        "type": "string",
-                        "description": "style"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "mouse_double_click",
-            "description": "Double-clicks the left mouse button.",
-            "func_name": "mouse_double_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "string",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "string",
-                        "description": "y"
-                    },
-                    "ref": {
-                        "type": "string",
-                        "description": "ref"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "mouse_drag",
-            "description": "Drags the mouse from one point to another.",
-            "func_name": "mouse_drag",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "from_x": {
-                        "type": "string",
-                        "description": "from x"
-                    },
-                    "from_y": {
-                        "type": "string",
-                        "description": "from y"
-                    },
-                    "to_x": {
-                        "type": "string",
-                        "description": "to x"
-                    },
-                    "to_y": {
-                        "type": "string",
-                        "description": "to y"
-                    },
-                    "button": {
-                        "type": "string",
-                        "description": "button"
-                    },
-                    "duration_ms": {
-                        "type": "string",
-                        "description": "duration ms"
-                    }
-                },
-                "required": [
-                    "from_x",
-                    "from_y",
-                    "to_x",
-                    "to_y"
-                ]
-            }
-        },
-        {
-            "name": "mouse_move",
-            "description": "Moves the mouse cursor to (x, y) instantly or smoothly.",
-            "func_name": "mouse_move",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "string",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "string",
-                        "description": "y"
-                    },
-                    "duration_ms": {
-                        "type": "string",
-                        "description": "duration ms"
-                    },
-                    "style": {
-                        "type": "string",
-                        "description": "style"
-                    }
-                },
-                "required": [
-                    "x",
-                    "y"
-                ]
-            }
-        },
-        {
-            "name": "mouse_right_click",
-            "description": "Right-clicks the mouse button.",
-            "func_name": "mouse_right_click",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "string",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "string",
-                        "description": "y"
-                    },
-                    "ref": {
-                        "type": "string",
-                        "description": "ref"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "name": "mouse_scroll",
-            "description": "Scrolls the mouse wheel vertically or horizontally.",
-            "func_name": "mouse_scroll",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dy": {
-                        "type": "string",
-                        "description": "dy"
-                    },
-                    "dx": {
-                        "type": "string",
-                        "description": "dx"
-                    },
-                    "x": {
-                        "type": "string",
-                        "description": "x"
-                    },
-                    "y": {
-                        "type": "string",
-                        "description": "y"
-                    }
-                },
-                "required": [
-                    "dy"
-                ]
             }
         },
         {

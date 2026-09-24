@@ -374,19 +374,34 @@ class WindowsUIABackend(GUIBackend):
         button: str = "left",
         clicks: int = 1,
     ) -> ActionResult:
-        # First attempt native InvokePattern if single left click
-        if button == "left" and clicks == 1:
-            res = self.invoke_element(element, pattern="Invoke")
-            if res.ok and res.method_used == "InvokePattern":
-                return res
+        if button != "left":
+            return ActionResult(ok=False, action="click_element", detail="Only semantic activation is supported; pointer buttons are disabled")
 
-        # Fallback to center coordinates if element has bounds
-        if element.center:
-            from kratos_agent.computer.gui.input.mouse import MouseEngine
-            mouse = MouseEngine()
-            return mouse.click(x=element.center.x, y=element.center.y, button=button, clicks=clicks)
+        # Prefer native UIA patterns; if unavailable, focus the resolved control
+        # and activate it through the keyboard. Never click its bounding-box center.
+        role = (element.role or "").lower()
+        if "check" in role or "radio" in role:
+            pattern, fallback_key = "Toggle", "space"
+        elif "selectionitem" in role or "list item" in role:
+            pattern, fallback_key = "SelectionItem", "enter"
+        else:
+            pattern, fallback_key = "Invoke", "enter"
 
-        return ActionResult(ok=False, action="click_element", detail="Element has no bounds and native invoke failed")
+        res = self.invoke_element(element, pattern=pattern)
+        if res.ok and res.method_used not in ("SetFocus", "unknown"):
+            return res
+        if not res.ok:
+            return ActionResult(ok=False, action="click_element", detail=res.detail or "UIA could not focus the resolved control")
+
+        from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+        key_result = KeyboardEngine().press(fallback_key)
+        return ActionResult(
+            ok=key_result.ok,
+            action="click_element",
+            detail=("Activated focused UIA control with keyboard" if key_result.ok else key_result.detail),
+            method_used="UIA focus + keyboard",
+            verified=False,
+        )
 
     def type_element(
         self,
@@ -400,8 +415,15 @@ class WindowsUIABackend(GUIBackend):
             if res.ok and res.method_used == "ValuePattern":
                 return res
 
-        # Fallback: focus and type via keyboard
-        self.invoke_element(element, pattern="Focus")
+        # Fallback: focus and type via keyboard. Never send text to whichever
+        # control happened to be focused if UIA could not focus this target.
+        focus_result = self.invoke_element(element, pattern="Focus")
+        if not focus_result.ok:
+            return ActionResult(
+                ok=False,
+                action="type_element",
+                detail=focus_result.detail or "UIA could not focus the resolved input control",
+            )
         from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
         kb = KeyboardEngine()
         if clear_first:

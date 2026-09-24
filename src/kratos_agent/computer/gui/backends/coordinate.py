@@ -1,24 +1,17 @@
 """Coordinate-based fallback GUI backend (LOWEST PRIORITY)."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from kratos_agent.computer.gui.backends.base import GUIBackend
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
+from kratos_agent.computer.gui.models import GUIElement
 from kratos_agent.computer.state import ActionResult
-from kratos_agent.computer.gui.input.mouse import MouseEngine
-from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
 
 
 class CoordinateBackend(GUIBackend):
-    """Raw coordinate GUI fallback backend.
-    
-    CRITICAL: Priority 8 (lowest). Only invoked when semantic methods,
-    accessibility, DOM, keyboard navigation, and vision have failed.
-    """
+    """Compatibility shell for the disabled coordinate-input backend."""
 
     def __init__(self) -> None:
-        self._mouse = MouseEngine()
-        self._keyboard = KeyboardEngine()
+        pass
 
     @property
     def name(self) -> str:
@@ -29,7 +22,7 @@ class CoordinateBackend(GUIBackend):
         return 8  # Lowest priority fallback
 
     def is_available(self) -> bool:
-        return True
+        return False
 
     def dump_tree(
         self,
@@ -73,9 +66,7 @@ class CoordinateBackend(GUIBackend):
         button: str = "left",
         clicks: int = 1,
     ) -> ActionResult:
-        if element.center:
-            return self._mouse.click(x=element.center.x, y=element.center.y, button=button, clicks=clicks)
-        return ActionResult(ok=False, action="coordinate_click", detail="Element lacks bounding coordinates")
+        return ActionResult(ok=False, action="coordinate_click", detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.")
 
     def type_element(
         self,
@@ -83,9 +74,4 @@ class CoordinateBackend(GUIBackend):
         text: str,
         clear_first: bool = False,
     ) -> ActionResult:
-        if element.center:
-            self._mouse.click(x=element.center.x, y=element.center.y)
-        if clear_first:
-            self._keyboard.hotkey("ctrl", "a")
-            self._keyboard.key_tap(["backspace"])
-        return self._keyboard.type_text(text)
+        return ActionResult(ok=False, action="coordinate_type", detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.")

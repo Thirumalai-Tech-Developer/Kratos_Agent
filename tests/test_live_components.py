@@ -297,6 +297,25 @@ class TestLiveRuntimeLifecycle(unittest.IsolatedAsyncioTestCase):
             await rt.stop()
             self.assertFalse(rt._is_running)
 
+    async def test_runtime_without_key_keeps_control_loop_ready_but_does_not_open_audio(self):
+        cfg = LiveConfig(api_key="", enabled=True)
+        rt = LiveRuntime(config=cfg)
+
+        with patch.object(rt.audio, "start", new_callable=AsyncMock) as audio_start, \
+             patch.object(rt.vision, "start", new_callable=AsyncMock) as vision_start, \
+             patch.object(rt.session, "run_connection_loop", new_callable=AsyncMock) as session_start:
+            await rt.start()
+            self.assertTrue(rt._is_running)
+            self.assertIs(asyncio.get_running_loop(), rt._loop)
+            self.assertIn("API_KEY", rt.get_status().last_error or "")
+            audio_start.assert_not_awaited()
+            vision_start.assert_not_awaited()
+            session_start.assert_not_awaited()
+
+            await rt.set_vision_mode("none")
+            await rt.stop()
+            self.assertFalse(rt._is_running)
+
 
 class TestMicrophoneAndVAD(unittest.TestCase):
     def test_calculate_rms_silence_and_signal(self):
@@ -416,4 +435,3 @@ class TestMicrophoneAndVAD(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

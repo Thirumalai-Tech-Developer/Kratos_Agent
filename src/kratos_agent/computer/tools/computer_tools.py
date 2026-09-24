@@ -32,7 +32,7 @@ def computer_find(query: str, role: Optional[str] = None) -> str:
 
 
 def computer_click(name: Optional[str] = None, role: Optional[str] = None, id: Optional[str] = None, button: str = "left") -> str:
-    """Clicks a semantic UI element (button, link, tab, checkbox) by name or role without needing coordinates."""
+    """Activates a semantic UI element by accessible name or role without pointer coordinates."""
     cm = get_computer_manager()
     target = {}
     if name: target["name"] = name
@@ -72,9 +72,13 @@ def computer_hotkey(keys: str) -> str:
 
 
 def computer_scroll(dy: int, dx: int = 0) -> str:
-    """Scrolls vertically (dy) or horizontally (dx). Positive dy scrolls up, negative scrolls down."""
-    from kratos_agent.computer.gui.input.mouse import MouseEngine
-    res = MouseEngine().scroll(dy=dy, dx=dx)
+    """Scrolls the focused control with Page Up/Down keys (positive dy is up)."""
+    from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+    if dx:
+        return json.dumps({"ok": False, "action": "computer_scroll", "detail": "Horizontal scrolling requires a semantic scroll target; pointer input is disabled."}, indent=2)
+    if not dy:
+        return json.dumps({"ok": True, "action": "computer_scroll", "detail": "No vertical scrolling requested."}, indent=2)
+    res = KeyboardEngine().press("pageup" if dy > 0 else "pagedown")
     return json.dumps(res.to_dict(), indent=2)
 
 

@@ -155,8 +155,7 @@ class LinuxATSPIBackend(GUIBackend):
         if not self.is_available():
             return ActionResult(ok=False, action="invoke_element", detail="Linux AT-SPI unavailable")
 
-        # Fallback to center click if bounds exist
-        return self.click_element(element)
+        return ActionResult(ok=False, action="invoke_element", detail="AT-SPI semantic action is unavailable for this element; coordinate input is disabled")
 
     def click_element(
         self,
@@ -164,11 +163,7 @@ class LinuxATSPIBackend(GUIBackend):
         button: str = "left",
         clicks: int = 1,
     ) -> ActionResult:
-        if element.center:
-            from kratos_agent.computer.gui.input.mouse import MouseEngine
-            mouse = MouseEngine()
-            return mouse.click(x=element.center.x, y=element.center.y, button=button, clicks=clicks)
-        return ActionResult(ok=False, action="click_element", detail="Element has no bounds")
+        return ActionResult(ok=False, action="click_element", detail="AT-SPI semantic activation is unavailable; coordinate input is disabled")
 
     def type_element(
         self,
@@ -176,10 +171,4 @@ class LinuxATSPIBackend(GUIBackend):
         text: str,
         clear_first: bool = False,
     ) -> ActionResult:
-        self.click_element(element)
-        from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
-        kb = KeyboardEngine()
-        if clear_first:
-            kb.hotkey("ctrl", "a")
-            kb.key_tap(["backspace"])
-        return kb.type_text(text)
+        return ActionResult(ok=False, action="type_element", detail="AT-SPI semantic text entry is unavailable; coordinate input is disabled")

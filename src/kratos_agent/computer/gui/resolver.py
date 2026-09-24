@@ -9,7 +9,6 @@ from kratos_agent.computer.gui.errors import AmbiguousTargetError, TargetNotFoun
 from kratos_agent.computer.gui.backends.base import GUIBackend
 from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
 from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
-from kratos_agent.computer.gui.backends.coordinate import CoordinateBackend
 
 
 class SemanticResolver:
@@ -22,8 +21,7 @@ class SemanticResolver:
     4. Semantic UI element
     5. Keyboard navigation
     6. Application-specific adapter
-    7. Vision
-    8. Coordinate fallback
+    7. Vision for observation only. Vision never supplies input coordinates.
     """
 
     def __init__(self) -> None:
@@ -36,7 +34,6 @@ class SemanticResolver:
         backends: List[GUIBackend] = [
             PlaywrightBackend(),
             WindowsUIABackend(),
-            CoordinateBackend(),
         ]
         self._backends = sorted([b for b in backends if b.is_available()], key=lambda x: x.priority)
 
