@@ -84,7 +84,7 @@ HELP_TEXT = """
   [bold cyan]/model[/bold cyan] [dim][name][/dim]           - Switch LLM with [bold gold1]↑ / ↓ arrow keys[/bold gold1] or direct name
   [bold cyan]/gateway[/bold cyan]                - View Brain Gateway status & configuration (alias: /accounts)
   [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
-  [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto][/dim] - Set approval mode (Codex-style)
+  [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set approval mode (Codex-style)
   [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Plan Mode (DeepSeek Harness & Claude Code)
   [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - DeepSeek Harness presets & plugins manager
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
@@ -330,7 +330,7 @@ def print_welcome():
     mem_label = str(mem_file.name) if mem_file else "KRATOS.md (none)"
 
     grid.add_row("⚔  Model", f"[bold cyan]{runtime.model_name}[/bold cyan]  [dim](Brain LLM Gateway)[/dim]")
-    grid.add_row("⛓  Mode", f"{mode_badge}  [dim]| /mode suggest|auto-edit|full-auto[/dim]")
+    grid.add_row("⛓  Mode", f"{mode_badge}  [dim]| /mode suggest|auto-edit|full-auto|sovereign[/dim]")
     grid.add_row("🔧  Tools", f"[bold green]{num_tools} loaded[/bold green]  [dim]{', '.join(loaded_tool_names[:5])}{'...' if num_tools > 5 else ''}[/dim]")
     grid.add_row("🧠  Skills", f"[bold green]{num_skills} active[/bold green]  [dim]Use /skill to view or add[/dim]")
     grid.add_row("📜  Memory", f"[dim]{mem_label}[/dim]")
@@ -1972,6 +1972,8 @@ def start_interactive_cli():
                     "full-auto": ApprovalMode.FULL_AUTO,
                     "full_auto": ApprovalMode.FULL_AUTO,
                     "full": ApprovalMode.FULL_AUTO,
+                    "sovereign": ApprovalMode.SOVEREIGN,
+                    "jarvis": ApprovalMode.SOVEREIGN,
                 }
                 if arg in mode_map:
                     approval_gate.set_mode(mode_map[arg])
@@ -1979,13 +1981,14 @@ def start_interactive_cli():
                     mode_badges = {
                         ApprovalMode.SUGGEST:   "[yellow]suggest[/yellow]   — read-only, all writes need approval",
                         ApprovalMode.AUTO_EDIT: "[cyan]auto-edit[/cyan]  — file edits auto, shell needs approval",
-                        ApprovalMode.FULL_AUTO: "[green]full-auto[/green]  — full autonomy (default)",
+                        ApprovalMode.FULL_AUTO: "[green]full-auto[/green]  — full autonomy",
+                        ApprovalMode.SOVEREIGN: "[bold magenta]sovereign[/bold magenta] — no app-level approval prompts",
                     }
                     console.print(f"\n[bold gold1]Current mode:[/bold gold1] {approval_gate.mode_badge()}")
                     console.print("\n[bold]Available modes:[/bold]")
                     for badge in mode_badges.values():
                         console.print(f"  {badge}")
-                    console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto[/dim]\n")
+                    console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto | /mode sovereign[/dim]\n")
                 continue
 
             # /plan [on|off|<query>] — Plan Mode (DeepSeek Harness & Claude Code)
