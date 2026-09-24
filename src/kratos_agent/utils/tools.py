@@ -66,8 +66,8 @@ def clean_command(cmd_str: str) -> str:
     cleaned = re.sub(r'^\{?\s*["\']?(?:command|direct_command|package_name)["\']?\s*[:=]\s*["\']?', '', cleaned).strip()
     cleaned = cleaned.rstrip('"} \t\n').lstrip('"{ \t\n')
     cleaned = re.sub(r'^\s*[`"\']+|[`"\']+\s*$', '', cleaned).strip()
-    cleaned = re.sub(r"(?i)\\bhttps//", "https://", cleaned)
-    cleaned = re.sub(r"(?i)\\bhttp//", "http://", cleaned)
+    cleaned = re.sub(r"(?i)\bhttps//", "https://", cleaned)
+    cleaned = re.sub(r"(?i)\bhttp//", "http://", cleaned)
     return cleaned
 
 def is_persistent_server_command(command: str) -> bool:
