@@ -55,6 +55,10 @@ def render_command_argv(command: str, shell: Optional[ShellInfo] = None) -> List
     sh = shell or get_current_shell()
 
     if sh.name in ("powershell", "pwsh"):
+        # Do not let PowerShell parse an explicit nested cmd.exe command.
+        nested_cmd = re.match(r"^\s*cmd(?:\.exe)?\s+(?:/d\s+)?/c\s+(.+)$", command, re.IGNORECASE | re.DOTALL)
+        if nested_cmd:
+            return ["cmd.exe", "/d", "/s", "/c", nested_cmd.group(1)]
         script = render_powershell_script(command, supports_and=sh.supports_and_operator)
         if sh.name == "pwsh":
             return pwsh_encoded(script)
