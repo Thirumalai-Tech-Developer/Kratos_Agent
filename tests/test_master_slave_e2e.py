@@ -136,6 +136,32 @@ class TestMasterSlaveEndToEnd(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_bridge_forwards_wait_for_result(self):
+        async def _run():
+            from kratos_agent.live.bridge import KratosBridge
+            from kratos_agent.live.events import LiveStatusHub
+
+            runtime = MagicMock()
+            bridge = KratosBridge(runtime=runtime, status_hub=LiveStatusHub())
+            bridge.slave_executor._running = True
+            bridge.supervisor = MagicMock()
+            bridge.supervisor.submit_delegated_task = AsyncMock(return_value={
+                "status": "success", "task_id": "task-1", "capability": "generic_task"
+            })
+
+            res = await bridge.submit_task(
+                "create a spiderman website in Documents",
+                action="generic_task",
+                wait_for_result=True,
+            )
+
+            self.assertEqual(res["status"], "success")
+            bridge.supervisor.submit_delegated_task.assert_awaited_once()
+            kwargs = bridge.supervisor.submit_delegated_task.await_args.kwargs
+            self.assertTrue(kwargs["wait_for_result"])
+            self.assertGreaterEqual(kwargs["timeout"], 600.0)
+
+        asyncio.run(_run())
 
 if __name__ == "__main__":
     unittest.main()
