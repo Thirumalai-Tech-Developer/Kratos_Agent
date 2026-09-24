@@ -1,7 +1,7 @@
 """Element selector query matching engine."""
 from __future__ import annotations
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from kratos_agent.computer.gui.models import GUIElement
 
