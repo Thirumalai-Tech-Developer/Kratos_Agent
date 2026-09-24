@@ -82,6 +82,7 @@ class LiveRuntime:
             on_user_transcript=on_user_transcript,
             on_model_transcript=on_model_transcript,
         )
+        self.router.set_diagnostics_handler(self.session.get_diagnostics)
 
         self.avatar: Optional[FloatingAvatar] = None
 

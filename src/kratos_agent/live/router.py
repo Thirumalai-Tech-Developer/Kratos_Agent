@@ -42,9 +42,19 @@ class StructuredTask:
 class LiveRouter:
     """Only dispatches structured Gemini decisions; it never classifies English."""
 
-    def __init__(self, bridge: KratosBridge, capture_screen_handler: Optional[Callable[[], Any]] = None) -> None:
+    def __init__(
+        self,
+        bridge: KratosBridge,
+        capture_screen_handler: Optional[Callable[[], Any]] = None,
+        diagnostics_handler: Optional[Callable[[], Dict[str, Any]]] = None,
+    ) -> None:
         self.bridge = bridge
         self.capture_screen_handler = capture_screen_handler
+        self.diagnostics_handler = diagnostics_handler
+
+    def set_diagnostics_handler(self, handler: Optional[Callable[[], Dict[str, Any]]]) -> None:
+        """Attach Live runtime diagnostics to the structured status tool."""
+        self.diagnostics_handler = handler
 
     def get_tool_declarations(self) -> List[types.Tool]:
         def obj_schema(properties: Dict[str, types.Schema], required: Optional[List[str]] = None) -> types.Schema:
@@ -96,7 +106,7 @@ class LiveRouter:
         status = types.FunctionDeclaration(
             name="get_task_status",
             behavior="NON_BLOCKING",
-            description="Inspect current mission/task state and the latest structured diagnostic. Use for error/status questions.",
+            description="Inspect current mission/task state, Live connection health, and the latest structured diagnostic. Use for error/status questions.",
             parameters=obj_schema({
                 "task_id": types.Schema(type="STRING", description="Optional task id."),
             }),
@@ -195,7 +205,25 @@ class LiveRouter:
                 }
 
         if name == "get_task_status":
-            return self.bridge.get_status(task_id=str(args.get("task_id") or "") or None)
+            try:
+                status = self.bridge.get_status(task_id=str(args.get("task_id") or "") or None)
+                if self.diagnostics_handler is not None:
+                    try:
+                        status["live"] = dict(self.diagnostics_handler() or {})
+                    except Exception as exc:
+                        status["live"] = {
+                            "healthy": False,
+                            "error": {"type": type(exc).__name__, "message": str(exc) or type(exc).__name__},
+                        }
+                return status
+            except Exception as exc:
+                logger.exception("task status lookup failed")
+                return {
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc) or type(exc).__name__,
+                    "stage": "status_lookup",
+                }
 
         if name == "cancel_task":
             return await self.bridge.cancel_active_task()

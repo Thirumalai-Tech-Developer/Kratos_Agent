@@ -46,6 +46,7 @@ browser.youtube.play, whatsapp.send_message, browser.navigate, app.launch, files
 terminal.execute, code.test, code.edit.
 If the exact capability is unknown, set capability to null and preserve the complete mission.
 
+Live computer tools execute asynchronously. Treat the function response from Kratos as the only authoritative completion signal; progress/filler speech is not completion. Never block the Live receive stream waiting for a tool.
 Never report task completion without evidence supplied by Kratos.
 Never replace a useful diagnostic with the phrase "system error".
 When the user asks what failed or why, call get_task_status and explain component, stage, capability,
@@ -88,27 +89,116 @@ class LiveSession:
         self._last_logged_error: str = ""
         self._last_logged_error_time: float = 0.0
         self._active_live_turn: Optional[LiveTurn] = None
+        self._pending_tool_tasks: set[asyncio.Task[Any]] = set()
+        self._pending_mission_tool_ids: set[str] = set()
 
         # Wire speech feedback from Slave execution to Gemini Master narration
         get_master_supervisor().set_speech_callback(self._on_slave_result_feedback)
 
     def _on_slave_result_feedback(self, text: str) -> None:
-        """Called when Slave finishes execution to let Gemini Master speak the verified outcome."""
+        """Narrate background Slave completions, avoiding duplicate Live mission narration."""
+        if self._pending_mission_tool_ids:
+            logger.debug("[LiveSession] Suppressing background mission narration while a Live mission tool is pending.")
+            return
         if self.is_running and self.session is not None and text.strip():
             asyncio.create_task(self.send_narration(text.strip()))
 
     def get_diagnostics(self) -> Dict[str, Any]:
         """Return the latest sanitized Live/Slave diagnostic state."""
+        now = time.time()
+        heartbeat_age = None if self._last_heartbeat <= 0 else round(max(0.0, now - self._last_heartbeat), 3)
+        turn = self._active_live_turn
+        supervisor = get_master_supervisor()
         return {
             "model": self.config.model,
             "connected": bool(self.session is not None),
             "running": bool(self.is_running),
+            "healthy": bool(self.is_healthy()),
+            "heartbeat_age_s": heartbeat_age,
+            "pending_tool_tasks": len(self._pending_tool_tasks),
+            "pending_mission_tools": len(self._pending_mission_tool_ids),
+            "active_turn_id": turn.turn_id if turn else None,
+            "active_turn_state": turn.state.value if turn else None,
+            "pending_tool_call_ids": sorted(turn.pending_tool_calls) if turn else [],
             "last_error": self.status_hub.status.last_error if self.status_hub else None,
             "last_error_component": self.status_hub.status.last_error_component if self.status_hub else None,
-            "last_task": get_master_supervisor().active_objective,
-            "active_task_id": get_master_supervisor().active_task_id,
+            "last_task": supervisor.active_objective,
+            "active_task_id": supervisor.active_task_id,
         }
 
+    def _track_tool_task(self, task: asyncio.Task[Any]) -> None:
+        self._pending_tool_tasks.add(task)
+        task.add_done_callback(self._pending_tool_tasks.discard)
+
+    async def _run_tool_call(
+        self,
+        name: str,
+        call_id: str,
+        turn_id: str,
+        args: Dict[str, Any],
+    ) -> None:
+        """Execute a Gemini Live tool outside the receive loop and return its result asynchronously."""
+        try:
+            try:
+                res = await self.router.handle_tool_call(name, args)
+                resp_dict = res if isinstance(res, dict) else {"result": str(res)}
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                err = error_from_exception(
+                    exc,
+                    component="LiveSession",
+                    stage="tool_dispatch",
+                    task_id=get_master_supervisor().active_task_id,
+                    request_id=args.get("request_id"),
+                    retryable=True,
+                    recovery_action="Inspect task status and retry through the structured mission pipeline.",
+                )
+                logger.exception("[LiveSession] tool %s failed", name)
+                if self.status_hub:
+                    self.status_hub.report_error("tool", err.user_message)
+                resp_dict = {"status": "failed", "error": err.to_dict()}
+
+            turn = self._active_live_turn
+            if turn is not None and turn.turn_id == turn_id:
+                turn.tool_result(call_id)
+
+            response_payload = dict(resp_dict)
+            response_payload["tool_call_id"] = call_id
+            response_payload["turn_id"] = turn_id
+            response_payload["scheduling"] = (
+                "INTERRUPT" if name in ("cancel_task", "cancel_active_task") else "WHEN_IDLE"
+            )
+            fn_resp = types.FunctionResponse(
+                name=name,
+                id=call_id,
+                response=response_payload,
+            )
+
+            # The tool has completed; the model receives the correlated result asynchronously.
+            try:
+                async with self._send_lock:
+                    if self.session is not None and self.is_running:
+                        await self.session.send_tool_response(function_responses=[fn_resp])
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                err = error_from_exception(
+                    exc,
+                    component="LiveSession",
+                    stage="tool_result_transport",
+                    task_id=get_master_supervisor().active_task_id,
+                    request_id=args.get("request_id"),
+                    retryable=True,
+                    recovery_action="Reconnect Gemini Live and retry the structured mission.",
+                )
+                logger.exception("[LiveSession] failed to send tool response")
+                if self.status_hub:
+                    self.status_hub.report_error("live_transport", err.user_message)
+        finally:
+            self._pending_mission_tool_ids.discard(call_id)
+            if self.status_hub and self.status_hub.status.active_task_id:
+                self.status_hub.update(current_state=LiveState.EXECUTING)
 
     @staticmethod
     def _normalize_interaction_status(value: Any) -> Optional[str]:
@@ -218,68 +308,28 @@ class LiveSession:
                                     request_id=f"REQ-{uuid.uuid4().hex[:10].upper()}",
                                     state=LiveTurnState.MODEL_THINKING,
                                 )
+                            turn_id = self._active_live_turn.turn_id
                             self._active_live_turn.begin_tool(call_id)
                             logger.info(
                                 "[GEMINI] tool_call=%s tool_call_id=%s turn_id=%s",
-                                call.name, call_id, self._active_live_turn.turn_id,
+                                call.name, call_id, turn_id,
                             )
                             if call.name in ("execute_mission", "delegate_task", "start_agent_task", "kratos_task", "continue_task"):
                                 self._last_user_transcript = ""
+                                self._pending_mission_tool_ids.add(call_id)
 
                             args = dict(call.args or {})
                             args.setdefault("tool_call_id", call_id)
-                            args.setdefault("turn_id", self._active_live_turn.turn_id)
+                            args.setdefault("turn_id", turn_id)
                             args.setdefault("request_id", self._active_live_turn.request_id)
 
-                            try:
-                                res = await self.router.handle_tool_call(call.name, args)
-                                resp_dict = res if isinstance(res, dict) else {"result": str(res)}
-                            except Exception as exc:
-                                err = error_from_exception(
-                                    exc,
-                                    component="LiveSession",
-                                    stage="tool_dispatch",
-                                    task_id=get_master_supervisor().active_task_id,
-                                    request_id=args.get("request_id"),
-                                    retryable=True,
-                                    recovery_action="Inspect task status and retry through the structured mission pipeline.",
-                                )
-                                logger.exception("[LiveSession] tool %s failed", call.name)
-                                if self.status_hub:
-                                    self.status_hub.report_error("tool", err.user_message)
-                                resp_dict = {"status": "failed", "error": err.to_dict()}
-
-                            if self._active_live_turn:
-                                self._active_live_turn.tool_result(call_id)
-
-                            response_payload = dict(resp_dict)
-                            response_payload["tool_call_id"] = call_id
-                            response_payload["turn_id"] = self._active_live_turn.turn_id if self._active_live_turn else ""
-                            response_payload["scheduling"] = (
-                                "INTERRUPT" if call.name in ("cancel_task", "cancel_active_task") else "WHEN_IDLE"
+                            # Gemini Live Extended Thinking requires asynchronous tool execution;
+                            # never block the receive loop on a physical computer action.
+                            tool_task = asyncio.create_task(
+                                self._run_tool_call(call.name, call_id, turn_id, args),
+                                name=f"kratos-live-tool-{call.name}-{call_id}",
                             )
-                            fn_resp = types.FunctionResponse(
-                                name=call.name,
-                                id=call_id,
-                                response=response_payload,
-                            )
-                            try:
-                                async with self._send_lock:
-                                    await self.session.send_tool_response(
-                                        function_responses=[fn_resp]
-                                    )
-                            except Exception as exc:
-                                err = error_from_exception(
-                                    exc,
-                                    component="LiveSession",
-                                    stage="tool_result_transport",
-                                    task_id=get_master_supervisor().active_task_id,
-                                    retryable=True,
-                                    recovery_action="Reconnect Gemini Live and retry the structured mission.",
-                                )
-                                logger.exception("[LiveSession] failed to send tool response")
-                                if self.status_hub:
-                                    self.status_hub.report_error("live_transport", err.user_message)
+                            self._track_tool_task(tool_task)
 
                     server_content = getattr(response, "server_content", None)
                     if server_content is None:
@@ -355,7 +405,7 @@ class LiveSession:
                     if getattr(server_content, "turn_complete", False):
                         from kratos_agent.live.echo_guard import get_echo_guard
                         get_echo_guard().stop_speaking()
-                        if self._active_live_turn and self._active_live_turn.can_finish():
+                        if not self._requires_interaction_status() and self._active_live_turn and self._active_live_turn.can_finish():
                             self._active_live_turn.state = LiveTurnState.TURN_COMPLETE
                             if self._turn_complete_event is not None:
                                 self._turn_complete_event.set()
@@ -582,9 +632,15 @@ class LiveSession:
         for t in self._tasks:
             if not t.done():
                 t.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        for t in list(self._pending_tool_tasks):
+            if not t.done():
+                t.cancel()
+        all_tasks = [*self._tasks, *self._pending_tool_tasks]
+        if all_tasks:
+            await asyncio.gather(*all_tasks, return_exceptions=True)
         self._tasks.clear()
+        self._pending_tool_tasks.clear()
+        self._pending_mission_tool_ids.clear()
         self.session = None
         if self.status_hub:
             self.status_hub.update(gemini_connected=False, current_state=LiveState.DISCONNECTED, live_health="offline")
