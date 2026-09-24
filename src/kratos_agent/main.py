@@ -1,6 +1,7 @@
 """Kratos application composition root with an explicit agent pipeline."""
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict, List
@@ -44,6 +45,53 @@ load_dotenv()
 DEFAULT_MODEL = get_default_model()
 
 KRATOS_AGENT_MODE_SYSTEM_PROMPT = CORE_PROMPT_V2
+
+
+
+_ACTIONABLE_REQUEST_PATTERN = re.compile(
+    r"\b(?:make|create|build|implement|generate|scaffold|develop|write)\b.*\b(?:website|webapp|web|site|app|project|file|page|code)\b",
+    re.IGNORECASE,
+)
+
+
+def _derive_turn_status(
+    result: str,
+    *,
+    cancelled: bool,
+    plan: Any,
+    tool_calls: List[Dict[str, Any]],
+    user_request: str = "",
+    verification_passed: Any = None,
+) -> str:
+    """Derive persisted turn status from runtime evidence, never from narration alone."""
+    if cancelled:
+        return "paused"
+    if result.startswith("Model request failed:") or result.startswith("Execution error:"):
+        return "failed"
+
+    plan_state = ""
+    if plan is not None:
+        state = getattr(plan, "state", "")
+        plan_state = str(getattr(state, "value", state)).lower()
+        tasks = list(getattr(plan, "tasks", []) or [])
+        tasks_completed = bool(tasks) and all(
+            str(getattr(getattr(task, "state", ""), "value", getattr(task, "state", ""))).lower() == "completed"
+            for task in tasks
+        )
+        if (
+            plan_state == "completed"
+            and tasks_completed
+            and bool(tool_calls)
+            and verification_passed is not False
+        ):
+            return "completed"
+        return "failed"
+
+    # A no-plan turn can be a normal chat response. However, an obvious mutation request
+    # with zero tool calls is not allowed to persist as completed.
+    if not tool_calls and _ACTIONABLE_REQUEST_PATTERN.search(user_request or ""):
+        return "failed"
+    return "completed"
 
 
 
@@ -246,8 +294,13 @@ class KratosRuntime:
         self._event_store.append(event)
         if event.kind.value == "model.request_assembled":
             self.last_request = event.payload
-        elif event.kind.value == "tool.requested":
-            self._current_tool_calls.append(event.payload)
+        elif event.kind.value in {"tool.requested", "tool.started"}:
+            payload = dict(event.payload or {})
+            call_id = payload.get("call_id")
+            if call_id and not any(item.get("call_id") == call_id for item in self._current_tool_calls):
+                self._current_tool_calls.append(payload)
+            elif not call_id and payload not in self._current_tool_calls:
+                self._current_tool_calls.append(payload)
 
     def _run_isolated(self, role: str, history: List[ChatMessage]) -> str:
         """Run a child task with a fresh history and role-scoped instructions."""
@@ -360,7 +413,18 @@ class KratosRuntime:
                 self._history.pop()
         else:
             self._history = final_history
-            status = "paused" if self._cancellation_flag.is_set() else "completed"
+            status = _derive_turn_status(
+                result,
+                cancelled=self._cancellation_flag.is_set(),
+                plan=self.loop.current_plan,
+                tool_calls=self._current_tool_calls,
+                user_request=user,
+                verification_passed=(
+                    self.loop.last_verification.passed
+                    if getattr(self.loop, "last_verification", None) is not None
+                    else None
+                ),
+            )
 
         plan_dict = self.loop.current_plan.to_dict() if self.loop.current_plan else None
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
@@ -450,7 +514,18 @@ class KratosRuntime:
             if self._history and self._history[-1].role == "user" and self._history[-1].content == query:
                 self._history.pop()
         else:
-            status = "paused" if self._cancellation_flag.is_set() else "completed"
+            status = _derive_turn_status(
+                result,
+                cancelled=self._cancellation_flag.is_set(),
+                plan=self.loop.current_plan,
+                tool_calls=self._current_tool_calls,
+                user_request=query,
+                verification_passed=(
+                    self.loop.last_verification.passed
+                    if getattr(self.loop, "last_verification", None) is not None
+                    else None
+                ),
+            )
 
         plan_dict = self.loop.current_plan.to_dict() if self.loop.current_plan else None
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
