@@ -11,6 +11,7 @@ Modes:
 from __future__ import annotations
 
 import json
+import os
 import re
 from enum import Enum
 from pathlib import Path
@@ -80,13 +81,23 @@ class ApprovalGate:
         self._load()
 
     def _load(self):
+        # Environment configuration is the highest-priority runtime override.
+        env_mode = os.environ.get("KRATOS_APPROVAL_MODE", "").strip().lower()
+        if env_mode:
+            try:
+                self._mode = ApprovalMode(env_mode)
+                return
+            except ValueError:
+                pass
         try:
             if self.SETTINGS_FILE.exists():
                 data = json.loads(self.SETTINGS_FILE.read_text(encoding="utf-8"))
                 mode_val = data.get("approval_mode", "sovereign")
                 self._mode = ApprovalMode(mode_val)
+                return
         except Exception:
-            self._mode = ApprovalMode.SOVEREIGN
+            pass
+        self._mode = ApprovalMode.SOVEREIGN
 
     def _save(self):
         try:
