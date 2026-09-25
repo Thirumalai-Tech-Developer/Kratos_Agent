@@ -136,6 +136,8 @@ class KratosBridge:
 
     def get_status(self, task_id: Optional[str] = None) -> Dict[str, Any]:
         status = self.supervisor.get_status(task_id)
+        if status.get("last_error"):
+            status["task_error"] = status["last_error"]
         if self.status_hub:
             live = self.status_hub.status
             status.update({
@@ -144,4 +146,20 @@ class KratosBridge:
                 "last_error": live.last_error or status.get("last_error"),
                 "last_error_component": live.last_error_component or status.get("error_component"),
             })
+        error = status.get("task_error") or status.get("last_error")
+        if isinstance(error, dict):
+            message = error.get("user_message") or error.get("message")
+            component = error.get("component") or status.get("last_error_component") or "agent"
+            stage = error.get("stage") or status.get("current_stage") or "execution"
+            recovery = error.get("recovery_action")
+        else:
+            message = error
+            component = status.get("last_error_component") or "agent"
+            stage = status.get("current_stage") or "execution"
+            recovery = None
+        if message:
+            summary = f"Last task failed in {component} during {stage}: {message}"
+            if recovery:
+                summary += f" Recovery: {recovery}"
+            status["diagnostic_summary"] = summary
         return status

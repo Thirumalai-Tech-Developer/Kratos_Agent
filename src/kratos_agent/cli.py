@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.table import Table
+from rich.markup import escape
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
@@ -791,32 +792,46 @@ def handle_accounts_command():
 
 
 def handle_system_status_command():
-    """Prints the comprehensive live status of all Kratos subsystems (§4.4)."""
+    """Print truthful live status, including the latest model and task failures."""
     from kratos_agent.ccs import get_capability_map
     from kratos_agent.live import get_live_runtime
+    from kratos_agent.core.latency_tracker import latency_tracker
+    from kratos_agent.master.supervisor import get_master_supervisor
 
     table = Table(title="⚔  KRATOS STATUS", border_style="red")
     table.add_column("Subsystem", style="bold gold1", width=18)
     table.add_column("Status / Details", style="white")
 
-    # Brain
-    table.add_row("Brain", f"[bold green]CONNECTED[/bold green]   {runtime.model_name}")
+    # A configured model is not proof that the chat endpoint accepts requests.
+    metrics = latency_tracker.get_last_metrics()
+    recorded_metrics = latency_tracker.get_all_metrics()
+    if metrics is None:
+        brain_state = "CONFIGURED · no chat request verified yet"
+    elif metrics not in recorded_metrics:
+        brain_state = f"REQUEST IN PROGRESS · {metrics.model or runtime.model_name}"
+    elif metrics.status == "completed":
+        brain_state = f"LAST REQUEST OK · {metrics.model or runtime.model_name} · {metrics.total_ms / 1000:.1f}s"
+    else:
+        from kratos_agent.output.voice import sanitize_speech_text
+        failure = sanitize_speech_text(metrics.error or "Provider request failed")
+        brain_state = f"LAST REQUEST FAILED · {metrics.model or runtime.model_name} · {failure}"
+    table.add_row("Brain", escape(brain_state))
 
     # Mode
-    table.add_row("Mode", "[bold cyan]SOVEREIGN[/bold cyan]   (no prompts)")
+    table.add_row("Mode", f"[bold cyan]{escape(approval_gate.mode.value.upper())}[/bold cyan] approval mode")
 
     # Tools
     num_tools = len(runtime.tools)
-    table.add_row("Tools", f"[bold green]{num_tools}/{num_tools} registered[/bold green] · 0 stubs · 0 untested")
+    table.add_row("Tools", f"{num_tools} handlers registered")
 
     # CCS
-    caps = get_capability_map()
-    num_caps = len(caps)
-    avail_caps = sum(1 for c in caps.values() if c.available)
-    table.add_row("CCS", f"[bold green]{avail_caps}/{num_caps} capabilities[/bold green] · elevation ready · interlock FREE")
-
-    # Perception
-    table.add_row("Perception", "a11y=UIA ✓  ocr=rapidocr ✓  cdp=chrome:9222 ✓  vlm ✓")
+    try:
+        caps = get_capability_map()
+        feature_flags = [value for value in caps.values() if isinstance(value, bool)]
+        avail_caps = sum(feature_flags)
+        table.add_row("CCS", f"{avail_caps}/{len(feature_flags)} detected feature flags are available")
+    except Exception as exc:
+        table.add_row("CCS", f"Unavailable: {escape(type(exc).__name__)}")
 
     # Displays
     try:
@@ -824,22 +839,41 @@ def handle_system_status_command():
         displays = get_computer_controller().get_displays()
         disp_str = " · ".join(f"[{d.index}] {d.width}x{d.height} @{d.scale_factor} {'primary' if d.is_primary else ''}".strip() for d in displays)
         table.add_row("Displays", disp_str or "Default Display")
-    except Exception:
-        table.add_row("Displays", "1 Display active")
+    except Exception as exc:
+        table.add_row("Displays", f"Unavailable: {escape(type(exc).__name__)}")
 
     # Voice / Live
     try:
         live_rt = get_live_runtime()
         st = live_rt.get_status()
-        v_status = "[bold green]CONNECTED[/bold green]" if st.gemini_connected else "[dim]OFFLINE[/dim]"
-        table.add_row("Voice (Omni)", f"{v_status}   127.0.0.1:7861 · session {st.active_session_id or 'none'}")
+        live_state = "CONNECTED" if st.gemini_connected else (st.live_health or "OFFLINE").upper()
+        mic_state = "muted" if st.muted else ("active" if st.microphone_active else "inactive")
+        table.add_row("Gemini Live", f"{escape(live_state)} · microphone {mic_state} · speaker {'active' if st.speaker_active else 'inactive'}")
         table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'}")
-    except Exception:
-        table.add_row("Voice (Omni)", "[dim]OFFLINE[/dim]")
-        table.add_row("Vision", "[dim]OFFLINE[/dim]")
+        if st.last_error:
+            table.add_row("Live error", escape(st.last_error))
+    except Exception as exc:
+        table.add_row("Gemini Live", f"Unavailable: {escape(type(exc).__name__)}")
+        table.add_row("Vision", "Unavailable")
 
     # Tasks
-    table.add_row("Tasks", "0 running · ready · 0 false completions")
+    task_status = get_master_supervisor().get_status()
+    active_id = task_status.get("active_task_id")
+    task_state = f"running · {task_status.get('mission') or active_id}" if active_id else "idle"
+    table.add_row("Tasks", escape(task_state))
+    diagnostic = task_status.get("last_error")
+    if diagnostic:
+        if isinstance(diagnostic, dict):
+            component = diagnostic.get("component", "agent")
+            stage = diagnostic.get("stage", "execution")
+            message = diagnostic.get("user_message") or diagnostic.get("message") or "Unknown failure"
+            recovery = diagnostic.get("recovery_action")
+            text = f"{component} / {stage}: {message}"
+            if recovery:
+                text += f" · Recovery: {recovery}"
+        else:
+            text = str(diagnostic)
+        table.add_row("Last task error", escape(text))
 
     console.print()
     console.print(table)

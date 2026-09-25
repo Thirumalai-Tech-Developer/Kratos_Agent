@@ -188,6 +188,41 @@ class TestMasterSlaveEndToEnd(unittest.TestCase):
             self.assertEqual(hub.status.last_error_component, "slaveexecutor")
             self.assertIn("HTTP 401", hub.status.last_error)
             self.assertIn("Invalid API key", hub.status.last_error)
+            bridge.supervisor.get_status.return_value = {
+                "status": "failed",
+                "last_error": {
+                    "component": "brain",
+                    "stage": "model_request",
+                    "message": "Model request failed: Brain access error (HTTP 401): Invalid API key",
+                    "recovery_action": "Correct the configured provider credential, then retry.",
+                },
+            }
+            status = bridge.get_status()
+            self.assertIn("HTTP 401", status["diagnostic_summary"])
+            self.assertIn("Correct the configured provider credential", status["diagnostic_summary"])
+
+        asyncio.run(_run())
+
+    def test_agent_task_returns_structured_provider_failure(self):
+        async def _run():
+            runtime = MagicMock()
+            runtime.run_agent.return_value = "Model request failed: Brain access error (HTTP 401): Invalid API key"
+            slave = SlaveExecutor(runtime=runtime)
+            cmd = MasterCommand.create(
+                objective="Create and test calculator.py",
+                action="generic_task",
+                request_id="request-auth-failure",
+            )
+
+            result = await slave._execute_agent_task(cmd)
+
+            self.assertEqual(result.status, "failed")
+            self.assertFalse(result.verified)
+            self.assertEqual(result.error["component"], "brain")
+            self.assertEqual(result.error["stage"], "model_request")
+            self.assertFalse(result.error["retryable"])
+            self.assertIn("HTTP 401", result.error["message"])
+            self.assertIn("OmniRoute credential was rejected", result.error["recovery_action"])
 
         asyncio.run(_run())
 

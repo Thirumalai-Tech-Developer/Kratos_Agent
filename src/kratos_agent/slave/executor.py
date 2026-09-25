@@ -382,6 +382,25 @@ class SlaveExecutor:
         res_str = await loop.run_in_executor(None, _run_sync)
         is_error = res_str.startswith("Model request failed:") or res_str.startswith("Execution error:")
 
+        error = None
+        if is_error:
+            from kratos_agent.diagnostics.errors import error_from_exception
+
+            auth_failed = "http 401" in res_str.lower() or "invalid api key" in res_str.lower()
+            error = error_from_exception(
+                RuntimeError(res_str),
+                component="brain",
+                stage="model_request",
+                task_id=cmd.task_id,
+                request_id=cmd.request_id or None,
+                retryable=not auth_failed,
+                recovery_action=(
+                    "The configured OmniRoute credential was rejected. Correct the API key for the configured Brain endpoint, then retry."
+                    if auth_failed else
+                    "Inspect the Brain endpoint/model diagnostic and retry after the provider is healthy."
+                ),
+            ).to_dict()
+
         return SlaveResult(
             command_id=cmd.command_id,
             task_id=cmd.task_id,
@@ -390,7 +409,7 @@ class SlaveExecutor:
             terminal=True,
             state="TASK_COMPLETED" if not is_error else "TASK_FAILED",
             evidence={"message": res_str[:300]},
-            error={"message": res_str} if is_error else None,
+            error=error,
         )
 
 
