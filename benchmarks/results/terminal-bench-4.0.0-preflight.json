@@ -1,0 +1,30 @@
+{
+  "benchmark": "Terminal-Bench 2.0",
+  "dataset_version": "4.0.0",
+  "agent": "Kratos",
+  "model": "ds-web/deepseek-v4-pro-think",
+  "mode": "Sovereign",
+  "status": "not_run",
+  "score": null,
+  "tasks_planned": [
+    "terminal-bench/html-js-filter",
+    "terminal-bench/photonic-waveguide-routing",
+    "terminal-bench/bun-sourcemap-leak"
+  ],
+  "attempts_started": 0,
+  "checks": {
+    "harbor_adapter_import_and_preflight": "passed",
+    "official_dataset_and_task_selection": "passed_for_all_three_tasks",
+    "python_compile": "passed",
+    "git_diff_check": "passed",
+    "docker_engine": "available",
+    "omniroute_chat_completion": "rejected_upstream_invalid_token"
+  },
+  "blockers": [
+    "The configured OmniRoute model endpoint rejected a minimal chat completion with an upstream invalid-token response. The model-list endpoint responding does not verify chat authentication."
+  ],
+  "notes": [
+    "No Terminal-Bench task was started, so this file contains no performance score. Harbor task resolution was corrected to the official terminal-bench/terminal-bench@4.0.0 dataset published by the benchmark release.",
+    "No Gemini requests were used."
+  ]
+}

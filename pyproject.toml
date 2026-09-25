@@ -39,6 +39,9 @@ kratos = "kratos_agent:main"
 kratos-agent = "kratos_agent:main"
 
 [project.optional-dependencies]
+benchmark = [
+    "harbor>=0.23.0",
+]
 headroom = [
     "headroom-ai>=0.37.0",
 ]
