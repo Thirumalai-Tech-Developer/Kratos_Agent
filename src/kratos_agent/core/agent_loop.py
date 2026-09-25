@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import os
 import re
 import threading
 import uuid
@@ -424,6 +425,8 @@ class AgentLoop:
         self.model = model
         self.emit_fn = emit
         self.workspace = workspace.resolve()
+        self.tool_platform = "windows" if os.name == "nt" else "linux"
+        self.tool_cwd = str(self.workspace)
         self.cancellation_flag: threading.Event = cancellation_flag or threading.Event()
 
         self.workspace_tracker = WorkspaceTracker(self.workspace)
@@ -808,7 +811,7 @@ class AgentLoop:
                     user_query,
                     route_decision.target_tool_categories if route_decision.target_tool_categories else None,
                 ),
-                {"cwd": str(self.workspace), "platform": "windows"},
+                {"cwd": self.tool_cwd, "platform": self.tool_platform},
                 run_state=self.current_run,
             )
             if built["compaction"]:

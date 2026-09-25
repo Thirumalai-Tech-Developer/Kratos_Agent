@@ -83,6 +83,18 @@ def test_normal_chat_without_plan_can_complete_without_tools():
     ) == "completed"
 
 
+def test_agent_step_limit_is_persisted_as_failure():
+    derive = _load_status_helper()
+    assert derive(
+        "Stopped after 32 agent steps to prevent an unbounded tool loop.",
+        cancelled=False,
+        plan=None,
+        tool_calls=[{"name": "run_terminal_command", "call_id": "1"}],
+        user_request="solve the task",
+        verification_passed=None,
+    ) == "failed"
+
+
 def test_tool_started_events_are_counted_in_runtime_source():
     source = (ROOT / "src/kratos_agent/main.py").read_text(encoding="utf-8")
     assert 'event.kind.value in {"tool.requested", "tool.started"}' in source

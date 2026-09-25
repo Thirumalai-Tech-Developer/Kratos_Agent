@@ -255,7 +255,10 @@ def _terminal_command_failed(content: str) -> bool:
         result = None
     if isinstance(result, dict) and result.get("ok") is False:
         return True
-    match = re.search(r"(?m)^\s*Exit Code:\s*(-?\d+)\s*$", content)
+    match = re.search(
+        r"(?im)^\s*(?:Exit Code:|Command exited with status)\s*(-?\d+)\.?\s*$",
+        content,
+    )
     return bool(match and int(match.group(1)) != 0)
 
 

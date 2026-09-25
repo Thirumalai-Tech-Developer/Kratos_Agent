@@ -70,7 +70,7 @@ def _derive_turn_status(
     """Derive persisted turn status from runtime evidence, never from narration alone."""
     if cancelled:
         return "paused"
-    if result.startswith("Model request failed:") or result.startswith("Execution error:"):
+    if result.startswith(("Model request failed:", "Execution error:", "Stopped after ")):
         return "failed"
 
     plan_state = ""
@@ -520,7 +520,13 @@ class KratosRuntime:
         self._emit(done_evt)
         return result
 
-    def run_agent(self, query: str, agent_mode: bool = True) -> str:
+    def run_agent(
+        self,
+        query: str,
+        agent_mode: bool = True,
+        *,
+        max_steps: int | None = None,
+    ) -> str:
         if not agent_mode:
             return self.run_chat_restricted(query)
 
@@ -529,9 +535,14 @@ class KratosRuntime:
         resume_plan = None
         if query.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:
             resume_plan = self.memory.active_session.get_plan()
-        result, self._history = self.loop.run(self._history, self._allow_tool, resume_plan=resume_plan)
+        result, self._history = self.loop.run(
+            self._history,
+            self._allow_tool,
+            max_steps=max_steps,
+            resume_plan=resume_plan,
+        )
 
-        if result.startswith("Model request failed:") or result.startswith("Execution error:"):
+        if result.startswith(("Model request failed:", "Execution error:", "Stopped after ")):
             status = "failed"
             if self._history and self._history[-1].role == "user" and self._history[-1].content == query:
                 self._history.pop()
