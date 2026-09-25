@@ -1,6 +1,6 @@
 """PromptBuilder V2: Modular 5-layer system prompt construction with strict token budgets."""
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 CORE_PROMPT_V2 = """You are Kratos, an autonomous computer-use and software agent.
@@ -28,6 +28,16 @@ Do not generate progress messages for every tool call.
 User-facing progress must contain only meaningful milestones.
 
 Never claim success before verification.
+
+VERIFICATION HIERARCHY:
+1. Prefer an existing task/project test, verifier, test script, build check, or acceptance command over self-authored tests.
+2. Before declaring a coding task complete, inspect the workspace for authoritative verification mechanisms when reasonably discoverable: test scripts, tests/, Makefile test targets, package.json test scripts, pyproject/pytest, Cargo tests, Go tests, or task-specific verification commands.
+3. A test file you created yourself is NOT authoritative. It is useful for debugging, but passing it alone never proves completion.
+4. If an authoritative test exists, run it after implementation. If it fails, diagnose the failure, repair the implementation, and run it again.
+5. If no authoritative test exists, derive adversarial checks directly from the task requirements. Cover boundary cases, malformed input, negative cases, and preservation of required behavior. Treat these as supporting evidence, not proof that hidden acceptance tests will pass.
+6. For security, filtering, parsing, sanitization, compatibility, or data-transformation tasks, actively look for bypasses and edge cases instead of testing only the happy path.
+7. Do not stop merely because syntax checks or a small self-authored test suite passes. Ask: "What exact requirement could still fail?"
+8. Final success must be based on concrete execution evidence, not model confidence or narration.
 
 After an important action, verify the resulting state.
 
@@ -77,30 +87,21 @@ class PromptBuilder:
 
     def build(self) -> str:
         layers: List[str] = [self.core]
-
-        # 1. Task Context
         if self.task and self.task.strip():
             layers.append(f"## TASK CONTEXT\n{self.task.strip()}")
-
-        # 2. Relevant Memory (compact bullet points only)
         if self.memory:
             cleaned_memories = [m.strip() for m in self.memory if m and m.strip()]
             if cleaned_memories:
                 mem_text = "\n".join(f"- {m}" for m in cleaned_memories[:5])
                 layers.append(f"## RELEVANT MEMORY\n{mem_text}")
-
-        # 3. Available Tools
         if self.tools:
             tool_list = ", ".join(self.tools)
             layers.append(f"## AVAILABLE TOOLS\n{tool_list}")
-
-        # 4. Current State
         if self.state:
             active_win = (self.state.get("active_window") or {}).get("title", "Unknown")
             browser_url = (self.state.get("browser_state") or {}).get("url")
             state_lines = [f"Active Window: {active_win}"]
             if browser_url:
                 state_lines.append(f"Browser URL: {browser_url}")
-            layers.append(f"## CURRENT STATE\n" + "\n".join(state_lines))
-
+            layers.append("## CURRENT STATE\n" + "\n".join(state_lines))
         return "\n\n".join(layers)

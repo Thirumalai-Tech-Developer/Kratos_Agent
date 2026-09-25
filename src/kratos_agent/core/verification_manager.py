@@ -1,16 +1,19 @@
 """Verification manager: runs post-implementation verification for coding tasks.
 
-Checks file integrity, validates syntax/structure of created assets, runs test/build
-checks if available, and confirms workspace state before marking tasks completed.
-Separates implementation from dedicated verification.
+Checks file integrity, validates syntax/structure of created assets, runs existing
+project test suites when discoverable, and confirms workspace state before marking
+tasks completed. Separates implementation from dedicated verification.
 """
 from __future__ import annotations
 
 import ast
 import json
+import os
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
 from .runtime_contracts import EventKind, RuntimeEvent
 from .evidence import Evidence, OutcomeAssertion
@@ -92,6 +95,111 @@ class VerificationManager:
 
         return Verdict(allow=True, reason="evidence_met", evidence=evidence)
 
+    def _candidate_test_commands(self) -> List[Tuple[str, List[str]]]:
+        """Discover *existing* project verification commands.
+
+        This intentionally ignores test files created during the current turn.
+        A self-authored verifier is useful for debugging but is not authoritative.
+        """
+        root = self.workspace
+        candidates: List[Tuple[str, List[str]]] = []
+
+        for name in ("run-tests.sh", "test.sh"):
+            path = root / name
+            if path.is_file():
+                candidates.append((name, ["bash", str(path)]))
+
+        ps1 = root / "run-tests.ps1"
+        if ps1.is_file() and os.name == "nt":
+            candidates.append((ps1.name, ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)]))
+
+        makefile = root / "Makefile"
+        if makefile.is_file():
+            try:
+                text = makefile.read_text(encoding="utf-8", errors="replace")
+                if any(line.startswith("test:") or line.startswith("test :") for line in text.splitlines()):
+                    candidates.append(("make test", ["make", "test"]))
+            except OSError:
+                pass
+
+        package = root / "package.json"
+        if package.is_file():
+            try:
+                data = json.loads(package.read_text(encoding="utf-8", errors="replace"))
+                scripts = data.get("scripts") or {}
+                test_script = str(scripts.get("test", "")).strip()
+                if test_script and "no test specified" not in test_script.lower():
+                    candidates.append(("npm test", ["npm", "test"]))
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        if (root / "Cargo.toml").is_file():
+            candidates.append(("cargo test", ["cargo", "test"]))
+
+        if (root / "go.mod").is_file():
+            candidates.append(("go test ./...", ["go", "test", "./..."]))
+
+        python_tests = root / "tests"
+        if python_tests.is_dir():
+            if (root / "pyproject.toml").is_file() or any(
+                p.suffix == ".py" and p.name.startswith("test_") for p in python_tests.rglob("*.py")
+            ):
+                candidates.append(("pytest", [sys.executable, "-m", "pytest", "-q"]))
+
+        seen: set[Tuple[str, ...]] = set()
+        unique: List[Tuple[str, List[str]]] = []
+        for label, command in candidates:
+            key = tuple(command)
+            if key not in seen:
+                seen.add(key)
+                unique.append((label, command))
+        return unique
+
+    def _run_discovered_tests(
+        self,
+        *,
+        changed_files: List[str],
+        timeout_seconds: int = 120,
+    ) -> Tuple[Optional[bool], List[str]]:
+        """Run pre-existing project tests, if a trustworthy suite is discoverable."""
+        commands = self._candidate_test_commands()
+        if not commands:
+            return None, ["No pre-existing project test suite was discovered; structural verification only."]
+
+        details: List[str] = []
+        all_passed = True
+
+        for label, command in commands[:2]:
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=self.workspace,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                all_passed = False
+                details.append(f"Test command failed to start ({label}): {exc}")
+                continue
+
+            output = (completed.stdout or "").strip()
+            if len(output) > 6000:
+                output = output[-6000:]
+            if completed.returncode == 0:
+                details.append(f"Authoritative project tests passed: {label}")
+            else:
+                all_passed = False
+                details.append(f"Authoritative project tests FAILED: {label} (exit {completed.returncode})")
+                if output:
+                    details.append(output)
+
+        return all_passed, details
+
     def verify_workspace(
         self,
         changed_files: List[str],
@@ -100,7 +208,7 @@ class VerificationManager:
         browser_performed: bool = False,
         turn_id: str = "",
     ) -> VerificationResult:
-        """Runs dedicated verification checks on changed workspace files."""
+        """Run file integrity checks plus any discoverable authoritative project tests."""
         self.emit(RuntimeEvent(
             EventKind.VERIFICATION_STARTED,
             {"changed_files": changed_files, "file_count": len(changed_files), "type": verification_type},
@@ -118,7 +226,6 @@ class VerificationManager:
             passed = False
             details.append("No files were created or modified during task execution.")
 
-        # 1. Verify existence and non-emptiness of all changed files
         for rel_path in changed_files:
             file_path = (self.workspace / rel_path).resolve()
             if not file_path.exists():
@@ -137,7 +244,6 @@ class VerificationManager:
                 passed = False
                 details.append(f"Empty file: {rel_path}")
 
-            # 2. Syntax / Format validation
             suffix = file_path.suffix.lower()
             if suffix == ".py":
                 try:
@@ -164,14 +270,15 @@ class VerificationManager:
             elif suffix in (".js", ".jsx", ".ts", ".tsx"):
                 details.append(f"Source file OK: {rel_path}")
 
-        # 3. Dedicated Build/Test verification if requested
-        if "build" in verification_type:
-            if passed and files_checked > 0:
-                build_passed = True
-                details.append("Build files and syntax verified.")
-            else:
-                build_passed = False
-                details.append("Build verification failed due to missing or invalid files.")
+        if passed and files_checked > 0:
+            build_passed = True
+
+        should_run_tests = verification_type == "auto" or "test" in verification_type or "build" in verification_type
+        if passed and should_run_tests and files_checked > 0:
+            tests_passed, test_details = self._run_discovered_tests(changed_files=changed_files)
+            details.extend(test_details)
+            if tests_passed is False:
+                passed = False
 
         if "browser" in verification_type:
             if browser_performed:
@@ -181,14 +288,18 @@ class VerificationManager:
                 browser_passed = None
                 details.append("Browser verification not performed.")
 
-        # 4. Overall status summary
         if passed and files_checked > 0:
             summary = f"Verified {files_checked} changed file(s) successfully."
+            if tests_passed is True:
+                summary += " Existing project tests also passed."
+            elif tests_passed is None:
+                summary += " No authoritative project test suite was available."
         elif passed and not require_files:
             summary = "Workspace verified successfully."
         else:
             passed = False
-            summary = f"Verification failed: {len([d for d in details if 'error' in d.lower() or 'missing' in d.lower() or 'no files' in d.lower() or 'empty' in d.lower()])} issue(s) detected."
+            issue_count = len([d for d in details if any(x in d.lower() for x in ("error", "missing", "no files", "empty", "failed"))])
+            summary = f"Verification failed: {issue_count} issue(s) detected."
 
         result = VerificationResult(
             passed=passed,
@@ -202,13 +313,7 @@ class VerificationManager:
 
         self.emit(RuntimeEvent(
             EventKind.VERIFICATION_COMPLETED,
-            {
-                "passed": passed,
-                "summary": summary,
-                "files_checked": files_checked,
-                "details": details,
-            },
+            {"passed": passed, "summary": summary, "files_checked": files_checked, "tests_passed": tests_passed, "details": details},
             turn_id,
         ))
-
         return result

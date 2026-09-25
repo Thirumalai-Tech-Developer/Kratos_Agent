@@ -18,6 +18,7 @@ TASKS = (
     "terminal-bench/photonic-waveguide-routing",
     "terminal-bench/bun-sourcemap-leak",
 )
+DEFAULT_VERIFIER_TIMEOUT_MULTIPLIER = 2.0
 
 
 def _base_url() -> str:
@@ -66,12 +67,54 @@ def preflight_provider() -> int:
     return 0
 
 
+def _build_harbor_command(
+    *,
+    task: str,
+    model: str,
+    jobs_dir: Path,
+    run_id: str,
+    agent_timeout_multiplier: float,
+    verifier_timeout_multiplier: float,
+    dry_run: bool = False,
+) -> list[str]:
+    command = [
+        "harbor", "run",
+        "--agent", "benchmarks.kratos_harbor_fast_agent:KratosHarborFastAgent",
+        "--model", model,
+        "--dataset", "terminal-bench/terminal-bench@4.0.0",
+        "--include-task-name", task,
+        "--n-tasks", "1",
+        "--n-attempts", "1",
+        "--n-concurrent", "1",
+        "--agent-timeout-multiplier", str(agent_timeout_multiplier),
+        "--verifier-timeout-multiplier", str(verifier_timeout_multiplier),
+        "--job-name", f"kratos-tb4-fast-{task.rsplit('/', 1)[-1]}-{run_id}",
+        "--jobs-dir", str(jobs_dir),
+        "--yes",
+    ]
+    if dry_run:
+        command.append("--dry-run")
+    return command
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="validate Harbor task metadata without a provider call")
     parser.add_argument("--skip-provider-preflight", action="store_true", help="skip the fast gateway/auth check")
     parser.add_argument("--task", action="append", choices=TASKS, help="select one or more pilot tasks")
+    parser.add_argument(
+        "--verifier-timeout-multiplier",
+        type=float,
+        default=DEFAULT_VERIFIER_TIMEOUT_MULTIPLIER,
+        help=(
+            "Multiplier for Terminal-Bench verifier timeouts. The html-js-filter "
+            "browser verifier can legitimately take several minutes."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.verifier_timeout_multiplier <= 0:
+        parser.error("--verifier-timeout-multiplier must be greater than 0")
 
     load_dotenv(ROOT / ".env", override=False)
     tasks = tuple(args.task) if args.task else TASKS
@@ -110,26 +153,19 @@ def main() -> int:
     failures = 0
     for task in tasks:
         print(f"\n=== {task} ===")
-        command = [
-            "harbor", "run",
-            "--agent", "benchmarks.kratos_harbor_fast_agent:KratosHarborFastAgent",
-            "--model", model,
-            "--dataset", "terminal-bench/terminal-bench@4.0.0",
-            "--include-task-name", task,
-            "--n-tasks", "1",
-            "--n-attempts", "1",
-            "--n-concurrent", "1",
-            "--agent-timeout-multiplier", str(600 / 3_600),
-            "--job-name", f"kratos-tb4-fast-{task.rsplit('/', 1)[-1]}-{run_id}",
-            "--jobs-dir", str(jobs_dir),
-            "--yes",
-        ]
-        if args.dry_run:
-            command.append("--dry-run")
+        command = _build_harbor_command(
+            task=task,
+            model=model,
+            jobs_dir=jobs_dir,
+            run_id=run_id,
+            agent_timeout_multiplier=600 / 3_600,
+            verifier_timeout_multiplier=args.verifier_timeout_multiplier,
+            dry_run=args.dry_run,
+        )
         try:
             result = subprocess.run(command, cwd=ROOT, env=env, check=False)
         except FileNotFoundError:
-            print("Harbor CLI not found. Run with `uv run --extra benchmark ...`.", file=sys.stderr)
+            print("Harbor CLI not found. Run with uv run --extra benchmark.", file=sys.stderr)
             return 5
         if result.returncode:
             failures += 1
