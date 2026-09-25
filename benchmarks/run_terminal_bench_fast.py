@@ -1,4 +1,4 @@
-"""Run a fair, low-overhead Terminal-Bench 2.0 pilot through Harbor."""
+"""Run a low-overhead Terminal-Bench 4.0.0 pilot through Harbor."""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +18,6 @@ TASKS = (
     "terminal-bench/photonic-waveguide-routing",
     "terminal-bench/bun-sourcemap-leak",
 )
-JOBS_DIR = Path(os.getenv("KRATOS_BENCH_JOBS_DIR", ROOT / "benchmarks" / "jobs")).resolve()
 
 
 def _base_url() -> str:
@@ -33,28 +32,36 @@ def _base_url() -> str:
     return endpoint
 
 
+def _model() -> str:
+    return (
+        os.getenv("KRATOS_BENCH_MODEL")
+        or os.getenv("OMNIROUTE_MODEL")
+        or os.getenv("BRAIN_MODEL")
+        or os.getenv("KRATOS_MODEL")
+        or "ds-web/deepseek-v4-pro-think"
+    )
+
+
 def preflight_provider() -> int:
-    """Fail fast on gateway/auth problems instead of burning Harbor task time."""
+    """Fail in seconds on gateway/auth problems instead of burning Harbor time."""
     key = (os.getenv("OMNI_KEY") or os.getenv("BRAIN_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
     if not key:
-        print("No provider API key is configured (OMNI_KEY/BRAIN_KEY/OPENAI_API_KEY).", file=sys.stderr)
+        print("Provider preflight failed: no API key configured (OMNI_KEY/BRAIN_KEY/OPENAI_API_KEY).", file=sys.stderr)
         return 2
 
     url = f"{_base_url()}/models"
     request = Request(url, headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
     try:
         with urlopen(request, timeout=5) as response:
-            if response.status < 200 or response.status >= 300:
+            if not 200 <= response.status < 300:
                 print(f"Provider preflight failed: HTTP {response.status} from {url}", file=sys.stderr)
                 return 3
     except HTTPError as exc:
-        print(f"Provider preflight failed: HTTP {exc.code} from {url}. Check OMNI_KEY and gateway auth.", file=sys.stderr)
+        print(f"Provider preflight failed: HTTP {exc.code} from {url}. Check gateway credentials.", file=sys.stderr)
         return 3
-    except URLError as exc:
-        print(f"Provider preflight failed: {exc.reason}. Is OmniRoute reachable at {url}?", file=sys.stderr)
-        return 3
-    except TimeoutError:
-        print(f"Provider preflight timed out after 5s: {url}", file=sys.stderr)
+    except (URLError, TimeoutError) as exc:
+        detail = getattr(exc, "reason", str(exc))
+        print(f"Provider preflight failed: {detail}. Is the gateway reachable at {url}?", file=sys.stderr)
         return 3
     return 0
 
@@ -65,22 +72,17 @@ def main() -> int:
     parser.add_argument("--skip-provider-preflight", action="store_true", help="skip the fast gateway/auth check")
     parser.add_argument("--task", action="append", choices=TASKS, help="select one or more pilot tasks")
     args = parser.parse_args()
-    tasks = tuple(args.task) if args.task else TASKS
 
     load_dotenv(ROOT / ".env", override=False)
+    tasks = tuple(args.task) if args.task else TASKS
+    jobs_dir = Path(os.getenv("KRATOS_BENCH_JOBS_DIR", ROOT / "benchmarks" / "jobs")).resolve()
+
     if not args.dry_run and not args.skip_provider_preflight:
         status = preflight_provider()
         if status:
             return status
 
-    model = (
-        os.getenv("KRATOS_BENCH_MODEL")
-        or os.getenv("OMNIROUTE_MODEL")
-        or os.getenv("BRAIN_MODEL")
-        or os.getenv("KRATOS_MODEL")
-        or "ds-web/deepseek-v4-pro-think"
-    )
-
+    model = _model()
     if not args.dry_run:
         docker = subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
@@ -104,7 +106,10 @@ def main() -> int:
         f"Terminal-Bench 4.0.0 | model={model} | attempts=1 | tasks={len(tasks)} | "
         "agent=kratos-fast | planner_call=disabled"
     )
+
+    failures = 0
     for task in tasks:
+        print(f"\n=== {task} ===")
         command = [
             "harbor", "run",
             "--agent", "benchmarks.kratos_harbor_fast_agent:KratosHarborFastAgent",
@@ -115,9 +120,8 @@ def main() -> int:
             "--n-attempts", "1",
             "--n-concurrent", "1",
             "--agent-timeout-multiplier", str(600 / 3_600),
-            "--quiet",
             "--job-name", f"kratos-tb4-fast-{task.rsplit('/', 1)[-1]}-{run_id}",
-            "--jobs-dir", str(JOBS_DIR),
+            "--jobs-dir", str(jobs_dir),
             "--yes",
         ]
         if args.dry_run:
@@ -128,7 +132,13 @@ def main() -> int:
             print("Harbor CLI not found. Run with `uv run --extra benchmark ...`.", file=sys.stderr)
             return 5
         if result.returncode:
-            return result.returncode
+            failures += 1
+            print(f"Task failed to execute: {task} (exit={result.returncode})", file=sys.stderr)
+
+    if failures:
+        print(f"\nBenchmark completed with {failures}/{len(tasks)} task execution failures.", file=sys.stderr)
+        return 10
+    print(f"\nBenchmark completed: {len(tasks)}/{len(tasks)} task runs returned successfully.")
     return 0
 
 
