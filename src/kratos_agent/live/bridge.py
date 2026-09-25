@@ -112,6 +112,15 @@ class KratosBridge:
                 self.status_hub.update(active_task_id=None)
             else:
                 self.status_hub.update(active_task_id=result["task_id"])
+        if self.status_hub and result.get("status") in {"failed", "partial", "error"}:
+            detail = result.get("error") or {}
+            if isinstance(detail, dict):
+                message = detail.get("user_message") or detail.get("message") or result.get("message")
+                component = detail.get("component") or "slave"
+            else:
+                message = str(detail)
+                component = "slave"
+            self.status_hub.report_error(component, str(message or "Mission failed without a diagnostic."))
         return {
             **result,
             "capability": result.get("capability") or capability or "generic_task",

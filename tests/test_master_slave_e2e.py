@@ -1,7 +1,7 @@
 """End-to-end integration test for Gemini Live Master + OmniRoute Slave execution."""
 import asyncio
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from kratos_agent.master.protocol import (
     CommandAction,
@@ -163,7 +163,33 @@ class TestMasterSlaveEndToEnd(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_bridge_exposes_slave_failure_in_live_status(self):
+        async def _run():
+            from kratos_agent.live.bridge import KratosBridge
+            from kratos_agent.live.events import LiveStatusHub
+
+            hub = LiveStatusHub()
+            bridge = KratosBridge(runtime=MagicMock(), status_hub=hub)
+            bridge.slave_executor._running = True
+            bridge.supervisor = MagicMock()
+            bridge.supervisor.submit_delegated_task = AsyncMock(return_value={
+                "status": "failed",
+                "task_id": "task-auth-failure",
+                "error": {
+                    "component": "SlaveExecutor",
+                    "stage": "physical_execution",
+                    "message": "Model request failed: Brain access error (HTTP 401): Invalid API key",
+                },
+            })
+
+            result = await bridge.submit_task("create and test calculator.py", wait_for_result=True)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(hub.status.last_error_component, "slaveexecutor")
+            self.assertIn("HTTP 401", hub.status.last_error)
+            self.assertIn("Invalid API key", hub.status.last_error)
+
+        asyncio.run(_run())
+
 if __name__ == "__main__":
     unittest.main()
-
-
