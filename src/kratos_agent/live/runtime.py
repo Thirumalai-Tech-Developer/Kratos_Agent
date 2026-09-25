@@ -19,6 +19,46 @@ from .vision import VisionManager
 logger = logging.getLogger(__name__)
 
 
+def _is_generic_live_failure(reply: str) -> bool:
+    """Detect Live's non-diagnostic apology so the CLI can use Kratos' real result."""
+    normalized = " ".join(str(reply or "").casefold().split())
+    return any(marker in normalized for marker in (
+        "system error occurred",
+        "couldn't process your request",
+        "could not process your request",
+        "i didn't catch your request",
+        "i did not catch your request",
+    ))
+
+
+def _resolve_live_chat_reply(reply: str, before_task_id: Optional[str], status: Dict[str, Any]) -> str:
+    """Use a correlated structured Kratos result instead of generic Live apology text."""
+    if reply and not _is_generic_live_failure(reply):
+        return reply
+
+    result = status.get("last_result") or {}
+    result_task_id = result.get("task_id")
+    if result_task_id and result_task_id != before_task_id:
+        if str(result.get("status") or "").lower() == "success" and result.get("verified"):
+            evidence = result.get("evidence") or {}
+            detail = evidence.get("message") or "Task completed and verified by Kratos."
+            return f"Kratos completed and verified the task. {detail}"
+        error = result.get("error") or status.get("last_error") or {}
+        if isinstance(error, dict):
+            component = error.get("component") or status.get("last_error_component") or "Kratos"
+            stage = error.get("stage") or status.get("current_stage") or "execution"
+            message = error.get("user_message") or error.get("message") or "No error detail was returned."
+            recovery = error.get("recovery_action")
+            detail = f"Kratos task failed in {component} during {stage}: {message}"
+            if recovery:
+                detail += f" Recovery: {recovery}"
+            return detail
+        return str(error or "Kratos task failed without a structured diagnostic.")
+
+    # None signals the CLI to route the original request through Kratos Agent.
+    return ""
+
+
 class LiveRuntime:
     """Orchestrates audio, vision, Gemini Live session, Kratos bridge, and narration."""
 
@@ -152,6 +192,7 @@ class LiveRuntime:
         if not self.status_hub.get_status().gemini_connected:
             return None
         try:
+            before_task_id = self.bridge.get_status().get("task_id")
             from kratos_agent.interfaces.cli import build_cli_input
             envelope = build_cli_input(text)
             fut = asyncio.run_coroutine_threadsafe(
@@ -159,13 +200,14 @@ class LiveRuntime:
                 self._loop,
             )
             result = fut.result(timeout=timeout + 3.0)
-            if result:
-                return result
             status = self.bridge.get_status()
-            error = status.get("last_error")
-            if error:
-                return str(error.get("user_message") or error.get("message") or "Live turn completed without a model response.")
-            return "Gemini Live completed the turn without returning a user-facing response."
+            resolved = _resolve_live_chat_reply(result or "", before_task_id, status)
+            if resolved:
+                return resolved
+            logger.warning(
+                "[LiveRuntime] Gemini Live returned no usable response and no correlated Kratos task result; falling back to Kratos Agent."
+            )
+            return None
         except Exception as e:
             logger.exception("[LiveRuntime] Error in send_chat_turn_sync")
             message = str(e).strip() or type(e).__name__
