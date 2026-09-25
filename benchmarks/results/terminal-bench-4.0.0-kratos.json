@@ -13,17 +13,19 @@
   ],
   "task_selection_dry_run": "passed_for_all_three_tasks",
   "attempts": {
-    "total_started": 5,
+    "total_started": 10,
     "failed_before_model_call_due_to_adapter_import_bug": 3,
-    "corrected_adapter_trials": 2,
-    "corrected_trial_task": "terminal-bench/html-js-filter (2 attempts)",
-    "corrected_trial_error": "OmniRoute returned HTTP 502: upstream provider rejected the token as invalid on both attempts",
+    "corrected_adapter_trials": 7,
+    "provider_auth_failures": 6,
+    "interrupted_without_score": 1,
+    "latest_user_run": "All three selected tasks reached the configured model request and returned HTTP 401: Invalid API key.",
+    "corrected_trial_error": "OmniRoute rejected the configured API key; no model response or verifier reward was produced.",
     "valid_task_scores": 0
   },
   "performance_diagnostic": {
     "same_task_auth_failure_runtime_before_retry_fix_seconds": 177,
     "same_task_auth_failure_runtime_after_retry_fix_seconds": 63,
-    "interpretation": "Error-path latency only; neither run produced a valid task score."
+    "interpretation": "Earlier error-path timings only; neither run produced a valid task score."
   },
   "checks": {
     "harbor_adapter_import_and_preflight": "passed",
@@ -33,7 +35,7 @@
     "python_compile": "passed",
     "git_diff_check": "passed",
     "docker_engine": "available",
-    "omniroute_chat_completion": "rejected_upstream_invalid_token"
+    "omniroute_chat_completion": "rejected_with_HTTP_401_invalid_API_key_in_latest_trials"
   },
   "notes": [
     "No valid Terminal-Bench reward was recorded. Harbor's displayed mean of 0.000 is based on errored trials and must not be reported as a 0% task-solving score.",
