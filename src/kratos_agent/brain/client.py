@@ -319,6 +319,33 @@ class BrainClient:
                 parsed_tool_calls.append({"id": call_id, "name": name, "args": parsed_args})
 
             text = "".join(chunks).strip()
+            # Some OpenAI-compatible reasoning gateways occasionally terminate a
+            # successful SSE stream without emitting user-facing content or tool
+            # deltas. Retry that one ambiguous case as a regular JSON completion;
+            # the non-streaming parser already handles both text and tool calls.
+            if stream and not text and not parsed_tool_calls:
+                try:
+                    fallback_text, fallback_calls = self.request_non_streaming_full(
+                        target_model,
+                        messages,
+                        system_instruction,
+                        max_retries=0,
+                        timeout=req_timeout,
+                        tools=tools,
+                    )
+                except Exception as exc:
+                    raise BrainError(
+                        f"Model {target_model} returned an empty streaming response; "
+                        f"non-streaming recovery failed ({type(exc).__name__})."
+                    ) from exc
+                text = str(fallback_text or "").strip()
+                parsed_tool_calls.extend(fallback_calls or [])
+                if on_chunk and text:
+                    try:
+                        on_chunk(text)
+                    except Exception:
+                        pass
+
             total_duration = (time.monotonic() - start_time) * 1000
             metrics.generation_ms = max(0.0, total_duration - metrics.context_build_ms)
             metrics.total_ms = total_duration
@@ -329,6 +356,10 @@ class BrainClient:
             if text or parsed_tool_calls:
                 return text, parsed_tool_calls
 
+            if stream:
+                raise BrainError(
+                    f"Model {target_model} returned no text or tool calls in streaming or non-streaming mode."
+                )
             raise BrainError(f"Model {target_model} returned an empty response.")
         except Exception as exc:
             metrics.status = "failed"

@@ -63,6 +63,47 @@ class BrainTransportTests(unittest.TestCase):
         result = self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}])
         self.assertEqual(result, "Non-streaming answer")
 
+    @patch.object(BrainClient, "request_non_streaming_full", return_value=("Recovered answer", []))
+    @patch("requests.Session.post")
+    def test_empty_stream_recovers_with_non_streaming_completion(self, mock_post, mock_fallback):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_lines.return_value = []
+        mock_resp.json.side_effect = ValueError("response was an empty SSE body")
+        mock_post.return_value.__enter__.return_value = mock_resp
+
+        result = self.client.generate(
+            "ds-web/deepseek-v4-pro-think",
+            [{"role": "user", "content": "create a small file"}],
+            max_retries=0,
+        )
+
+        self.assertEqual(result, "Recovered answer")
+        mock_fallback.assert_called_once()
+
+    @patch.object(
+        BrainClient,
+        "request_non_streaming_full",
+        return_value=("", [{"id": "call-1", "name": "run_terminal_command", "args": {"command": "pwd"}}]),
+    )
+    @patch("requests.Session.post")
+    def test_empty_stream_recovers_native_tool_call(self, mock_post, mock_fallback):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_lines.return_value = []
+        mock_resp.json.side_effect = ValueError("response was an empty SSE body")
+        mock_post.return_value.__enter__.return_value = mock_resp
+
+        result = self.client.generate(
+            "ds-web/deepseek-v4-pro-think",
+            [{"role": "user", "content": "inspect the workspace"}],
+            max_retries=0,
+        )
+
+        self.assertIn("call:run_terminal_command", result)
+        self.assertIn("pwd", result)
+        mock_fallback.assert_called_once()
+
     @patch("requests.Session.post")
     def test_direct_non_streaming_mode(self, mock_post):
         mock_resp = MagicMock()
