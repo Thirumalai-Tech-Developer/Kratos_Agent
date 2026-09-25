@@ -6,6 +6,7 @@ from kratos_agent.brain.config import (
     DEFAULT_CHAT_ENDPOINT,
     BrainConnectionError,
     BrainBadRequestError,
+    BrainError,
 )
 from kratos_agent.brain.client import BrainClient
 from kratos_agent.brain.chat_model import extract_tool_calls_from_text
@@ -95,6 +96,25 @@ class BrainTransportTests(unittest.TestCase):
             self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}], max_retries=2)
         self.assertIn("Invalid model request to Brain", str(ctx.exception))
         self.assertEqual(mock_post.call_count, 1)  # No retry on 400
+
+    @patch("requests.Session.post")
+    def test_wrapped_upstream_auth_error_is_not_retried(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 502
+        mock_resp.json.return_value = {
+            "error": {"message": "Provider rejected token: Authorization Failed (invalid token)"}
+        }
+        mock_resp.text = "upstream authentication failure"
+        mock_post.return_value.__enter__.return_value = mock_resp
+
+        with self.assertRaises(BrainError) as ctx:
+            self.client.generate(
+                "ds-web/deepseek-v4-pro-think",
+                [{"role": "user", "content": "hello"}],
+                max_retries=2,
+            )
+        self.assertIn("upstream authentication failed", str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
 
     def test_tool_calling_extraction_from_coding_output(self):
         raw_text = 'call:write_file{file_path: "index.html", content: "<h1>Ben 10 WebApp</h1>"}'

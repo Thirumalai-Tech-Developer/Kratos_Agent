@@ -1,0 +1,43 @@
+{
+  "benchmark": "Terminal-Bench 2.0",
+  "dataset_version": "4.0.0",
+  "agent": "Kratos",
+  "model": "ds-web/deepseek-v4-pro-think",
+  "mode": "Sovereign",
+  "status": "blocked_by_provider_auth",
+  "score": null,
+  "planned_tasks": [
+    "terminal-bench/html-js-filter",
+    "terminal-bench/photonic-waveguide-routing",
+    "terminal-bench/bun-sourcemap-leak"
+  ],
+  "task_selection_dry_run": "passed_for_all_three_tasks",
+  "attempts": {
+    "total_started": 5,
+    "failed_before_model_call_due_to_adapter_import_bug": 3,
+    "corrected_adapter_trials": 2,
+    "corrected_trial_task": "terminal-bench/html-js-filter (2 attempts)",
+    "corrected_trial_error": "OmniRoute returned HTTP 502: upstream provider rejected the token as invalid on both attempts",
+    "valid_task_scores": 0
+  },
+  "performance_diagnostic": {
+    "same_task_auth_failure_runtime_before_retry_fix_seconds": 177,
+    "same_task_auth_failure_runtime_after_retry_fix_seconds": 63,
+    "interpretation": "Error-path latency only; neither run produced a valid task score."
+  },
+  "checks": {
+    "harbor_adapter_import_and_preflight": "passed",
+    "kratos_runtime_import_in_isolated_workspace": "passed",
+    "official_dataset_and_task_selection": "passed_for_all_three_tasks",
+    "brain_transport_unit_tests": "passed_12_tests",
+    "python_compile": "passed",
+    "git_diff_check": "passed",
+    "docker_engine": "available",
+    "omniroute_chat_completion": "rejected_upstream_invalid_token"
+  },
+  "notes": [
+    "No valid Terminal-Bench reward was recorded. Harbor's displayed mean of 0.000 is based on errored trials and must not be reported as a 0% task-solving score.",
+    "No Gemini requests were used.",
+    "Raw Harbor job artifacts are local and excluded from Git."
+  ]
+}

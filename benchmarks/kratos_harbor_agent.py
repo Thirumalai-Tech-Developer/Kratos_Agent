@@ -7,6 +7,7 @@ inside Harbor's disposable task environment. Credentials stay on the host.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -66,7 +67,7 @@ class KratosHarborAgent(BaseAgent):
             os.chdir(scratch_path)
             try:
                 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
-                import kratos_agent.main as kratos_main
+                kratos_main = importlib.import_module("kratos_agent.main")
 
                 runtime = kratos_main.runtime
                 runtime.workspace = scratch_path

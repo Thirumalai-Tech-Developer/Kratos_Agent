@@ -1,13 +1,15 @@
-# Latest benchmark attempt
+# Terminal-Bench 4.0.0 status
 
-The Terminal-Bench 4.0.0 run is currently **not run**. The Kratos Harbor
-adapter imports and passes Harbor's agent preflight, and Harbor's metadata-only
-dry-run resolves all three selected tasks. Docker is available, but no task
-attempts have started because a minimal chat request to the configured OmniRoute
-model was rejected upstream as an invalid token. The model-list endpoint alone
-was not sufficient to validate chat access.
+Harbor now resolves the three selected tasks and starts the isolated container.
+Three early trials failed on a Kratos adapter import bug before model inference;
+that bug is fixed. Two corrected trials reached Kratos's model request, but
+OmniRoute returned HTTP 502 because the upstream provider rejected the
+configured token as invalid. No task received a valid verifier score.
 
-See [the machine-readable status](terminal-bench-4.0.0-preflight.json). It has
-no score and must not be presented as benchmark performance. Once Docker is
-running and the OmniRoute credential is corrected, use the command in the
-parent README to run the pinned three-task pilot.
+The corrected authentication-error handler reduced the observed error path
+from 177 seconds to 63 seconds by avoiding retries of the same invalid token.
+This is an error-recovery timing, not an agent task-solving result.
+
+See [the machine-readable status](terminal-bench-4.0.0-kratos.json). It has no
+score and must not be presented as benchmark performance. Once the OmniRoute
+credential is fixed, use the command in the parent README to run the pilot.

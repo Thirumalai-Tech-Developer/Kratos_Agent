@@ -58,6 +58,7 @@ worker-configuration.d.ts
 
 # Pytest & Coverage
 .pytest_cache/
+benchmarks/jobs/
 .coverage
 htmlcov/
 

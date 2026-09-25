@@ -6,6 +6,7 @@ import argparse
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -66,6 +67,9 @@ def main() -> int:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     env["KRATOS_BENCH_MODEL"] = model
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     print(f"Terminal-Bench 4.0.0 | model={model} | attempts=1 | tasks={len(tasks)} | mode=Sovereign")
     print("Task commands are routed through Harbor's disposable Docker environments.")
@@ -80,7 +84,8 @@ def main() -> int:
             "--n-attempts", "1",
             "--n-concurrent", "1",
             "--agent-timeout-multiplier", str(600 / 3_600),
-            "--job-name", f"kratos-tb4-{task.rsplit('/', 1)[-1]}",
+            "--quiet",
+            "--job-name", f"kratos-tb4-{task.rsplit('/', 1)[-1]}-{run_id}",
             "--jobs-dir", str(JOBS_DIR),
             "--yes",
         ]

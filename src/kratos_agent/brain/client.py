@@ -563,6 +563,21 @@ class BrainClient:
         elif resp.status_code in (401, 403):
             raise BrainError(f"Brain access error (HTTP {resp.status_code}): {detail}")
         elif resp.status_code >= 500:
+            lowered = detail.lower()
+            auth_markers = (
+                "invalid token",
+                "authorization failed",
+                "unauthorized",
+                "invalid api key",
+                "authentication failed",
+            )
+            if any(marker in lowered for marker in auth_markers):
+                # Some gateways wrap upstream 401/403 responses as HTTP 502.
+                # Retrying bad credentials only wastes minutes and obscures the
+                # actionable error; treat these as non-retryable access errors.
+                raise BrainError(
+                    f"Brain upstream authentication failed (HTTP {resp.status_code}): {detail}"
+                )
             raise BrainServerError(f"Brain server error (HTTP {resp.status_code}): {detail}")
         else:
             raise BrainError(f"Brain returned HTTP {resp.status_code}: {detail}")
