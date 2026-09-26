@@ -6,7 +6,16 @@ the process-global runtime after every Harbor task.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
+
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext

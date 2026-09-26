@@ -139,7 +139,7 @@ def main() -> int:
             return 4
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     env["KRATOS_BENCH_MODEL"] = model
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
