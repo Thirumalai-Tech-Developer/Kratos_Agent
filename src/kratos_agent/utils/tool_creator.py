@@ -34,6 +34,10 @@ def create_or_update_tool(
     Validates Python code, writes the function to tools.py,
     updates tools_list.json, and triggers a hot-reload.
     """
+    import os
+    if os.environ.get("KRATOS_ALLOW_DYNAMIC_PLUGINS", "false").lower() != "true":
+        return "Dynamic tool forging is disabled. Set KRATOS_ALLOW_DYNAMIC_PLUGINS=true to enable."
+
     # 1. Validate AST / Syntax
     try:
         parsed_ast = ast.parse(python_code)

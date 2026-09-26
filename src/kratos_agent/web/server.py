@@ -40,6 +40,14 @@ def get_web_dir() -> Path:
 WEB_DIR = get_web_dir()
 
 
+ALLOWED_ORIGINS = {
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:7860",
+    "http://localhost:7860",
+}
+
+
 class KratosWebHandler(BaseHTTPRequestHandler):
     """HTTP Request Handler for Kratos Web Console, Agent Arena & REST API."""
 
@@ -49,10 +57,16 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         if args and str(args[1]) not in ("200", "304"):
             logger.info("%s - %s", self.address_string(), format % args)
 
+    def _send_cors_headers(self) -> None:
+        origin = self.headers.get("Origin", "")
+        if origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
     def do_OPTIONS(self) -> None:
         """Handle CORS pre-flight checks."""
         self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
@@ -322,7 +336,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-transform")
         self.send_header("Connection", "close")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.end_headers()
 
         def send_event(data: Dict[str, Any]) -> None:
@@ -505,7 +519,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-transform")
         self.send_header("Connection", "close")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.end_headers()
         
         # In a real implementation, this ties into event_adapter.py and the event_bus
@@ -569,8 +583,8 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         """Verifies commander security clearance passcode to unlock Autonomous Agent Mode."""
         import os
         password = str(payload.get("password", "")).strip()
-        expected = os.environ.get("AGENT_PASSWORD", "kratos").strip()
-        if password == expected:
+        expected = os.environ.get("AGENT_PASSWORD", "").strip()
+        if expected and password == expected:
             self._send_json({"success": True, "message": "Security clearance granted"})
         else:
             self._send_json({"success": False, "error": "ACCESS DENIED // Invalid Passcode"}, status=HTTPStatus.UNAUTHORIZED)
@@ -727,7 +741,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(content)
 

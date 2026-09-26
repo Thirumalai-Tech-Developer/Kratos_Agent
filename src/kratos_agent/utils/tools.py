@@ -21,6 +21,13 @@ from kratos_agent.core.approval_mode import approval_gate
 from kratos_agent.core.hooks import hook_registry
 from kratos_agent.core import git_tools as _git
 from kratos_agent.utils.tool_creator import self_tool_creator
+from kratos_agent.utils.computer_tools import (
+    active_window_info,
+    display_info,
+    screenshot_capture,
+    screen_read_text,
+    ui_tree_dump,
+)
 
 # Reconfigure stdout for UTF-8 on Windows
 if sys.platform == "win32":

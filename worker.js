@@ -484,7 +484,12 @@ async function handleApi(request, env, url) {
 
   // 10. POST /api/auth/agent-mode (Commander Security Clearance)
   if (path === "/api/auth/agent-mode" && method === "POST") {
-    return jsonResponse({ success: true, message: "Security clearance granted // Unrestricted Full Autonomy Active" });
+    const body = await request.json().catch(() => ({}));
+    const expected = (env.AGENT_PASSWORD || "").trim();
+    if (!expected || String(body.password || "") !== expected) {
+      return jsonResponse({ success: false, error: "ACCESS DENIED" }, 401);
+    }
+    return jsonResponse({ success: true, message: "Security clearance granted" });
   }
 
   // 11. POST /api/chat (Server-Sent Events streaming chat)

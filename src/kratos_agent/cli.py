@@ -3,9 +3,12 @@ import sys
 import re
 import json
 import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from kratos_agent.core.memory import AgenticSession
+
+logger = logging.getLogger(__name__)
 
 # Ensure Windows terminal handles UTF-8 & emojis properly
 if sys.platform == "win32":

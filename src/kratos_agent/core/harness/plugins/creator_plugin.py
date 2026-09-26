@@ -110,6 +110,10 @@ class {class_name}(HarnessPlugin):
         if not self.kernel:
             return None, "Kernel is not attached."
 
+        import os
+        if os.environ.get("KRATOS_ALLOW_DYNAMIC_PLUGINS", "false").lower() != "true":
+            return None, "Dynamic plugin loading is disabled. Set KRATOS_ALLOW_DYNAMIC_PLUGINS=true to enable."
+
         valid, err = self.validate_plugin_code(source_code)
         if not valid:
             return None, err
