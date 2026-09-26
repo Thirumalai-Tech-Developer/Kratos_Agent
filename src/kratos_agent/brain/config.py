@@ -181,7 +181,7 @@ def get_available_models(refresh: bool = False, timeout: float = 3.0) -> List[st
     return get_model(refresh=refresh, timeout=timeout)
 
 
-PUBLIC_MODELS: List[str] = get_model()
+PUBLIC_MODELS: List[str] = []
 
 
 def get_normal_mode_model() -> str:

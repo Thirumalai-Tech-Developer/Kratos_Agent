@@ -1577,11 +1577,14 @@ def handle_parallel_command(arg: str = ""):
     console.print("[dim]Use '/parallel on', '/parallel off', or '/parallel <workers>' (e.g. /parallel 16) to configure.[/dim]\n")
 
 def start_interactive_cli():
-    session = PromptSession(
-        completer=KratosCompleter(),
-        complete_while_typing=True,
-        style=prompt_style
-    )
+    try:
+        session = PromptSession(
+            completer=KratosCompleter(),
+            complete_while_typing=True,
+            style=prompt_style
+        )
+    except Exception:
+        session = None
 
     # Every interactive CLI launch starts a new conversational/task session.
     # Older sessions remain available explicitly via /session load.
@@ -1617,9 +1620,12 @@ def start_interactive_cli():
             # 1. Auto hot-reload if any source files or skills changed on disk
             code_reloader.auto_reload_if_changed()
 
-            user_input = session.prompt(
-                HTML("<prompt>KRATOS</prompt> <arrow>›</arrow> ")
-            ).strip()
+            if session is not None:
+                user_input = session.prompt(
+                    HTML("<prompt>KRATOS</prompt> <arrow>›</arrow> ")
+                ).strip()
+            else:
+                user_input = input("KRATOS › ").strip()
 
             # 2. Automatically identify and normalize multiple leading slashes (// -> /)
             user_input = normalize_command(user_input)
@@ -2336,18 +2342,17 @@ def render_git_changes_card():
         pass
 
 def main():
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].strip()
-        if arg in ("--help", "-h", "/help", "help"):
-            console.print(HELP_TEXT)
-            return
-        if arg in ("--version", "-v", "version"):
-            console.print("[bold red]Kratos Agent[/bold red] [bold gold1]v0.1.0[/bold gold1] - [dim]The Ghost of Sparta Codes[/dim]")
-            return
-        if arg in ("--cli", "-c", "cli", "/cli"):
-            code_reloader.auto_reload_if_changed()
-            start_interactive_cli()
-            return
+    args = [a.strip() for a in sys.argv[1:]]
+    if any(a in ("--help", "-h", "/help", "help") for a in args):
+        console.print(HELP_TEXT)
+        return
+    if any(a in ("--version", "-v", "version") for a in args):
+        console.print("[bold red]Kratos Agent[/bold red] [bold gold1]v0.1.0[/bold gold1] - [dim]The Ghost of Sparta Codes[/dim]")
+        return
+    if any(a in ("--cli", "-c", "cli", "/cli") for a in args):
+        code_reloader.auto_reload_if_changed()
+        start_interactive_cli()
+        return
 
     # If invoked with no arguments or explicitly requesting web server:
     if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1].strip() in ("--web", "web", "/web", "serve", "server")):

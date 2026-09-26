@@ -31,6 +31,7 @@ venv.bak/
 # Environment variables & sensitive API keys
 .env
 .env.*
+!.env.example
 *.env
 .dev.vars
 .dev.vars.*
