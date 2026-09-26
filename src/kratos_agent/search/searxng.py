@@ -25,18 +25,42 @@ class SearXNGProvider(SearchProvider):
             or os.environ.get("KRATOS_SEARXNG_URL")
             or "http://127.0.0.1:8080"
         ).rstrip("/")
+        self._listening: bool = True
+        self._last_check: float = 0.0
 
     @property
     def name(self) -> str:
         return "searxng"
 
+    def is_listening(self) -> bool:
+        """Fast check if the service port is reachable with caching."""
+        now = time.monotonic()
+        if self._last_check > 0 and (now - self._last_check < 30.0):
+            return self._listening
+
+        self._last_check = now
+        try:
+            import socket
+            parsed = urllib.parse.urlparse(self.base_url)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            with socket.create_connection((host, port), timeout=0.2):
+                self._listening = True
+                return True
+        except Exception:
+            self._listening = False
+            return False
+
     async def is_available(self) -> bool:
         """Pings SearXNG health / test search endpoint."""
+        if not self.is_listening():
+            return False
         try:
             req = urllib.request.Request(f"{self.base_url}/", headers={"User-Agent": "Kratos/1.0"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
                 return resp.status in (200, 302)
         except Exception:
+            self._listening = False
             return False
 
     async def search(
@@ -49,6 +73,16 @@ class SearXNGProvider(SearchProvider):
         max_results: int = 10,
     ) -> SearchResponse:
         start_time = time.monotonic()
+        if not self.is_listening():
+            return SearchResponse(
+                query=query,
+                results=[],
+                total_results=0,
+                provider=self.name,
+                latency_ms=0.0,
+                metadata={"error": "SearXNG service port unreachable"},
+            )
+
         params: dict[str, Any] = {
             "q": query,
             "format": "json",
@@ -68,7 +102,7 @@ class SearXNGProvider(SearchProvider):
                     "Accept": "application/json",
                 },
             )
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
 
             raw_results = data.get("results", [])
@@ -105,7 +139,9 @@ class SearXNGProvider(SearchProvider):
             )
 
         except Exception as e:
-            logger.warning(f"[SearXNGProvider] Query failed for '{query}': {e}")
+            self._listening = False
+            self._last_check = time.monotonic()
+            logger.debug(f"[SearXNGProvider] Query failed for '{query}': {e}")
             latency = (time.monotonic() - start_time) * 1000
             return SearchResponse(
                 query=query,

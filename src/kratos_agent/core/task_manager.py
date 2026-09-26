@@ -162,6 +162,18 @@ class TaskItem:
     assertion: Any | None = None
     observed_evidence: Any | None = None
     claim: str = ""
+    # Provider & Task Graph attributes
+    parent_id: str | None = None
+    child_ids: list[str] = field(default_factory=list)
+    provider: str | None = None
+    dependencies: list[str] = field(default_factory=list)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    retry_count: int = 0
+    max_retries: int = 3
+    verification_state: str = "pending"  # "pending", "verified", "failed"
+    cancellation_reason: str | None = None
+    resource_locks: dict[str, list[str]] = field(default_factory=lambda: {"reads": [], "writes": [], "side_effects": []})
 
     def start(self) -> None:
         self.state = TaskState.RUNNING
@@ -253,6 +265,17 @@ class TaskItem:
             "tool_count": self.tool_count,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "parent_id": self.parent_id,
+            "child_ids": list(self.child_ids),
+            "provider": self.provider,
+            "dependencies": list(self.dependencies),
+            "inputs": dict(self.inputs),
+            "outputs": dict(self.outputs),
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
+            "verification_state": self.verification_state,
+            "cancellation_reason": self.cancellation_reason,
+            "resource_locks": dict(self.resource_locks),
         }
 
     @classmethod
@@ -275,6 +298,17 @@ class TaskItem:
             tool_count=int(data.get("tool_count", 0)),
             started_at=data.get("started_at"),
             finished_at=data.get("finished_at"),
+            parent_id=data.get("parent_id"),
+            child_ids=list(data.get("child_ids", [])),
+            provider=data.get("provider"),
+            dependencies=list(data.get("dependencies", [])),
+            inputs=dict(data.get("inputs", {})),
+            outputs=dict(data.get("outputs", {})),
+            retry_count=int(data.get("retry_count", 0)),
+            max_retries=int(data.get("max_retries", 3)),
+            verification_state=str(data.get("verification_state", "pending")),
+            cancellation_reason=data.get("cancellation_reason"),
+            resource_locks=dict(data.get("resource_locks", {"reads": [], "writes": [], "side_effects": []})),
         )
 
 

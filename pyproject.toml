@@ -36,6 +36,7 @@ dependencies = [
     "websocket-client>=1.8.0",
     "PyYAML>=6.0.2",
     "climage>=0.2.2",
+    "anthropic>=1.8.0",
 ]
 
 [project.scripts]

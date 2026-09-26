@@ -1831,6 +1831,18 @@ def start_interactive_cli():
                     console.print()
                 continue
 
+            if user_input.lower().startswith("/providers") or user_input.lower().startswith("/provider"):
+                parts = user_input.split(maxsplit=2)
+                sub = parts[1].strip().lower() if len(parts) > 1 else "doctor"
+                from kratos_agent.providers.diagnostics import inspect_provider, render_provider_doctor
+                if sub in ("doctor", "status", "health", "list"):
+                    render_provider_doctor(console=console)
+                elif sub in ("inspect", "details", "info") and len(parts) > 2:
+                    inspect_provider(parts[2].strip().lower(), console=console)
+                else:
+                    render_provider_doctor(console=console)
+                continue
+
             if user_input.lower().startswith("/search"):
                 parts = user_input.split(maxsplit=2)
                 if len(parts) < 2:
@@ -2283,10 +2295,13 @@ def start_interactive_cli():
             if is_gemini_connected:
                 try:
                     with console.status("[bold cyan]🌐 Gemini Live thinking & speaking...[/bold cyan]", spinner="dots"):
-                        reply_text = live_runtime.send_chat_turn_sync(processed_query, timeout=45.0)
-                    if reply_text:
+                        reply_text = live_runtime.send_chat_turn_sync(processed_query, timeout=120.0)
+                    if reply_text and not reply_text.startswith("Gemini Live turn failed:"):
                         messages.append({"role": "assistant", "content": reply_text})
                         continue
+                    if reply_text and reply_text.startswith("Gemini Live turn failed:"):
+                        logger.warning(f"[CLI] {reply_text}. Falling back to Kratos Agent.")
+                        console.print("[dim yellow]⚠ Gemini Live turn timed out/failed; falling back to Kratos Agent directly...[/dim yellow]")
                 except Exception as e:
                     logger.warning(f"[CLI] Gemini Live turn error, falling back to Kratos Agent: {e}")
                     console.print("[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
@@ -2411,6 +2426,16 @@ def main():
     if any(a in ("--cli", "-c", "cli", "/cli") for a in args):
         code_reloader.auto_reload_if_changed()
         start_interactive_cli()
+        return
+    if len(args) >= 1 and args[0] in ("providers", "--providers", "provider"):
+        from kratos_agent.providers.diagnostics import inspect_provider, render_provider_doctor
+        sub = args[1].lower() if len(args) > 1 else "doctor"
+        if sub in ("doctor", "status", "health", "list"):
+            render_provider_doctor(console=console)
+        elif sub in ("inspect", "details", "info") and len(args) > 2:
+            inspect_provider(args[2].lower(), console=console)
+        else:
+            render_provider_doctor(console=console)
         return
 
     # If invoked with no arguments or explicitly requesting web server:

@@ -102,16 +102,22 @@ class SearchRouter:
 
         # 3. Mode-specific enrichment (STANDARD, DEEP, RESEARCH)
         if search_mode in (SearchMode.STANDARD, SearchMode.DEEP, SearchMode.RESEARCH) and response.results:
-            # Extract content from top 2-3 results
             extract_count = 1 if search_mode == SearchMode.STANDARD else (3 if search_mode == SearchMode.DEEP else 5)
-            for r in response.results[:extract_count]:
-                if not r.content and r.url:
-                    try:
-                        page = await asyncio.to_thread(fetch_and_extract_url, r.url, max_chars=1200)
-                        if page.is_safe and page.text:
-                            r.content = page.text
-                    except Exception as e:
-                        logger.debug(f"[SearchRouter] Content extraction skipped for {r.url}: {e}")
+            candidates = [r for r in response.results[:extract_count] if not r.content and r.url]
+
+            async def _extract_one(item: SearchResult) -> None:
+                try:
+                    page = await asyncio.to_thread(fetch_and_extract_url, item.url, max_chars=1200, timeout=3.5)
+                    if page.is_safe and page.text:
+                        item.content = page.text
+                except Exception as e:
+                    logger.debug(f"[SearchRouter] Content extraction skipped for {item.url}: {e}")
+
+            if candidates:
+                try:
+                    await asyncio.wait_for(asyncio.gather(*[_extract_one(r) for r in candidates], return_exceptions=True), timeout=4.0)
+                except Exception:
+                    pass
 
         # 4. Attach citations and update cache
         response.citations = attach_citations(response.results)

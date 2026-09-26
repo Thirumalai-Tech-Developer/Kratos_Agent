@@ -318,3 +318,54 @@ class VerificationManager:
             turn_id,
         ))
         return result
+
+    def verify_provider_task(
+        self,
+        task_id: str,
+        provider: str,
+        changed_files: list[str] | None = None,
+        expected_outputs: list[str] | None = None,
+        require_files: bool = True,
+        verification_type: str = "auto",
+        declared_output: str = "",
+    ) -> VerificationResult:
+        """Authoritative verification gate for tasks executed by external agent providers.
+
+        Ensures provider reported completion is backed by tangible, validated evidence:
+        syntax checks, non-empty files, tests, and expected output presence.
+        """
+        files = changed_files or []
+        res = self.verify_workspace(
+            changed_files=files,
+            verification_type=verification_type,
+            require_files=require_files and len(files) > 0,
+            turn_id=task_id,
+        )
+
+        details = list(res.details)
+        passed = res.passed
+
+        # False completion defense: check declared outputs if expected
+        if expected_outputs and declared_output:
+            for expected in expected_outputs:
+                if expected.lower() not in declared_output.lower():
+                    passed = False
+                    details.append(f"Provider {provider} output missing expected content: '{expected}'")
+
+        if not passed:
+            details.append(f"Provider '{provider}' completion rejected by Kratos verification gate.")
+            summary = f"Verification failed for provider '{provider}': {len(details)} issue(s) found."
+        else:
+            details.append(f"Provider '{provider}' output confirmed by Kratos verification.")
+            summary = f"Provider '{provider}' task successfully verified."
+
+        return VerificationResult(
+            passed=passed,
+            summary=summary,
+            details=details,
+            build_passed=res.build_passed,
+            tests_passed=res.tests_passed,
+            browser_passed=res.browser_passed,
+            files_checked=res.files_checked,
+        )
+

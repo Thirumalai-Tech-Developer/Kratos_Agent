@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Secret sanitization patterns
 SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|token|secret|password|bearer|omni[_-]?key)\s*(?:[:=]|\bis\b)\s*['\"]?([a-zA-Z0-9_\-\.]{8,})['\"]?"),
+    re.compile(r"(?i)(api[_-]?key|token|secret|password|bearer|omni[_-]?key)\s*(?:[:=]|\bis\b|\s)\s*['\"]?([a-zA-Z0-9_\-\.]{8,})['\"]?"),
     re.compile(r"sk-[a-zA-Z0-9]{20,}"),
     re.compile(r"AIza[0-9A-Za-z-_]{20,}"),
 ]
@@ -76,7 +76,11 @@ class NarrationManager:
         narrative: str | None = None
         is_priority = False
 
-        if kind == "task.started":
+        if payload.get("voice_text"):
+            narrative = str(payload.get("voice_text"))
+            if int(payload.get("voice_priority", 50)) >= 80:
+                is_priority = True
+        elif kind == "task.started":
             title = payload.get("title", "")
             if title:
                 narrative = f"Starting task: {title[:50]}."

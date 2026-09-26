@@ -104,7 +104,7 @@ def extract_clean_text_from_html(html: str, max_chars: int = 4000) -> str:
     return result
 
 
-def fetch_and_extract_url(url: str, max_chars: int = 4000, timeout: float = 8.0) -> ExtractedPage:
+def fetch_and_extract_url(url: str, max_chars: int = 4000, timeout: float = 4.0) -> ExtractedPage:
     """Fetches a URL over HTTP with Anti-SSRF check, returning an ExtractedPage."""
     safe, reason = is_url_safe(url)
     if not safe:
@@ -156,8 +156,18 @@ def fetch_and_extract_url(url: str, max_chars: int = 4000, timeout: float = 8.0)
                 is_safe=True,
                 status_code=resp.status,
             )
+    except urllib.error.HTTPError as e:
+        logger.debug(f"[SearchExtraction] HTTP {e.code} fetching {url}: {e.reason}")
+        return ExtractedPage(
+            url=url,
+            title="",
+            text=f"HTTP {e.code} Error: {e.reason}",
+            is_safe=False,
+            status_code=e.code,
+            error=str(e),
+        )
     except Exception as e:
-        logger.warning(f"[SearchExtraction] Error fetching {url}: {e}")
+        logger.debug(f"[SearchExtraction] Error fetching {url}: {e}")
         return ExtractedPage(
             url=url,
             title="",

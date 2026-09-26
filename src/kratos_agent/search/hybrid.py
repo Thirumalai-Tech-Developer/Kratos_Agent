@@ -105,10 +105,17 @@ class HybridSearchProvider(SearchProvider):
     ) -> SearchResponse:
         start_time = time.monotonic()
 
-        # Query all providers in parallel
+        # Query listening/available providers in parallel
+        active_providers = [
+            p for p in self.providers
+            if not hasattr(p, "is_listening") or p.is_listening()
+        ]
+        if not active_providers:
+            active_providers = self.providers
+
         tasks = [
             p.search(query, category=category, domains=domains, language=language, max_results=max_results)
-            for p in self.providers
+            for p in active_providers
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
