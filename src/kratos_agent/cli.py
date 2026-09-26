@@ -1048,8 +1048,14 @@ def handle_create_tool_command(user_prompt: str = ""):
             tool_name=tool_name,
             description=description,
             python_code=python_code,
-            parameters_schema=params
+            parameters_schema=params,
+            author_model=getattr(runtime, "model_name", "kratos"),
+            trigger_prompt=user_prompt,
         )
+
+        if "successfully created" not in result.lower():
+            console.print(f"\n[bold red]❌ Tool forging rejected:[/bold red] {result}\n")
+            return
 
         table = Table.grid(padding=(0, 2))
         table.add_column(style="bold gold1")

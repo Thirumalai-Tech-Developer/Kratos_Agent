@@ -105,13 +105,19 @@ class {class_name}(HarnessPlugin):
 '''
 
     def validate_plugin_code(self, source_code: str) -> tuple[bool, str | None]:
-        """Validate Python source code for AST syntax correctness."""
+        """Validate Python source code for AST syntax correctness and security policies."""
         try:
             tree = ast.parse(source_code)
             # Verify at least one class definition exists
             classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
             if not classes:
                 return False, "Source code does not define any class."
+
+            from kratos_agent.utils.tool_sandbox import validate_tool_ast
+            valid, err = validate_tool_ast(source_code, allow_subprocess=False)
+            if not valid:
+                return False, f"Static analysis security rejection: {err}"
+
             return True, None
         except SyntaxError as e:
             return False, f"Syntax error at line {e.lineno}: {e.msg}"

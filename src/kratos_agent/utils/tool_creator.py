@@ -1,12 +1,20 @@
-
-import logging
-logger = logging.getLogger(__name__)
 import ast
 import importlib
 import json
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+from kratos_agent.utils.tool_sandbox import (
+    execute_sandboxed_tool,
+    log_forged_tool_audit,
+    validate_tool_ast,
+    verify_tool_in_sandbox,
+)
+
+logger = logging.getLogger(__name__)
 
 TOOLS_PY_PATH = Path(__file__).parent / "tools.py"
 TOOLS_JSON_PATH = Path(__file__).parent / "tools_list.json"
@@ -14,10 +22,12 @@ TOOLS_JSON_PATH = Path(__file__).parent / "tools_list.json"
 # Global callback hook to notify runtime when tools change
 _on_tools_updated_callback = None
 
+
 def register_tools_updated_callback(callback):
     """Register a callback function to notify runtime when tools change."""
     global _on_tools_updated_callback
     _on_tools_updated_callback = callback
+
 
 def notify_tools_updated():
     """Trigger reload in active runtime."""
@@ -27,56 +37,76 @@ def notify_tools_updated():
         except Exception as exc:
             logger.debug("Operation error suppressed: %s", exc)
 
+
 def create_or_update_tool(
     tool_name: str,
     description: str,
     python_code: str,
-    parameters_schema: dict[str, Any] | None = None
+    parameters_schema: dict[str, Any] | None = None,
+    author_model: str = "kratos",
+    trigger_prompt: str = "",
+    allow_subprocess: bool = False,
+    workspace: Path | None = None,
 ) -> str:
     """
-    Validates Python code, writes the function to tools.py,
-    updates tools_list.json, and triggers a hot-reload.
+    Validates Python code with AST security rules, verifies in a sandboxed subprocess,
+    writes audit log to .kratos/forged_tools/, generates sandboxed wrapper in tools.py,
+    updates tools_list.json, and triggers hot-reload.
     """
-    import os
     if os.environ.get("KRATOS_ALLOW_DYNAMIC_PLUGINS", "false").lower() != "true":
         return "Dynamic tool forging is disabled. Set KRATOS_ALLOW_DYNAMIC_PLUGINS=true to enable."
 
-    # 1. Validate AST / Syntax
+    # 1. Validate AST / Security Syntax
+    valid, err = validate_tool_ast(python_code, tool_name=tool_name, allow_subprocess=allow_subprocess)
+    if not valid:
+        return f"Static analysis security rejection for '{tool_name}': {err}"
+
+    # 2. Automated Companion Sandbox Verification Test
+    verified, verify_err = verify_tool_in_sandbox(python_code, tool_name, parameters_schema)
+    if not verified:
+        return f"Sandbox verification test failed for '{tool_name}': {verify_err}"
+
+    # 3. Tool Audit Log
     try:
-        parsed_ast = ast.parse(python_code)
-    except SyntaxError as e:
-        return f"Error: Python syntax validation failed on line {e.lineno}: {e.msg}"
-
-    # Check that the function is actually defined in the provided code
-    defined_funcs = [
-        node.name for node in ast.walk(parsed_ast)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-    if tool_name not in defined_funcs:
-        return (
-            f"Error: Provided python_code does not define a function named '{tool_name}'. "
-            f"Found functions: {defined_funcs}"
+        audit_path = log_forged_tool_audit(
+            tool_name=tool_name,
+            code=python_code,
+            author_model=author_model,
+            trigger_prompt=trigger_prompt,
+            workspace=workspace,
         )
+        logger.info("Forged tool '%s' logged to audit trail at %s", tool_name, audit_path)
+    except Exception as e:
+        logger.warning("Failed to record audit log for '%s': %s", tool_name, e)
 
-    # 2. Append/Update tools.py
+    # 4. Generate sandboxed wrapper in tools.py
     try:
         tools_code = TOOLS_PY_PATH.read_text(encoding="utf-8") if TOOLS_PY_PATH.exists() else ""
         clean_code = python_code.strip()
-        
-        # Pattern matching the tool block
+
         block_pattern = rf"(# --- Auto-generated tool: {re.escape(tool_name)} ---.*?(?=\n# --- Auto-generated tool:|\Z))"
-        new_block = f"# --- Auto-generated tool: {tool_name} ---\n{clean_code}\n"
-        
+        wrapper_code = (
+            f"# --- Auto-generated tool: {tool_name} ---\n"
+            f"def {tool_name}(*args, **kwargs) -> str:\n"
+            f"    \"\"\"{description}\"\"\"\n"
+            f"    from kratos_agent.utils.tool_sandbox import execute_sandboxed_tool\n"
+            f"    _code = {repr(clean_code)}\n"
+            f"    _res = execute_sandboxed_tool(_code, {repr(tool_name)}, kwargs=kwargs, args=list(args))\n"
+            f"    if not _res.get('success'):\n"
+            f"        return f\"Error executing sandboxed tool '{tool_name}': {{_res.get('error')}}\"\n"
+            f"    return str(_res.get('result', ''))\n"
+        )
+
         if re.search(block_pattern, tools_code, flags=re.DOTALL):
-            updated_tools_code = re.sub(block_pattern, new_block.strip(), tools_code, flags=re.DOTALL)
+            updated_tools_code = re.sub(block_pattern, wrapper_code.strip(), tools_code, flags=re.DOTALL)
         else:
-            updated_tools_code = tools_code.rstrip() + f"\n\n{new_block}"
+            updated_tools_code = tools_code.rstrip() + f"\n\n{wrapper_code}"
 
         TOOLS_PY_PATH.write_text(updated_tools_code, encoding="utf-8")
     except Exception as e:
         return f"Error writing to tools.py: {e}"
 
-    # 3. Update tools_list.json
+    # 5. Update tools_list.json
     try:
         data = {"tools": []}
         if TOOLS_JSON_PATH.exists():
@@ -94,9 +124,9 @@ def create_or_update_tool(
                 "properties": {
                     "input": {
                         "type": "string",
-                        "description": "Input parameter for the tool"
+                        "description": "Input parameter for the tool",
                     }
-                }
+                },
             }
 
         # Remove existing entry if present
@@ -107,14 +137,14 @@ def create_or_update_tool(
             "name": tool_name,
             "description": description,
             "func_name": tool_name,
-            "parameters": parameters_schema
+            "parameters": parameters_schema,
         })
 
         TOOLS_JSON_PATH.write_text(json.dumps(data, indent=4), encoding="utf-8")
     except Exception as e:
         return f"Error updating tools_list.json: {e}"
 
-    # 4. Hot-reload module
+    # 6. Hot-reload module
     try:
         from kratos_agent.utils import tools as tools_module
         importlib.reload(tools_module)
@@ -127,20 +157,18 @@ def create_or_update_tool(
         f"and hot-loaded into active memory! You can now call it."
     )
 
+
 def self_tool_creator(
     tool_name: str,
     description: str,
     python_code: str,
-    parameters_json_str: str = "{}"
+    parameters_json_str: str = "{}",
+    author_model: str = "kratos",
+    trigger_prompt: str = "",
+    allow_subprocess: bool = False,
 ) -> str:
     """
-    Self Tool Creator: Automatically creates, registers, and hot-loads a new Python tool.
-    
-    Args:
-        tool_name: Unique function name (e.g. 'calculate_expression', 'fetch_weather')
-        description: Clear explanation of what the tool does and when to call it
-        python_code: Complete Python function code defining `def <tool_name>(...): -> str`
-        parameters_json_str: JSON string of parameters schema (optional)
+    Self Tool Creator: Automatically validates, verifies in sandbox, and hot-loads a new tool.
     """
     params = None
     if parameters_json_str and parameters_json_str.strip():
@@ -148,22 +176,26 @@ def self_tool_creator(
             params = json.loads(parameters_json_str)
         except Exception:
             params = None
-            
+
     return create_or_update_tool(
         tool_name=tool_name,
         description=description,
         python_code=python_code,
-        parameters_schema=params
+        parameters_schema=params,
+        author_model=author_model,
+        trigger_prompt=trigger_prompt,
+        allow_subprocess=allow_subprocess,
     )
+
 
 def synthesize_and_register_tool(tool_name: str, requirement: str, brain: Any) -> str:
     """
     Autonomously generates Python code and schema for a missing tool using the LLM,
-    then automatically adds it to tools.py and tools_list.json for immediate and future use.
+    then automatically validates, verifies in sandbox, and adds it for immediate use.
     """
     if not brain:
         return f"Error: No LLM brain available to synthesize tool '{tool_name}'."
-        
+
     prompt = f"""You are the Kratos Agent Autonomous Tool Forger.
 Create a production-grade, reliable Python function for a new tool named '{tool_name}'.
 Requirement: {requirement}
@@ -183,27 +215,28 @@ RULES:
         from langchain_core.messages import HumanMessage
         response = brain.invoke([HumanMessage(content=prompt)])
         raw_text = getattr(response, "content", str(response)).strip()
-        
+
         # Clean JSON markdown
-        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         if not json_match:
             return f"Error: Failed to parse synthesized tool JSON for '{tool_name}'."
-            
+
         data = json.loads(json_match.group(0))
         t_name = data.get("tool_name", tool_name).strip()
         t_desc = data.get("description", f"Tool for {requirement}").strip()
         t_code = data.get("python_code", "").strip()
         t_params = data.get("parameters_schema", None)
-        
+
         if not t_code:
             return f"Error: Synthesized tool '{tool_name}' contains no Python code."
-            
+
         return create_or_update_tool(
             tool_name=t_name,
             description=t_desc,
             python_code=t_code,
-            parameters_schema=t_params
+            parameters_schema=t_params,
+            author_model=getattr(brain, "model_name", "kratos"),
+            trigger_prompt=requirement,
         )
     except Exception as e:
         return f"Error synthesizing tool '{tool_name}': {e}"
-
