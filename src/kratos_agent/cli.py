@@ -1892,7 +1892,7 @@ def start_interactive_cli():
                     b_diag = get_browser_manager().diagnostics()
                     st = live_runtime.get_status() if live_runtime else None
                     pipe = get_error_pipeline()
-                    recent_errs = pipe.get_recent_errors(limit=5)
+                    recent_errs = pipe.get_recent_errors()
 
                     console.print("\n[bold gold1]── Diagnostic State (§46) ──[/bold gold1]")
                     console.print(f"[bold cyan][SCREEN][/bold cyan]\nbackend={s_health.backend}\navailable={s_health.available}\nresolution={s_health.width}x{s_health.height}\nframes={s_health.frame_count}\nerror={s_health.error}")
