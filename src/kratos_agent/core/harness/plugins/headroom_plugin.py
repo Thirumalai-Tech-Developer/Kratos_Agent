@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Lazy import guard — headroom is optional
 # ---------------------------------------------------------------------------
-_headroom_available: Optional[bool] = None
+_headroom_available: bool | None = None
 
 
 def is_headroom_available() -> bool:
@@ -46,7 +46,7 @@ class HeadroomStats:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tokens_saved: int = 0
-    per_content_type: Dict[str, int] = field(default_factory=dict)
+    per_content_type: dict[str, int] = field(default_factory=dict)
     last_ratio: float = 0.0
     enabled: bool = True
 
@@ -60,7 +60,7 @@ class HeadroomStats:
     def savings_percent(self) -> float:
         return round(self.overall_ratio * 100, 1)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total_calls": self.total_calls,
             "total_input_tokens": self.total_input_tokens,
@@ -94,13 +94,13 @@ class HeadroomPlugin(HarnessPlugin):
         tags=["compression", "tokens", "optimization"],
     )
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config=config)
         self.stats = HeadroomStats()
         self._compress_fn = None
         self._model_name: str = "gpt-4o"  # Default tokenizer model for Headroom
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         """Attach to kernel context."""
         super().on_load(kernel)
 
@@ -148,9 +148,9 @@ class HeadroomPlugin(HarnessPlugin):
 
     def compress_messages(
         self,
-        messages: List[Dict[str, Any]],
-        model: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Compress a list of chat messages using Headroom.
 
         Args:
@@ -198,8 +198,8 @@ class HeadroomPlugin(HarnessPlugin):
             if self.kernel:
                 try:
                     self.kernel.emit("headroom:compressed", stats)
-                except Exception:
-                    pass  # Don't let event bus errors break compression
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)  # Don't let event bus errors break compression
 
             return compressed_msgs, stats
 
@@ -207,7 +207,7 @@ class HeadroomPlugin(HarnessPlugin):
             logger.warning(f"[HeadroomPlugin] Compression failed, passing through: {e}")
             return messages, {"compressed": False, "reason": str(e)}
 
-    def compress_text(self, text: str, content_type: str = "text") -> Tuple[str, Dict[str, Any]]:
+    def compress_text(self, text: str, content_type: str = "text") -> tuple[str, dict[str, Any]]:
         """Compress a single text string (tool output, log, etc).
 
         Wraps text in a message, compresses, and extracts the result.
@@ -235,7 +235,7 @@ class HeadroomPlugin(HarnessPlugin):
 
         return text, stats
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return runtime status including compression stats."""
         base = super().get_status()
         base["headroom_installed"] = is_headroom_available()

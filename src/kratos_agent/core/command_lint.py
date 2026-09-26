@@ -2,18 +2,21 @@
 and destructive commands before execution.
 """
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
+
 from kratos_agent.utils.shell_quote import argv_for
+
 
 @dataclass
 class LintResult:
     ok: bool
-    problems: List[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
     shell: str = "powershell"
     code: str = "OK"
-    suggestion: Optional[dict[str, Any]] = None
+    suggestion: dict[str, Any] | None = None
     hint: str = ""
 
 @dataclass
@@ -30,7 +33,7 @@ INLINE_SOURCE_PATTERNS = [
 ]
 
 
-def contains_inline_source_code(cmd: str) -> Optional[str]:
+def contains_inline_source_code(cmd: str) -> str | None:
     """Detect source-code payloads that should use write_file/edit_file instead of a shell."""
     stripped = cmd.strip()
     if len(stripped) < 280:
@@ -56,7 +59,7 @@ KNOWN_BAD = [
 ]
 
 
-def quote_balance(cmd: str, shell: str) -> Optional[QuoteBalanceError]:
+def quote_balance(cmd: str, shell: str) -> QuoteBalanceError | None:
     """Finds unbalanced quotes in cmd."""
     s = shell.lower()
     in_single = False
@@ -78,9 +81,7 @@ def quote_balance(cmd: str, shell: str) -> Optional[QuoteBalanceError]:
                 single_idx = i
         elif ch == '"' and not in_single:
             # Check backtick escape in pwsh or backslash in bash
-            if s in ("powershell", "pwsh") and i > 0 and cmd[i - 1] == "`":
-                pass
-            elif s in ("bash", "sh", "zsh") and i > 0 and cmd[i - 1] == "\\":
+            if s in ("powershell", "pwsh") and i > 0 and cmd[i - 1] == "`" or s in ("bash", "sh", "zsh") and i > 0 and cmd[i - 1] == "\\":
                 pass
             else:
                 in_double = not in_double
@@ -106,7 +107,7 @@ def contains_prose(cmd: str) -> bool:
     return False
 
 
-def unquoted_metachars(cmd: str) -> List[Any]:
+def unquoted_metachars(cmd: str) -> list[Any]:
     """Finds unquoted shell metacharacters like & or | in URLs or arguments."""
     problems = []
     # e.g., https://youtube.com/results?q=a&b without quotes
@@ -128,7 +129,7 @@ def lint_command(cmd: str, shell: str = "powershell") -> LintResult:
     """Returns ok=False with a precise, actionable hint when the command would
     fail to parse. The hint goes straight back to the model as the tool result
     so it self-corrects on the next turn."""
-    problems: List[str] = []
+    problems: list[str] = []
     code = "OK"
 
     # 1. Check Known Bad / Forbidden Targets

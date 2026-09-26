@@ -1,8 +1,8 @@
 """Privilege boundaries and safety policies for computer actions."""
 from __future__ import annotations
-import os
-import sys
-from typing import Any, Dict, Optional, Tuple
+
+import logging
+logger = logging.getLogger(__name__)
 
 from kratos_agent.computer.state import ComputerAction
 
@@ -28,15 +28,15 @@ class ComputerPermissionPolicy:
         "del /s /q c:\\windows",
     ]
 
-    def check_permission(self, action: ComputerAction) -> Tuple[bool, str]:
+    def check_permission(self, action: ComputerAction) -> tuple[bool, str]:
         """Checks computer actions; Sovereign removes app-level permission gates."""
         try:
-            from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+            from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
             if approval_gate.mode is ApprovalMode.SOVEREIGN:
                 approval_gate._audit.record(action.action, str(action.parameters), "ALLOW", "sovereign")
                 return True, "sovereign"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Non-Sovereign modes retain the existing policy.
         # 1. Self-preservation and system corruption checks
@@ -54,7 +54,7 @@ class ComputerPermissionPolicy:
         return True, "permitted"
 
 
-_permission_policy: Optional[ComputerPermissionPolicy] = None
+_permission_policy: ComputerPermissionPolicy | None = None
 
 
 def get_permission_policy() -> ComputerPermissionPolicy:

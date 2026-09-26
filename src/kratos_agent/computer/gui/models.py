@@ -1,8 +1,9 @@
 """Platform-independent GUI element and geometry models."""
 from __future__ import annotations
+
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -22,11 +23,11 @@ class Rect:
     def center(self) -> Point:
         return Point(self.x + self.w // 2, self.y + self.h // 2)
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         return {"x": self.x, "y": self.y, "w": self.w, "h": self.h}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, int]) -> Rect:
+    def from_dict(cls, data: dict[str, int]) -> Rect:
         return cls(
             x=data.get("x", 0),
             y=data.get("y", 0),
@@ -41,10 +42,10 @@ class WindowInfo:
     title: str
     app_name: str
     is_active: bool
-    bounds: Dict[str, int]
-    pid: Optional[int] = None
+    bounds: dict[str, int]
+    pid: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -59,7 +60,7 @@ class WindowInfo:
 class DisplayInfo:
     id: str
     is_primary: bool
-    bounds: Dict[str, int]
+    bounds: dict[str, int]
     resolution: str
     scale_factor: float = 1.0
 
@@ -71,7 +72,7 @@ class DisplayInfo:
     def height(self) -> int:
         return self.bounds.get("height", 1080)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "is_primary": self.is_primary,
@@ -85,41 +86,41 @@ class DisplayInfo:
 class GUIElement:
     """Platform-independent representation of an interactive or structural GUI element."""
     id: str
-    name: Optional[str] = None
-    role: Optional[str] = None
-    control_type: Optional[str] = None
-    text: Optional[str] = None
-    value: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    role: str | None = None
+    control_type: str | None = None
+    text: str | None = None
+    value: str | None = None
+    description: str | None = None
 
     enabled: bool = True
     visible: bool = True
     focused: bool = False
 
-    bounds: Optional[Dict[str, int]] = None
+    bounds: dict[str, int] | None = None
 
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     backend: str = "unknown"  # windows_uia, linux_atspi, playwright, vision, coordinate
 
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     generation: int = 1
     timestamp: float = field(default_factory=time.time)
     confidence: float = 1.0
 
     @property
-    def rect(self) -> Optional[Rect]:
+    def rect(self) -> Rect | None:
         if not self.bounds:
             return None
         return Rect.from_dict(self.bounds)
 
     @property
-    def center(self) -> Optional[Point]:
+    def center(self) -> Point | None:
         r = self.rect
         return r.center if r else None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Compact dictionary format suitable for LLM context or JSON serialization."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "id": self.id,
             "backend": self.backend,
             "enabled": self.enabled,

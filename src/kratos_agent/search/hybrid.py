@@ -6,7 +6,6 @@ import logging
 import re
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Set
 
 from .citations import attach_citations
 from .models import SearchResponse, SearchResult
@@ -54,7 +53,7 @@ def normalize_url(raw_url: str) -> str:
         return raw_url.strip().lower()
 
 
-def rank_and_score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
+def rank_and_score_results(results: list[SearchResult], query: str) -> list[SearchResult]:
     """Ranks results based on relevance to query tokens, domain trust, and freshness."""
     q_tokens = set(re.findall(r"\w+", query.lower()))
 
@@ -85,7 +84,7 @@ def rank_and_score_results(results: List[SearchResult], query: str) -> List[Sear
 class HybridSearchProvider(SearchProvider):
     """Aggregates multiple search providers with parallel queries, canonical deduplication, and ranking."""
 
-    def __init__(self, providers: List[SearchProvider]) -> None:
+    def __init__(self, providers: list[SearchProvider]) -> None:
         self.providers = providers
 
     @property
@@ -99,9 +98,9 @@ class HybridSearchProvider(SearchProvider):
         self,
         query: str,
         *,
-        category: Optional[str] = None,
-        domains: Optional[List[str]] = None,
-        language: Optional[str] = None,
+        category: str | None = None,
+        domains: list[str] | None = None,
+        language: str | None = None,
         max_results: int = 10,
     ) -> SearchResponse:
         start_time = time.monotonic()
@@ -113,8 +112,8 @@ class HybridSearchProvider(SearchProvider):
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        combined_results: List[SearchResult] = []
-        seen_urls: Set[str] = set()
+        combined_results: list[SearchResult] = []
+        seen_urls: set[str] = set()
 
         for resp in responses:
             if isinstance(resp, SearchResponse):

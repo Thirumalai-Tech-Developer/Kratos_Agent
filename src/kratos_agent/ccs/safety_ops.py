@@ -2,14 +2,13 @@
 Safety Operations Subsystem for Sovereign mode.
 Handles emergency panic (Ctrl+Alt+Shift+F12), snapshots, and audit logging.
 """
-import logging
-from pathlib import Path
+import hashlib
 import json
+import logging
+import os
 import re
 import shutil
-import hashlib
-from typing import Dict, Any, Optional, List
-import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +116,7 @@ def panic_halt(reason: str = "emergency_panic") -> None:
         from kratos_agent.ccs.discovery import get_computer_controller
         ctrl = get_computer_controller()
         ctrl.input_release_all()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
     safety.record_audit(capability="panic_halt", target=None, decision="halt", mode="sovereign", args={"reason": reason})
 

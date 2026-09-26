@@ -1,12 +1,17 @@
 """Synchronize the callable tool catalog without registering imported classes/types."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import inspect
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
+
+from kratos_agent.computer import tools as computer_tool_package
 from kratos_agent.utils import computer_tools
 from kratos_agent.utils import tools as legacy_tools
-from kratos_agent.computer import tools as computer_tool_package
 
 _EXCLUDED = {
     "read_notifications","volume_control","wifi_control","bluetooth_control","hosts_file_edit",
@@ -22,8 +27,8 @@ def _json_type(annotation: Any) -> str:
     if "dict" in text or "mapping" in text or "object" in text: return "object"
     return "string"
 
-def _iter_tool_functions() -> Dict[str, Any]:
-    found: Dict[str, Any] = {}
+def _iter_tool_functions() -> dict[str, Any]:
+    found: dict[str, Any] = {}
     for module in (legacy_tools, computer_tools, computer_tool_package):
         for name, fn in inspect.getmembers(module, inspect.isfunction):
             if name.startswith("_") or name in _EXCLUDED:
@@ -43,8 +48,8 @@ def update_tools_list() -> None:
     if tools_list_path.exists():
         try:
             existing = {x.get("name") or x.get("func_name"): x for x in json.loads(tools_list_path.read_text(encoding="utf-8")).get("tools", [])}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
     output=[]
     for name, fn in sorted(_iter_tool_functions().items()):
         properties, required = {}, []

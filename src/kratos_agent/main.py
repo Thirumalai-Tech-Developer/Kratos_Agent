@@ -1,11 +1,11 @@
 """Kratos application composition root with an explicit agent pipeline."""
 from __future__ import annotations
 
-import re
 import logging
+import re
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -13,39 +13,41 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from kratos_agent.brain import BrainChatModel, get_default_model
+from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
-from kratos_agent.core.context_pipeline import ContextBuilder, ContextBudget
+from kratos_agent.core.context_pipeline import ContextBudget, ContextBuilder
 from kratos_agent.core.event_bus import event_bus
 from kratos_agent.core.event_store import EventStore
-from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
-from kratos_agent.core.memory import memory
-from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.framework_runtime import ExternalAgentFrameworks
-from kratos_agent.core.provider_runtime import BrainAdapter
-from kratos_agent.core.runtime_contracts import ChatMessage, EventKind, RuntimeEvent, ToolPermission
-from kratos_agent.core.skills import skill_manager
-from kratos_agent.core.tool_runtime import legacy_tool_registry
-from kratos_agent.core.subagents import SubagentManager
-from kratos_agent.core.project_memory import project_memory
-from kratos_agent.core.prompt_library import prompt_library
-from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.harness import HarnessKernel
 from kratos_agent.core.harness.plugins import (
-    ToolsPlugin,
-    MemoryPlugin,
-    DeepSeekModelPlugin,
     AuditPlugin,
     CreatorPlugin,
+    DeepSeekModelPlugin,
     HeadroomPlugin,
+    MemoryPlugin,
+    ToolsPlugin,
 )
-
+from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
+from kratos_agent.core.mcp_runtime import McpManager
+from kratos_agent.core.memory import memory
 from kratos_agent.core.prompt_builder import CORE_PROMPT_V2
+from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.core.provider_runtime import BrainAdapter
+from kratos_agent.core.runtime_contracts import (
+    ChatMessage,
+    EventKind,
+    RuntimeEvent,
+    ToolPermission,
+)
+from kratos_agent.core.skills import skill_manager
+from kratos_agent.core.subagents import SubagentManager
+from kratos_agent.core.tool_runtime import legacy_tool_registry
 from kratos_agent.memory import get_memory_manager
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 DEFAULT_MODEL = get_default_model()
 
 KRATOS_AGENT_MODE_SYSTEM_PROMPT = CORE_PROMPT_V2
@@ -63,7 +65,7 @@ def _derive_turn_status(
     *,
     cancelled: bool,
     plan: Any,
-    tool_calls: List[Dict[str, Any]],
+    tool_calls: list[dict[str, Any]],
     user_request: str = "",
     verification_passed: Any = None,
 ) -> str:
@@ -175,12 +177,16 @@ class KratosRuntime:
         self.agent = None  # The explicit AgentLoop replaces the opaque LangChain graph.
         self._history = self._restore_history()
         self._event_store = self._open_event_store()
-        self.last_request: Dict[str, Any] | None = None
-        self._current_tool_calls: List[Dict[str, Any]] = []
+        self.last_request: dict[str, Any] | None = None
+        self._current_tool_calls: list[dict[str, Any]] = []
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.subagents = SubagentManager(self._run_isolated)
-        from kratos_agent.utils.tools import set_subagent_runner, set_parallel_subagent_runner, set_plan_mode_handler
+        from kratos_agent.utils.tools import (
+            set_parallel_subagent_runner,
+            set_plan_mode_handler,
+            set_subagent_runner,
+        )
         set_subagent_runner(self.subagents.run)
         set_parallel_subagent_runner(self.subagents.run_multi_parallel)
         self.plan_mode: bool = False
@@ -262,11 +268,11 @@ class KratosRuntime:
         self.instructions.register(InstructionModule("skills", "persona", lambda: "SKILLS: Over 150 domain playbooks installed. Use `read_skill(name)` to retrieve detailed instructions when needed.", 40))
         self.instructions.register(InstructionModule("engineering-guidelines", "developer", lambda: "GUIDELINES: Follow project conventions, make minimal targeted changes, and verify results before declaring completion.", 50))
 
-    def _restore_history(self) -> List[ChatMessage]:
+    def _restore_history(self) -> list[ChatMessage]:
         active = self.memory.active_session
         if not active:
             return []
-        history: List[ChatMessage] = []
+        history: list[ChatMessage] = []
         turns = active.turns[-36:]
         for turn in turns:
             agent_text = str(turn.get("agent", "")).strip()
@@ -309,12 +315,10 @@ class KratosRuntime:
         elif event.kind.value in {"tool.requested", "tool.started"}:
             payload = dict(event.payload or {})
             call_id = payload.get("call_id")
-            if call_id and not any(item.get("call_id") == call_id for item in self._current_tool_calls):
-                self._current_tool_calls.append(payload)
-            elif not call_id and payload not in self._current_tool_calls:
+            if call_id and not any(item.get("call_id") == call_id for item in self._current_tool_calls) or not call_id and payload not in self._current_tool_calls:
                 self._current_tool_calls.append(payload)
 
-    def _run_isolated(self, role: str, history: List[ChatMessage]) -> str:
+    def _run_isolated(self, role: str, history: list[ChatMessage]) -> str:
         """Run a child task with a fresh history and role-scoped instructions."""
         self._is_subagent_running = True
         try:
@@ -327,16 +331,16 @@ class KratosRuntime:
                 p_text = prompt_library.get_subagent_prompt(role)
                 if p_text:
                     subagent_prompt = p_text
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to fetch subagent prompt for %s: %s", role, e)
             if not subagent_prompt:
                 subagent_prompt = f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context."
 
             def _subagent_emit(ev: RuntimeEvent) -> None:
                 try:
                     self._event_store.append(ev)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error("Failed to append subagent event: %s", e)
 
             child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, _subagent_emit, self.workspace)
             result, _ = child_loop.run(history, self._allow_tool)
@@ -360,7 +364,7 @@ class KratosRuntime:
         self.tools = self.tools_registry.specs()
         self.loop.tools = self.tools_registry
 
-    def import_integration(self, source: str) -> Dict[str, Any]:
+    def import_integration(self, source: str) -> dict[str, Any]:
         """Import interoperable MCP/Agent Skills surfaces from a framework bundle."""
         imported = self.frameworks.import_integration(source, self.mcp, self.skill_manager)
         self.reload_tools()
@@ -376,7 +380,7 @@ class KratosRuntime:
             self.memory.active_session.model = model_name
             self.memory.save()
 
-    def _allow_tool(self, spec: Any, arguments: Dict[str, Any]) -> tuple[bool, str]:
+    def _allow_tool(self, spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
         if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):
             return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
         # Sovereign mode is the explicit autonomous execution profile: harness presets and Plan Mode
@@ -416,7 +420,7 @@ class KratosRuntime:
             return False, f"{spec.permission.value} tools require auto-edit or full-auto mode"
         return True, spec.permission.value
 
-    def invoke(self, messages: List[Dict[str, str]]) -> str:
+    def invoke(self, messages: list[dict[str, str]]) -> str:
         self._current_tool_calls = []
         self._cancellation_flag.clear()  # Always start fresh for a new turn
         history = [ChatMessage(role=item.get("role", "user"), content=str(item.get("content", ""))) for item in messages]
@@ -483,7 +487,7 @@ class KratosRuntime:
         self._emit(start_evt)
 
         messages = [{"role": msg.role, "content": msg.content} for msg in self._history]
-        response_chunks: List[str] = []
+        response_chunks: list[str] = []
 
         def on_chunk(chunk: str) -> None:
             if chunk:
@@ -578,15 +582,15 @@ class KratosRuntime:
         self._emit(done_evt)
         return result
 
-    def set_harness_mode(self, mode: str) -> Dict[str, Any]:
+    def set_harness_mode(self, mode: str) -> dict[str, Any]:
         """Switch active harness runtime preset (standard, code, minimal, creator)."""
         return self.harness.apply_preset(mode)
 
-    def get_harness_status(self) -> Dict[str, Any]:
+    def get_harness_status(self) -> dict[str, Any]:
         """Get harness status, active preset, and loaded plugins."""
         return self.harness.get_status()
 
-    def debug_context(self) -> Dict[str, Any]:
+    def debug_context(self) -> dict[str, Any]:
         """A redacted, developer-facing snapshot of exactly what Kratos sends."""
         return {"session_id": self.memory.active_session.session_id if self.memory.active_session else None, "model": self.model_name, "instructions": self.instructions.build(), "history": [item.to_dict() for item in self._history], "tools": self.tools_registry.schemas(), "last_request": self.last_request, "events": self._event_store.read()[-100:]}
 
@@ -602,13 +606,13 @@ def run_agent(query: str) -> str:
 def set_model(model_name: str) -> None:
     runtime.set_model(model_name)
 
-def set_harness_mode(mode: str) -> Dict[str, Any]:
+def set_harness_mode(mode: str) -> dict[str, Any]:
     return runtime.set_harness_mode(mode)
 
 def reload_tools() -> None:
     runtime.reload_tools()
 
-def probe_capabilities() -> Dict[str, Any]:
+def probe_capabilities() -> dict[str, Any]:
     """Returns the capability map for Sovereign mode diagnostics."""
     try:
         from kratos_agent.ccs import get_capability_map

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from rich.console import RenderableType, Group
+from rich.console import Group, RenderableType
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -41,16 +41,16 @@ class StepRecord:
     detail: str
     status: str
     started_at: float
-    finished_at: Optional[float] = None
-    tool_name: Optional[str] = None
-    tool_args: Optional[Dict[str, Any]] = None
-    tool_output: Optional[str] = None
+    finished_at: float | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_output: str | None = None
     output_truncated: bool = False
-    error: Optional[str] = None
-    usage: Optional[Dict[str, int]] = None
+    error: str | None = None
+    usage: dict[str, int] | None = None
 
     @property
-    def duration(self) -> Optional[str]:
+    def duration(self) -> str | None:
         if self.finished_at:
             ms = int((self.finished_at - self.started_at) * 1000)
             return _ms(ms)
@@ -62,15 +62,15 @@ class EventRenderer:
 
     def __init__(self, is_tty: bool = True) -> None:
         self.is_tty = is_tty
-        self.steps: List[StepRecord] = []
-        self.plan: Optional[ExecutionPlan] = None
+        self.steps: list[StepRecord] = []
+        self.plan: ExecutionPlan | None = None
         self.is_chat_mode: bool = False
         self.thinking_label: str = "Thinking…"
         self.stream_text: str = ""
         self._turn_start: float = time.monotonic()
         self._step_idx: int = 0
-        self._open_tool_steps: Dict[str, int] = {}
-        self._thinking_step_idx: Optional[int] = None
+        self._open_tool_steps: dict[str, int] = {}
+        self._thinking_step_idx: int | None = None
 
     def reset(self) -> None:
         self.steps.clear()
@@ -89,25 +89,25 @@ class EventRenderer:
 
     # ── Event Callbacks ────────────────────────────────────────────────────────
 
-    def on_agent_started(self, payload: Dict[str, Any]) -> None:
+    def on_agent_started(self, payload: dict[str, Any]) -> None:
         intent = payload.get("intent", "coding_task")
         self.is_chat_mode = (intent in ("chat", "question"))
         self.thinking_label = "Understanding request…"
 
-    def on_understanding_started(self, payload: Dict[str, Any]) -> None:
+    def on_understanding_started(self, payload: dict[str, Any]) -> None:
         self.thinking_label = "Understanding request…"
 
-    def on_planning_started(self, payload: Dict[str, Any]) -> None:
+    def on_planning_started(self, payload: dict[str, Any]) -> None:
         self.thinking_label = "Formulating execution plan…"
 
-    def on_plan_created(self, payload: Dict[str, Any]) -> None:
+    def on_plan_created(self, payload: dict[str, Any]) -> None:
         self.plan = ExecutionPlan.from_dict(payload)
         self.thinking_label = f"Starting task 1/{self.plan.total_count}…"
 
-    def on_plan_updated(self, payload: Dict[str, Any]) -> None:
+    def on_plan_updated(self, payload: dict[str, Any]) -> None:
         self.plan = ExecutionPlan.from_dict(payload)
 
-    def on_task_started(self, payload: Dict[str, Any]) -> None:
+    def on_task_started(self, payload: dict[str, Any]) -> None:
         tid = payload.get("id", "")
         title = payload.get("title", "")
         if self.plan:
@@ -117,7 +117,7 @@ class EventRenderer:
         else:
             self.thinking_label = f"Implementing: {title[:35]}…"
 
-    def on_task_updated(self, payload: Dict[str, Any]) -> None:
+    def on_task_updated(self, payload: dict[str, Any]) -> None:
         tid = payload.get("id", "")
         if self.plan:
             t = self.plan._find_task(tid)
@@ -131,12 +131,12 @@ class EventRenderer:
                 if payload.get("detail"):
                     t.detail = payload["detail"]
 
-    def on_task_completed(self, payload: Dict[str, Any]) -> None:
+    def on_task_completed(self, payload: dict[str, Any]) -> None:
         tid = payload.get("id", "")
         if self.plan:
             self.plan.complete_task(tid, payload.get("detail"))
 
-    def on_task_failed(self, payload: Dict[str, Any]) -> None:
+    def on_task_failed(self, payload: dict[str, Any]) -> None:
         tid = payload.get("id", "")
         if self.plan:
             self.plan.fail_task(tid, payload.get("detail", "Error"))
@@ -158,7 +158,7 @@ class EventRenderer:
     def on_model_chunk(self, chunk: str) -> None:
         self.stream_text += chunk
 
-    def on_model_response(self, payload: Dict[str, Any]) -> None:
+    def on_model_response(self, payload: dict[str, Any]) -> None:
         if self._thinking_step_idx is not None:
             step = self.steps[self._thinking_step_idx]
             step.status = "success"
@@ -166,7 +166,7 @@ class EventRenderer:
             step.usage = payload.get("usage") or {}
             self._thinking_step_idx = None
 
-    def on_tool_requested(self, payload: Dict[str, Any]) -> None:
+    def on_tool_requested(self, payload: dict[str, Any]) -> None:
         self.stream_text = ""
         name = payload.get("name", "tool")
         args = payload.get("arguments", {})
@@ -201,7 +201,7 @@ class EventRenderer:
             display = f"[tool call] {action}"
         self.thinking_label = display
 
-    def on_tool_completed(self, payload: Dict[str, Any], failed: bool = False) -> None:
+    def on_tool_completed(self, payload: dict[str, Any], failed: bool = False) -> None:
         call_id = payload.get("call_id", "")
         content = payload.get("content", "")
         is_error = payload.get("is_error", False) or failed
@@ -215,21 +215,21 @@ class EventRenderer:
             if is_error:
                 step.error = content[:150]
 
-    def on_verification_started(self, payload: Dict[str, Any]) -> None:
+    def on_verification_started(self, payload: dict[str, Any]) -> None:
         self.thinking_label = "Verifying application & changed files…"
 
-    def on_verification_completed(self, payload: Dict[str, Any]) -> None:
+    def on_verification_completed(self, payload: dict[str, Any]) -> None:
         passed = payload.get("passed", True)
         self.thinking_label = "Verification complete." if passed else "Verification encountered issues."
 
     # ── Live Plan Tree Rendering ───────────────────────────────────────────────
 
-    def render_plan_tree(self) -> Optional[RenderableType]:
+    def render_plan_tree(self) -> RenderableType | None:
         """Renders the clean structured PLAN tree with nested tool substeps."""
         if not self.plan or not self.plan.tasks or self.is_chat_mode:
             return None
 
-        lines: List[RenderableType] = []
+        lines: list[RenderableType] = []
 
         # Goal Header
         if self.plan.goal:

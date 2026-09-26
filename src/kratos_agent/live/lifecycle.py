@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Set
 
 
 class LiveTurnState(str, Enum):
@@ -21,8 +20,8 @@ class LiveTurn:
     turn_id: str
     request_id: str
     state: LiveTurnState = LiveTurnState.USER_INPUT
-    pending_tool_calls: Set[str] = field(default_factory=set)
-    completed_tool_calls: Set[str] = field(default_factory=set)
+    pending_tool_calls: set[str] = field(default_factory=set)
+    completed_tool_calls: set[str] = field(default_factory=set)
     awaiting_model_followup: bool = False
     narration_pending: bool = False
 

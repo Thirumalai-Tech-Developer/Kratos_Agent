@@ -1,41 +1,45 @@
-import warnings
+import difflib
+import json
+import logging
+import os
+import re
+import shutil
 import subprocess
 import sys
-import os
-import json
-import re
 import time
-import difflib
-import shutil
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import warnings
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from kratos_agent.utils.step_tracker import step_tracker
-from kratos_agent.core.memory import memory
+from kratos_agent.core import git_tools as _git
 from kratos_agent.core.approval_mode import approval_gate
 from kratos_agent.core.hooks import hook_registry
-from kratos_agent.core import git_tools as _git
-from kratos_agent.utils.tool_creator import self_tool_creator
+from kratos_agent.core.memory import memory
 from kratos_agent.utils.computer_tools import (
     active_window_info,
     display_info,
-    screenshot_capture,
     screen_read_text,
+    screenshot_capture,
     ui_tree_dump,
 )
+from kratos_agent.utils.step_tracker import step_tracker
 
 # Reconfigure stdout for UTF-8 on Windows
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to reconfigure stdout/stderr encoding: %s", e)
 
 console = Console(highlight=False)
 
@@ -103,16 +107,17 @@ def is_persistent_server_command(command: str) -> bool:
     ]
     return any(re.search(pat, last_cmd) for pat in server_patterns)
 
-def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) -> str:
+def run_terminal_command(command: str = "", argv: list[str] | None = None) -> str:
     """
     Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly.
     Shows real-time dynamic single-line status, handles background servers, and tracks completion.
     PREFERRED: pass argv as a list. Only use command as a string when you genuinely need shell features.
     """
     import sys
+
     from kratos_agent.core.command_lint import lint_command
-    from kratos_agent.system.shell.renderer import render_command_argv
     from kratos_agent.system.shell.output_parser import normalize_command_output
+    from kratos_agent.system.shell.renderer import render_command_argv
 
     shell_dialect = "powershell" if sys.platform == "win32" else "bash"
 
@@ -208,14 +213,14 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
             proc.wait(timeout=300)
         except subprocess.TimeoutExpired:
             proc.kill()
-            step_tracker.fail(f"[bold red]Command timed out after 300s[/bold red]", command)
+            step_tracker.fail("[bold red]Command timed out after 300s[/bold red]", command)
             return f"Error: Command '{command}' timed out after 300 seconds."
         except Exception as stream_err:
             try:
                 proc.kill()
-            except Exception:
-                pass
-            step_tracker.fail(f"[bold red]Execution error[/bold red]", str(stream_err))
+            except Exception as e:
+                logger.debug("Failed to kill process after stream error: %s", e)
+            step_tracker.fail("[bold red]Execution error[/bold red]", str(stream_err))
 
         raw_text = "".join(output_lines).strip()
         cmd_result = normalize_command_output(raw_text, exit_code=proc.returncode)
@@ -274,7 +279,7 @@ def run_terminal_command(command: str = "", argv: Optional[List[str]] = None) ->
         return final_output
 
     except Exception as e:
-        step_tracker.fail(f"[bold red]Execution error[/bold red]", str(e))
+        step_tracker.fail("[bold red]Execution error[/bold red]", str(e))
         return f"Error executing terminal command: {e}"
 
 def verify_project(project_path: str = ".", timeout: int = 300) -> str:
@@ -379,7 +384,7 @@ def verify_project(project_path: str = ".", timeout: int = 300) -> str:
 
 def computer_visual_diagnose(include_ocr: bool = True) -> str:
     """Build a fresh multimodal desktop diagnostic bundle for visual problem solving."""
-    result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
+    result: dict[str, Any] = {"ok": True, "timestamp": time.time()}
     try:
         result["active_window"] = json.loads(active_window_info())
     except Exception as exc:
@@ -433,7 +438,7 @@ def clean_file_path(fp_str: str) -> str:
 
     return cleaned.lstrip("/")
 
-def _missing_script_target(command: str) -> Optional[str]:
+def _missing_script_target(command: str) -> str | None:
     """Detect an explicit PowerShell -File target that does not exist yet."""
     if sys.platform != "win32":
         return None
@@ -475,8 +480,8 @@ def write_file(file_path: str, content: str) -> str:
         if existed:
             try:
                 old_content = p.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read existing content for %s: %s", p, e)
 
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content_str, encoding="utf-8")
@@ -507,7 +512,7 @@ def read_file(file_path: str) -> str:
     try:
         p = Path(file_path)
         if not p.exists():
-            step_tracker.fail(f"[bold red]File not found[/bold red]", file_path)
+            step_tracker.fail("[bold red]File not found[/bold red]", file_path)
             return f"Error: File '{file_path}' does not exist."
         content = p.read_text(encoding="utf-8", errors="replace")
         num_lines = len(content.splitlines())
@@ -532,7 +537,7 @@ def edit_file(file_path: str, target_text: str, replacement_text: str) -> str:
     try:
         p = Path(file_path)
         if not p.exists():
-            step_tracker.fail(f"[bold red]File not found[/bold red]", file_path)
+            step_tracker.fail("[bold red]File not found[/bold red]", file_path)
             return f"Error: File '{file_path}' does not exist. Use 'write_file' to create new files."
         
         current_content = p.read_text(encoding="utf-8", errors="replace")
@@ -584,10 +589,10 @@ def list_directory(directory_path: str = ".", max_depth: int = 2) -> str:
     try:
         target = Path(clean_dir)
         if not target.exists():
-            step_tracker.fail(f"[bold red]Directory not found[/bold red]", clean_dir)
+            step_tracker.fail("[bold red]Directory not found[/bold red]", clean_dir)
             return f"Error: Directory '{directory_path}' does not exist."
         if not target.is_dir():
-            step_tracker.fail(f"[bold red]Not a directory[/bold red]", clean_dir)
+            step_tracker.fail("[bold red]Not a directory[/bold red]", clean_dir)
             return f"Error: '{directory_path}' is a file, not a directory."
 
         ignored = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".next", ".turbo"}
@@ -631,7 +636,7 @@ def grep_search(query: str, directory_path: str = ".", is_regex: bool = False) -
     try:
         target = Path(clean_file_path(directory_path))
         if not target.exists():
-            step_tracker.fail(f"[bold red]Path not found[/bold red]", directory_path)
+            step_tracker.fail("[bold red]Path not found[/bold red]", directory_path)
             return f"Error: Path '{directory_path}' does not exist."
 
         ignored = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".kratos/sessions"}
@@ -652,8 +657,8 @@ def grep_search(query: str, directory_path: str = ".", is_regex: bool = False) -
                                 matches.append(f"{rel_path}:{line_no}: {line.strip()[:140]}")
                                 if len(matches) >= 40:
                                     break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed reading file during grep: %s", e)
                 if len(matches) >= 40:
                     break
             if len(matches) >= 40:
@@ -667,7 +672,7 @@ def grep_search(query: str, directory_path: str = ".", is_regex: bool = False) -
         step_tracker.complete(f"[bold white]Grep search[/bold white] [cyan]'{query}'[/cyan]", f"{len(matches)} matches", success=True)
         return res
     except Exception as e:
-        step_tracker.fail(f"[bold red]Grep search error[/bold red]", str(e))
+        step_tracker.fail("[bold red]Grep search error[/bold red]", str(e))
         return f"Error during grep search: {e}"
 
 def fetch_url(url: str) -> str:
@@ -703,7 +708,11 @@ def google_search(query: str) -> str:
     step_tracker.start(f"Searching web for '{query}'...")
     try:
         import asyncio
-        from kratos_agent.search import get_search_router, format_search_results_with_citations
+
+        from kratos_agent.search import (
+            format_search_results_with_citations,
+            get_search_router,
+        )
 
         router = get_search_router()
         try:
@@ -726,7 +735,7 @@ def google_search(query: str) -> str:
         step_tracker.complete(f"[bold white]Web search[/bold white] [cyan]'{query}'[/cyan]", "0 results", success=True)
         return "No search results found for query."
     except Exception as e:
-        step_tracker.fail(f"[bold red]Web search error[/bold red]", str(e))
+        step_tracker.fail("[bold red]Web search error[/bold red]", str(e))
         return f"Search error: {e}"
 
 
@@ -740,7 +749,8 @@ def calculate_expression(expression: str) -> str:
     """Evaluates a mathematical expression safely."""
     step_tracker.start(f"Evaluating math: {expression}...")
     try:
-        import ast, operator
+        import ast
+        import operator
         ops = {
             ast.Add: operator.add,
             ast.Sub: operator.sub,
@@ -758,7 +768,7 @@ def calculate_expression(expression: str) -> str:
         step_tracker.complete(f"[bold white]Math evaluated[/bold white] [cyan]{expression} = {res}[/cyan]", success=True)
         return res
     except Exception as e:
-        step_tracker.fail(f"[bold red]Math evaluation error[/bold red]", str(e))
+        step_tracker.fail("[bold red]Math evaluation error[/bold red]", str(e))
         return f"Math error: {e}"
 
 
@@ -871,7 +881,7 @@ def clear_memory(memory_type: str = "") -> str:
     try:
         m_type = memory_type.strip() if memory_type.strip() else None
         cleared = memory.clear_cognitive_memory(memory_type=m_type)
-        step_tracker.complete(f"[bold white]Cleared memory[/bold white]", f"Type: {memory_type or 'all'}", success=True)
+        step_tracker.complete("[bold white]Cleared memory[/bold white]", f"Type: {memory_type or 'all'}", success=True)
         return f"Cleared cognitive memory layer '{memory_type or 'all'}'."
     except Exception as e:
         step_tracker.fail("Failed to clear memory", str(e))
@@ -936,7 +946,7 @@ def set_parallel_subagent_runner(runner) -> None:
     _parallel_subagent_runner = runner
 
 
-def spawn_parallel_subagents(subagents: List[Dict[str, str]]) -> str:
+def spawn_parallel_subagents(subagents: list[dict[str, str]]) -> str:
     """Spawns multiple isolated specialized subagents concurrently in parallel threads.
 
     Each subagent executes its focused task simultaneously, saving significant time.
@@ -1025,7 +1035,7 @@ def list_skills(filter_tag: str = "") -> str:
         if len(unique_skills) > 35:
             lines.append(f"... and {len(unique_skills) - 35} more skills. Filter by tag to narrow down.")
 
-        step_tracker.complete(f"[bold white]Skills listed[/bold white]", f"Total: {len(unique_skills)}", success=True)
+        step_tracker.complete("[bold white]Skills listed[/bold white]", f"Total: {len(unique_skills)}", success=True)
         return "\n".join(lines)
     except Exception as e:
         step_tracker.fail("Failed to list skills", str(e))

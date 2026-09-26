@@ -1,13 +1,16 @@
 """Append-only JSONL and Cloudflare D1 database event storage for recovery, replay, and trace inspection."""
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .d1_client import D1DatabaseClient, d1_db
+from .d1_client import D1DatabaseClient
 from .runtime_contracts import EventKind, RuntimeEvent, json_safe
 
 
@@ -17,9 +20,9 @@ class EventStore:
     def __init__(
         self,
         session_dir: Path,
-        session_id: Optional[str] = None,
-        db: Optional[D1DatabaseClient] = None,
-        d1_db: Optional[D1DatabaseClient] = None,
+        session_id: str | None = None,
+        db: D1DatabaseClient | None = None,
+        d1_db: D1DatabaseClient | None = None,
     ) -> None:
         self.session_dir = session_dir
         self.session_id = session_id or session_dir.name
@@ -39,8 +42,8 @@ class EventStore:
         try:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(json_safe(event), ensure_ascii=False) + "\n")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Cloudflare D1 database persistence
         try:
@@ -55,10 +58,10 @@ class EventStore:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 [event_id, self.session_id, turn_id, kind_str, ts, payload_json],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
-    def read(self) -> List[Dict[str, Any]]:
+    def read(self) -> list[dict[str, Any]]:
         """Reads all events for this session from Cloudflare D1, falling back to local JSONL."""
         # Try reading from D1 database first
         try:
@@ -83,8 +86,8 @@ class EventStore:
                         "payload": payload,
                     })
                 return events
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Fallback to local JSONL file
         if not self.path.exists():

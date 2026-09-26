@@ -5,17 +5,17 @@ Provides clean structured summaries of workspace changes without dumping excessi
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 
 class WorkspaceTracker:
     def __init__(self, workspace: Path | None = None) -> None:
         self.workspace = (workspace or Path.cwd()).resolve()
-        self.created_files: Set[str] = set()
-        self.modified_files: Set[str] = set()
-        self.deleted_files: Set[str] = set()
-        self.inspected_files: Set[str] = set()
-        self.executed_commands: List[Dict[str, Any]] = []
+        self.created_files: set[str] = set()
+        self.modified_files: set[str] = set()
+        self.deleted_files: set[str] = set()
+        self.inspected_files: set[str] = set()
+        self.executed_commands: list[dict[str, Any]] = []
 
     def reset(self) -> None:
         self.created_files.clear()
@@ -63,11 +63,11 @@ class WorkspaceTracker:
         return len(self.created_files) + len(self.modified_files) + len(self.deleted_files)
 
     @property
-    def all_changed_files(self) -> List[str]:
+    def all_changed_files(self) -> list[str]:
         combined = sorted(list(self.created_files | self.modified_files))
         return combined
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "created": sorted(list(self.created_files)),
             "modified": sorted(list(self.modified_files)),

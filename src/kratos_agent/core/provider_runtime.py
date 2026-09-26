@@ -6,10 +6,11 @@ responses into Kratos' ModelResponse contract without hiding real failures.
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import json
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from typing import Any
 
 from .runtime_contracts import ModelCapabilities, ModelResponse, ToolCall
 
@@ -22,8 +23,8 @@ class ModelAdapter(ABC):
     @abstractmethod
     def complete(
         self,
-        request: Dict[str, Any],
-        on_chunk: Optional[Callable[[str], None]] = None,
+        request: dict[str, Any],
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         from kratos_agent.ccs.base import CapabilityUnavailable
         raise CapabilityUnavailable(
@@ -45,9 +46,9 @@ class BrainAdapter(ModelAdapter):
         self.capabilities = ModelCapabilities(streaming=True, tool_calling=True, reasoning=True)
 
     @staticmethod
-    def _messages(request: Dict[str, Any]) -> tuple[str, List[Dict[str, Any]]]:
+    def _messages(request: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
         system_content = str(request.get("system") or "")
-        messages: List[Dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
 
         for message in request.get("messages", []):
             role = str(message.get("role", "user"))
@@ -60,7 +61,7 @@ class BrainAdapter(ModelAdapter):
             if role == "assistant":
                 content = message.get("content")
                 tool_calls_meta = message.get("tool_calls") or message.get("metadata", {}).get("tool_calls")
-                item: Dict[str, Any] = {"role": "assistant", "content": None}
+                item: dict[str, Any] = {"role": "assistant", "content": None}
                 if content is not None:
                     text = str(content).strip()
                     item["content"] = None if tool_calls_meta and (text.startswith("call:") or not text) else (text or None)
@@ -95,8 +96,8 @@ class BrainAdapter(ModelAdapter):
         )
 
     @staticmethod
-    def _dedupe_calls(calls: List[Dict[str, Any]]) -> List[ToolCall]:
-        result: List[ToolCall] = []
+    def _dedupe_calls(calls: list[dict[str, Any]]) -> list[ToolCall]:
+        result: list[ToolCall] = []
         seen: set[tuple[str, str]] = set()
         for call in calls:
             name = str(call.get("name") or "tool")
@@ -116,8 +117,8 @@ class BrainAdapter(ModelAdapter):
 
     def complete(
         self,
-        request: Dict[str, Any],
-        on_chunk: Optional[Callable[[str], None]] = None,
+        request: dict[str, Any],
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         from kratos_agent.brain.chat_model import extract_tool_calls_from_text
 
@@ -128,7 +129,7 @@ class BrainAdapter(ModelAdapter):
             # BrainClient already sends them through the native `tools` field.
             system_content = system_content + self._tool_protocol_hint()
 
-        buffered: List[str] = []
+        buffered: list[str] = []
         recent = ""
         suppress_text = False
         streaming_active = False
@@ -159,7 +160,7 @@ class BrainAdapter(ModelAdapter):
                 on_chunk(chunk)
 
         raw_text = ""
-        native_calls: List[Dict[str, Any]] = []
+        native_calls: list[dict[str, Any]] = []
 
         complete_fn = getattr(self.client, "complete", None)
         if callable(complete_fn):

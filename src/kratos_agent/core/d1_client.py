@@ -9,12 +9,14 @@ Supports:
 """
 from __future__ import annotations
 
-import json
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import requests
 from dotenv import load_dotenv
@@ -30,10 +32,10 @@ class D1DatabaseClient:
 
     def __init__(
         self,
-        account_id: Optional[str] = None,
-        database_id: Optional[str] = None,
-        api_token: Optional[str] = None,
-        local_db_path: Optional[Path] = None,
+        account_id: str | None = None,
+        database_id: str | None = None,
+        api_token: str | None = None,
+        local_db_path: Path | None = None,
     ) -> None:
         self.account_id = account_id.strip() if account_id is not None else os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
         self.database_id = database_id.strip() if database_id is not None else os.getenv("CLOUDFLARE_D1_DATABASE_ID", "").strip()
@@ -55,7 +57,7 @@ class D1DatabaseClient:
         """Cloudflare D1 REST query endpoint."""
         return f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/d1/database/{self.database_id}/query"
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json",
@@ -63,7 +65,7 @@ class D1DatabaseClient:
 
     # ── SQL Execution ──────────────────────────────────────────────────────────
 
-    def execute(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    def execute(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
         """Executes a SQL query and returns rows as dictionaries."""
         if not self._schema_initialized:
             self.init_schema()
@@ -71,13 +73,13 @@ class D1DatabaseClient:
         if self.is_remote:
             try:
                 return self._execute_remote(sql, params or [])
-            except Exception as exc:
+            except Exception:
                 # Log and fallback gracefully to local mirror on network or remote error
                 return self._execute_local(sql, params or [])
         else:
             return self._execute_local(sql, params or [])
 
-    def _execute_remote(self, sql: str, params: List[Any]) -> List[Dict[str, Any]]:
+    def _execute_remote(self, sql: str, params: list[Any]) -> list[dict[str, Any]]:
         payload = {
             "sql": sql,
             "params": params,
@@ -104,7 +106,7 @@ class D1DatabaseClient:
         # Return results of the primary statement block
         return result_blocks[0].get("results", [])
 
-    def _execute_local(self, sql: str, params: List[Any]) -> List[Dict[str, Any]]:
+    def _execute_local(self, sql: str, params: list[Any]) -> list[dict[str, Any]]:
         conn = sqlite3.connect(self.local_db_path)
         try:
             conn.row_factory = sqlite3.Row
@@ -118,7 +120,7 @@ class D1DatabaseClient:
         finally:
             conn.close()
 
-    def execute_many(self, sql: str, param_list: List[List[Any]]) -> int:
+    def execute_many(self, sql: str, param_list: list[list[Any]]) -> int:
         """Executes a parameterized statement for multiple rows."""
         count = 0
         for params in param_list:
@@ -128,7 +130,7 @@ class D1DatabaseClient:
 
     # ── Schema Initialization ──────────────────────────────────────────────────
 
-    def init_schema(self, schema_file: Optional[Path] = None) -> bool:
+    def init_schema(self, schema_file: Path | None = None) -> bool:
         """Initializes tables and indices from d1_schema.sql."""
         path = schema_file or DEFAULT_SCHEMA_PATH
         if not path.exists():
@@ -152,15 +154,15 @@ class D1DatabaseClient:
             try:
                 for stmt in statements:
                     self._execute_remote(stmt, [])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         self._schema_initialized = True
         return True
 
     # ── Statistics & Diagnostic Health ─────────────────────────────────────────
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Returns database statistics, connection mode, and record counts."""
         start = time.monotonic()
         mode = "cloudflare_d1" if self.is_remote else "local_sqlite"

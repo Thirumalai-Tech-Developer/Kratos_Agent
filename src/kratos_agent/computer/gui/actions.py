@@ -1,14 +1,15 @@
 """Semantic GUI actions helper."""
 from __future__ import annotations
-from typing import Any, Dict, Optional
 
-from kratos_agent.computer.state import ComputerAction, ActionResult
+from typing import Any
+
 from kratos_agent.computer.executor import get_executor
+from kratos_agent.computer.state import ActionResult, ComputerAction
 
 
-def click(role: Optional[str] = None, name: Optional[str] = None, element_id: Optional[str] = None, button: str = "left") -> ActionResult:
+def click(role: str | None = None, name: str | None = None, element_id: str | None = None, button: str = "left") -> ActionResult:
     """Clicks an element semantically."""
-    target: Dict[str, Any] = {}
+    target: dict[str, Any] = {}
     if role:
         target["role"] = role
     if name:
@@ -20,9 +21,9 @@ def click(role: Optional[str] = None, name: Optional[str] = None, element_id: Op
     return get_executor().execute(action)
 
 
-def type_text(text: str, role: Optional[str] = None, name: Optional[str] = None, element_id: Optional[str] = None) -> ActionResult:
+def type_text(text: str, role: str | None = None, name: str | None = None, element_id: str | None = None) -> ActionResult:
     """Types text into an element semantically."""
-    target: Dict[str, Any] = {}
+    target: dict[str, Any] = {}
     if role:
         target["role"] = role
     if name:

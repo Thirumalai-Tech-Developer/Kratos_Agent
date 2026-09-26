@@ -1,7 +1,8 @@
 import abc
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Literal, Tuple
+from typing import Any
+
 
 class CapabilityUnavailable(RuntimeError):
     """Raised when a requested capability is not present on this platform/machine.
@@ -22,13 +23,13 @@ class WindowInfo:
     title: str
     app_name: str
     is_active: bool
-    bounds: Dict[str, int]  # x, y, width, height
+    bounds: dict[str, int]  # x, y, width, height
 
 @dataclass
 class DisplayInfo:
     id: str
     is_primary: bool
-    bounds: Dict[str, int]
+    bounds: dict[str, int]
     resolution: str
 
     @property
@@ -73,23 +74,23 @@ class ComputerController(abc.ABC):
         raise CapabilityUnavailable("keyboard_type", "abstract", "Abstract method not implemented on base class.")
         
     @abc.abstractmethod
-    def keyboard_press(self, keys: List[str]) -> None:
+    def keyboard_press(self, keys: list[str]) -> None:
         """Presses a combination of keys (e.g. ['ctrl', 'c'])."""
         raise CapabilityUnavailable("keyboard_press", "abstract", "Abstract method not implemented on base class.")
 
     # ── SCREEN & VISION ────────────────────────────────────
     @abc.abstractmethod
-    def take_screenshot(self, monitor_id: Optional[str] = None) -> bytes:
+    def take_screenshot(self, monitor_id: str | None = None) -> bytes:
         """Returns screenshot as PNG bytes."""
         raise CapabilityUnavailable("take_screenshot", "abstract", "Abstract method not implemented on base class.")
         
     @abc.abstractmethod
-    def get_displays(self) -> List[DisplayInfo]:
+    def get_displays(self) -> list[DisplayInfo]:
         raise CapabilityUnavailable("get_displays", "abstract", "Abstract method not implemented on base class.")
 
     # ── WINDOW MANAGEMENT ──────────────────────────────────
     @abc.abstractmethod
-    def list_windows(self) -> List[WindowInfo]:
+    def list_windows(self) -> list[WindowInfo]:
         raise CapabilityUnavailable("list_windows", "abstract", "Abstract method not implemented on base class.")
         
     @abc.abstractmethod
@@ -111,12 +112,12 @@ class ComputerController(abc.ABC):
 
     # ── SYSTEM CAPABILITIES ────────────────────────────────
     @abc.abstractmethod
-    def get_system_info(self) -> Dict[str, Any]:
+    def get_system_info(self) -> dict[str, Any]:
         """Returns OS version, memory, CPU info, etc."""
         raise CapabilityUnavailable("get_system_info", "abstract", "Abstract method not implemented on base class.")
         
     @abc.abstractmethod
-    def list_applications(self) -> List[Dict[str, str]]:
+    def list_applications(self) -> list[dict[str, str]]:
         raise CapabilityUnavailable("list_applications", "abstract", "Abstract method not implemented on base class.")
         
     @abc.abstractmethod
@@ -147,14 +148,14 @@ class ElementHandle:
     name: str                      # accessible name / label
     value: str | None
     rect: Rect
-    states: List[str]              # ["focused", "enabled", "checked", "expanded"]
-    patterns: List[str]            # ["Invoke", "Value", "Toggle", "SelectionItem", "Scroll"]
+    states: list[str]              # ["focused", "enabled", "checked", "expanded"]
+    patterns: list[str]            # ["Invoke", "Value", "Toggle", "SelectionItem", "Scroll"]
     app: str                       # process name
     window: str                    # window title
     depth: int
     native: object | None = None
     
-    def to_model_dict(self) -> Dict[str, Any]:
+    def to_model_dict(self) -> dict[str, Any]:
         """Compact representation for Headroom/LLM consumption."""
         d = {
             "ref": self.ref,
@@ -194,7 +195,7 @@ class PlatformBackend(ABC):
     @abstractmethod
     def dump_tree(self, app: str | None = None, root_window: str | None = None,
                   max_depth: int = 12, max_nodes: int = 800,
-                  visible_only: bool = True) -> List[ElementHandle]:
+                  visible_only: bool = True) -> list[ElementHandle]:
         raise CapabilityUnavailable("dump_tree", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
@@ -209,7 +210,7 @@ class PlatformBackend(ABC):
         
     @abstractmethod
     def mouse_click(self, p: Point | None = None, button: str = "left",
-                    clicks: int = 1, modifiers: List[str] = field(default_factory=list)) -> ActionResult:
+                    clicks: int = 1, modifiers: list[str] = field(default_factory=list)) -> ActionResult:
         raise CapabilityUnavailable("mouse_click", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
@@ -222,7 +223,7 @@ class PlatformBackend(ABC):
         raise CapabilityUnavailable("mouse_scroll", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
-    def key_tap(self, keys: List[str]) -> ActionResult:
+    def key_tap(self, keys: list[str]) -> ActionResult:
         raise CapabilityUnavailable("key_tap", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
@@ -232,7 +233,7 @@ class PlatformBackend(ABC):
 
     # ── windows ──────────────────────────────────────────────────────────────
     @abstractmethod
-    def list_windows(self, include_minimized: bool = True) -> List[Dict[str, Any]]:
+    def list_windows(self, include_minimized: bool = True) -> list[dict[str, Any]]:
         raise CapabilityUnavailable("list_windows", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
@@ -245,7 +246,7 @@ class PlatformBackend(ABC):
 
     # ── system ───────────────────────────────────────────────────────────────
     @abstractmethod
-    def launch(self, target: str, args: List[str] = field(default_factory=list), cwd: str | None = None,
+    def launch(self, target: str, args: list[str] = field(default_factory=list), cwd: str | None = None,
                elevated: bool = False, verb: str | None = None,
                wait: bool = False, timeout: float | None = None) -> ActionResult:
         raise CapabilityUnavailable("launch", "abstract", "Abstract method not implemented on base class.")
@@ -260,5 +261,5 @@ class PlatformBackend(ABC):
         raise CapabilityUnavailable("run_elevated", "abstract", "Abstract method not implemented on base class.")
         
     @abstractmethod
-    def display_info(self) -> List[Dict[str, Any]]:
+    def display_info(self) -> list[dict[str, Any]]:
         raise CapabilityUnavailable("display_info", "abstract", "Abstract method not implemented on base class.")

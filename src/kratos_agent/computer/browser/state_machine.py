@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 
 class BrowserTaskState(str, Enum):
@@ -33,15 +33,15 @@ class BrowserActionRegistry:
     MAX_PLAY_RETRIES: int = 2
 
     def __init__(self) -> None:
-        self._successful_actions: Set[str] = set()
-        self._action_attempts: Dict[str, int] = {}
+        self._successful_actions: set[str] = set()
+        self._action_attempts: dict[str, int] = {}
 
     @staticmethod
     def compute_action_key(
         task_id: str,
-        target_page_id: Optional[str],
+        target_page_id: str | None,
         action_type: str,
-        arguments: Optional[Dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
     ) -> str:
         """Computes a deterministic hash for an action execution."""
         args_str = json.dumps(arguments or {}, sort_keys=True)
@@ -67,7 +67,7 @@ class BrowserActionRegistry:
         self._action_attempts.clear()
 
 
-_action_registry: Optional[BrowserActionRegistry] = None
+_action_registry: BrowserActionRegistry | None = None
 
 
 def get_browser_action_registry() -> BrowserActionRegistry:

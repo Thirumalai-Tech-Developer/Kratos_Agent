@@ -1,5 +1,4 @@
 import ctypes
-from typing import Tuple
 
 user32 = ctypes.windll.user32
 
@@ -23,7 +22,7 @@ EXTENDED_KEYS = {
     "insert", "delete", "lwin", "rwin", "div", "ralt", "rctrl", "prtscr"
 }
 
-def get_vk_and_scancode(key: str) -> Tuple[int, int, bool]:
+def get_vk_and_scancode(key: str) -> tuple[int, int, bool]:
     """Returns (vk_code, scan_code, is_extended)"""
     key = key.lower()
     vk = KEY_MAP.get(key)

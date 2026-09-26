@@ -1,8 +1,8 @@
 """PowerShell CLIXML parser and terminal output normalizer."""
 from __future__ import annotations
+
 import re
 import xml.etree.ElementTree as ET
-from typing import Optional
 
 from kratos_agent.system.shell.base import CommandResult
 

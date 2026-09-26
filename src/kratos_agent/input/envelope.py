@@ -3,28 +3,28 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
 class InputEnvelope:
     request_id: str = field(default_factory=lambda: f"REQ-{uuid.uuid4().hex[:10].upper()}")
-    session_id: Optional[str] = None
+    session_id: str | None = None
     source: str = "unknown"
     timestamp: float = field(default_factory=time.time)
     text: str = ""
-    audio_metadata: Dict[str, Any] = field(default_factory=dict)
-    image_frames: List[Any] = field(default_factory=list)
+    audio_metadata: dict[str, Any] = field(default_factory=dict)
+    image_frames: list[Any] = field(default_factory=list)
     screen_frame: Any = None
     camera_frame: Any = None
-    active_window: Optional[Dict[str, Any]] = None
-    active_browser_tab: Optional[Dict[str, Any]] = None
-    selected_text: Optional[str] = None
-    cursor_context: Optional[Dict[str, Any]] = None
-    previous_user_turns: List[Dict[str, Any]] = field(default_factory=list)
-    active_task_summary: Optional[Dict[str, Any]] = None
+    active_window: dict[str, Any] | None = None
+    active_browser_tab: dict[str, Any] | None = None
+    selected_text: str | None = None
+    cursor_context: dict[str, Any] | None = None
+    previous_user_turns: list[dict[str, Any]] = field(default_factory=list)
+    active_task_summary: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "session_id": self.session_id,

@@ -1,11 +1,12 @@
 """Multi-tier recovery engine for automated fault handling."""
 from __future__ import annotations
-import time
-from typing import Any, Callable, Dict, List, Optional
 
-from kratos_agent.computer.state import ComputerAction, ActionResult
-from kratos_agent.computer.gui.errors import FailureType, ComputerError
+import time
+from collections.abc import Callable
+
+from kratos_agent.computer.gui.errors import ComputerError, FailureType
 from kratos_agent.computer.observer import get_observer
+from kratos_agent.computer.state import ActionResult, ComputerAction
 
 
 class RecoveryEngine:
@@ -66,11 +67,11 @@ class RecoveryEngine:
             focus_window(existing["handle"], policy=FocusPolicy.FOCUS_TARGET)
         return bm.open_url(url)
 
-    def recover_browser_focus(self, window_handle: Optional[int] = None) -> bool:
+    def recover_browser_focus(self, window_handle: int | None = None) -> bool:
         """Recovers browser window focus and restores if minimized (§41)."""
-        from kratos_agent.computer.browser.manager import get_browser_manager
         from kratos_agent.computer.apps.focus import focus_window
         from kratos_agent.computer.apps.focus_policy import FocusPolicy
+        from kratos_agent.computer.browser.manager import get_browser_manager
         bm = get_browser_manager()
         handle = window_handle
         if not handle:
@@ -124,7 +125,7 @@ class RecoveryEngine:
         max_attempts: int = 2,
     ) -> ActionResult:
         """Executes action through bounded recovery (default MAX_RECOVERY_ATTEMPTS = 2) (§42)."""
-        last_result: Optional[ActionResult] = None
+        last_result: ActionResult | None = None
         bound = min(max_attempts, self.MAX_RECOVERY_ATTEMPTS)
 
         for attempt in range(1, bound + 1):
@@ -151,7 +152,7 @@ class RecoveryEngine:
 
 
 
-_recovery_engine: Optional[RecoveryEngine] = None
+_recovery_engine: RecoveryEngine | None = None
 
 
 def get_recovery_engine() -> RecoveryEngine:

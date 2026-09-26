@@ -1,10 +1,14 @@
 """Desktop window management using native OS APIs."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import re
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from kratos_agent.computer.gui.models import WindowInfo, Rect
+from kratos_agent.computer.gui.models import Rect, WindowInfo
 from kratos_agent.computer.state import ActionResult
 
 try:
@@ -44,9 +48,9 @@ def _activate_hwnd_win32(hwnd: int) -> bool:
 class WindowManager:
     """Manages application windows (list, focus, move, resize, close)."""
 
-    def list_windows(self, include_minimized: bool = True) -> List[WindowInfo]:
+    def list_windows(self, include_minimized: bool = True) -> list[WindowInfo]:
         """Lists open application windows with titles, bounds, and active state."""
-        windows: List[WindowInfo] = []
+        windows: list[WindowInfo] = []
 
         if sys.platform == "win32" and gw:
             try:
@@ -61,8 +65,8 @@ class WindowManager:
                             is_active=bool(win.isActive),
                             bounds={"x": win.left, "y": win.top, "w": win.width, "h": win.height},
                         ))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         elif sys.platform == "linux":
             import subprocess
             try:
@@ -79,12 +83,12 @@ class WindowManager:
                             is_active=False,
                             bounds={"x": int(parts[2]), "y": int(parts[3]), "w": int(parts[4]), "h": int(parts[5])},
                         ))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         return windows
 
-    def focus_window(self, handle: Optional[str] = None, title_regex: Optional[str] = None) -> ActionResult:
+    def focus_window(self, handle: str | None = None, title_regex: str | None = None) -> ActionResult:
         """Brings a window to the foreground by handle or title regex (§6, §7)."""
         target_win = None
 
@@ -127,7 +131,7 @@ class WindowManager:
 
         return ActionResult(ok=False, action="window_focus", detail="Window not found")
 
-    def window_action(self, handle: str, action: str = "restore", rect: Optional[Rect] = None) -> ActionResult:
+    def window_action(self, handle: str, action: str = "restore", rect: Rect | None = None) -> ActionResult:
         """Performs window action: 'minimize', 'maximize', 'restore', 'close', 'move_resize'."""
         if sys.platform == "win32" and gw:
             try:
@@ -160,7 +164,7 @@ class WindowManager:
         return ActionResult(ok=False, action=f"window_{action}", detail="Window handle not found")
 
 
-_window_manager: Optional[WindowManager] = None
+_window_manager: WindowManager | None = None
 
 
 def get_window_manager() -> WindowManager:
@@ -170,9 +174,9 @@ def get_window_manager() -> WindowManager:
     return _window_manager
 
 
-def enumerate_chrome_windows() -> List[Dict[str, Any]]:
+def enumerate_chrome_windows() -> list[dict[str, Any]]:
     """Lists all visible, non-minimized Chrome and Chromium windows with HWND, PID, title, and foreground status (§30)."""
-    chrome_windows: List[Dict[str, Any]] = []
+    chrome_windows: list[dict[str, Any]] = []
     if sys.platform == "win32":
         import ctypes
         user32 = ctypes.windll.user32
@@ -211,8 +215,8 @@ def enumerate_chrome_windows() -> List[Dict[str, Any]]:
                             "visible": True,
                             "foreground": (hwnd == fore_hwnd),
                         })
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
     elif sys.platform == "linux":
         wm = get_window_manager()
         for win in wm.list_windows():

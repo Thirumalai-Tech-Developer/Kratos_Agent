@@ -1,9 +1,15 @@
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
+
 from kratos_agent.core.evidence import Evidence
+
 
 @dataclass
 class Blocker:
@@ -11,8 +17,8 @@ class Blocker:
     detail: str
     spoken_hint: str
     clearable: bool
-    cdp_probe: Optional[str] = None
-    ocr_patterns: List[str] = field(default_factory=list)
+    cdp_probe: str | None = None
+    ocr_patterns: list[str] = field(default_factory=list)
 
 
 BLOCKERS_DEF = [
@@ -75,16 +81,16 @@ BLOCKERS_DEF = [
 ]
 
 
-def get_blocker_by_name(name: str) -> Optional[Blocker]:
+def get_blocker_by_name(name: str) -> Blocker | None:
     for b_name, probe, patterns, hint, clearable in BLOCKERS_DEF:
         if b_name == name:
             return Blocker(name=b_name, detail=hint, spoken_hint=hint, clearable=clearable, cdp_probe=probe, ocr_patterns=patterns)
     return None
 
 
-def detect_blockers(ccs: Any, frame_ref: Optional[str] = None) -> List[Blocker]:
+def detect_blockers(ccs: Any, frame_ref: str | None = None) -> list[Blocker]:
     """Run CDP probes where available, OCR fallback always. Returns every match."""
-    matches: List[Blocker] = []
+    matches: list[Blocker] = []
 
     # 1. Try CDP probes if browser is attached/available
     cdp_eval = getattr(ccs, "browser_js", None) or getattr(ccs, "cdp_eval", None)
@@ -96,8 +102,8 @@ def detect_blockers(ccs: Any, frame_ref: Optional[str] = None) -> List[Blocker]:
                     val = res.get("value") if isinstance(res, dict) else res
                     if val is True or str(val).lower() == "true":
                         matches.append(Blocker(name=name, detail=hint, spoken_hint=hint, clearable=clearable, cdp_probe=probe, ocr_patterns=patterns))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
     # 2. OCR fallback / native checks
     text_corpus = ""
@@ -105,8 +111,8 @@ def detect_blockers(ccs: Any, frame_ref: Optional[str] = None) -> List[Blocker]:
     if ocr_read:
         try:
             text_corpus = str(ocr_read(frame_ref=frame_ref) or "").lower()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     if text_corpus:
         for name, probe, patterns, hint, clearable in BLOCKERS_DEF:
@@ -153,7 +159,7 @@ def clear_blocker(ccs: Any, blocker: Blocker | str) -> Evidence:
     browser_click = getattr(ccs, "browser_click", None)
     key_tap = getattr(ccs, "key_tap", None)
 
-    def _poll_blocker_cleared(probe: Optional[str], timeout_s: float = 1.5, poll_s: float = 0.1) -> bool:
+    def _poll_blocker_cleared(probe: str | None, timeout_s: float = 1.5, poll_s: float = 0.1) -> bool:
         if not probe or not cdp_eval:
             return True
         deadline = time.monotonic() + timeout_s
@@ -177,8 +183,8 @@ def clear_blocker(ccs: Any, blocker: Blocker | str) -> Evidence:
                     " if(b){ b.click(); return true; } return false; })()"
                 )
                 res = cdp_eval(click_script)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         _poll_blocker_cleared(blocker.cdp_probe)
 
     elif blocker.name == "autoplay_blocked":
@@ -186,13 +192,13 @@ def clear_blocker(ccs: Any, blocker: Blocker | str) -> Evidence:
         if cdp_eval:
             try:
                 res = cdp_eval("document.querySelector('video') ? (document.querySelector('video').play(), true) : false")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         if browser_click:
             try:
                 browser_click(selector="video")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         _poll_blocker_cleared(blocker.cdp_probe)
 
     elif blocker.name == "ad_overlay":
@@ -204,16 +210,16 @@ def clear_blocker(ccs: Any, blocker: Blocker | str) -> Evidence:
                     " if(b){ b.click(); return true; } return false; })()"
                 )
                 cdp_eval(skip_script)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         _poll_blocker_cleared(blocker.cdp_probe)
 
     elif blocker.name in ("native_modal", "browser_dialog"):
         if key_tap:
             try:
                 key_tap("escape")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     # Re-check if blocker persists
     still_there = False
@@ -222,8 +228,8 @@ def clear_blocker(ccs: Any, blocker: Blocker | str) -> Evidence:
             res = cdp_eval(blocker.cdp_probe)
             val = res.get("value") if isinstance(res, dict) else res
             still_there = bool(val is True or str(val).lower() == "true")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     if still_there:
         return Evidence(

@@ -1,18 +1,22 @@
+
+import logging
+logger = logging.getLogger(__name__)
 import platform
-from typing import Dict, Any, List, Optional
-import time
+from typing import Any
 
 try:
-    import pyautogui
+    import io
+
     import psutil
+    import pyautogui
     import pygetwindow as gw
     import pyperclip
     from PIL import ImageGrab
-    import io
 except ImportError:
     pass
 
-from .base import ComputerController, WindowInfo, DisplayInfo
+from .base import ComputerController, DisplayInfo, WindowInfo
+
 
 class WindowsComputerController(ComputerController):
     def __init__(self):
@@ -39,18 +43,18 @@ class WindowsComputerController(ComputerController):
     def keyboard_type(self, text: str) -> None:
         pyautogui.write(text, interval=0.01)
         
-    def keyboard_press(self, keys: List[str]) -> None:
+    def keyboard_press(self, keys: list[str]) -> None:
         pyautogui.hotkey(*keys)
 
     # ── SCREEN & VISION ────────────────────────────────────
-    def take_screenshot(self, monitor_id: Optional[str] = None) -> bytes:
+    def take_screenshot(self, monitor_id: str | None = None) -> bytes:
         # Pillow's ImageGrab works well for Windows
         img = ImageGrab.grab(all_screens=True)
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format='PNG')
         return img_byte_arr.getvalue()
         
-    def get_displays(self) -> List[DisplayInfo]:
+    def get_displays(self) -> list[DisplayInfo]:
         # Pillow does not easily give individual monitor bounds in a robust cross-platform way,
         # but pyautogui.size() gives primary screen size.
         # For multi-monitor, mss is better, but ImageGrab all_screens captures bounding box.
@@ -63,7 +67,7 @@ class WindowsComputerController(ComputerController):
         )]
 
     # ── WINDOW MANAGEMENT ──────────────────────────────────
-    def list_windows(self) -> List[WindowInfo]:
+    def list_windows(self) -> list[WindowInfo]:
         windows = []
         for win in gw.getAllWindows():
             if win.title:  # Only windows with titles
@@ -85,8 +89,8 @@ class WindowsComputerController(ComputerController):
                     if not win.isActive:
                         win.activate()
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         return False
         
     def close_window(self, window_id: str) -> bool:
@@ -95,8 +99,8 @@ class WindowsComputerController(ComputerController):
                 if str(win._hWnd) == window_id:
                     win.close()
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         return False
 
     # ── CLIPBOARD ──────────────────────────────────────────
@@ -107,7 +111,7 @@ class WindowsComputerController(ComputerController):
         pyperclip.copy(text)
 
     # ── SYSTEM CAPABILITIES ────────────────────────────────
-    def get_system_info(self) -> Dict[str, Any]:
+    def get_system_info(self) -> dict[str, Any]:
         return {
             "os": "Windows",
             "release": platform.release(),
@@ -118,7 +122,7 @@ class WindowsComputerController(ComputerController):
             "disk_percent": psutil.disk_usage('/').percent
         }
         
-    def list_applications(self) -> List[Dict[str, str]]:
+    def list_applications(self) -> list[dict[str, str]]:
         # Simplified running process list with names
         apps = []
         seen = set()
@@ -133,8 +137,8 @@ class WindowsComputerController(ComputerController):
         return apps
         
     def launch_application(self, app_name_or_path: str) -> bool:
-        import subprocess
         import os
+        import subprocess
         try:
             # os.startfile is Windows specific and opens files or apps via shell
             os.startfile(app_name_or_path)

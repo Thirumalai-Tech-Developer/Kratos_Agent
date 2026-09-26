@@ -8,9 +8,12 @@ Renders:
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -19,8 +22,9 @@ from rich.panel import Panel
 from rich.rule import Rule
 
 from kratos_agent.core.approval_mode import approval_gate
-from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
 from kratos_agent.core.event_bus import event_bus
+from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
+
 from .events import EventRenderer
 from .status_bar import StatusBar
 from .stream_printer import (
@@ -40,15 +44,15 @@ class KratosLiveRenderer:
         self._status_bar = StatusBar()
         self._console = Console(highlight=False, markup=True, legacy_windows=False)
         self._cancel_flag = threading.Event()
-        self._live: Optional[Live] = None
-        self._last_events: List[Dict[str, Any]] = []
+        self._live: Live | None = None
+        self._last_events: list[dict[str, Any]] = []
         self.live_mode: bool = self._is_tty
 
         # Subscribe to central event bus so any published event updates the live TUI
         try:
             event_bus.subscribe(self._hooked_emit)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def cancel(self) -> None:
         """Signal the current agent turn to cancel."""
@@ -60,7 +64,7 @@ class KratosLiveRenderer:
     def get_last_steps(self):
         return self._renderer.steps
 
-    def get_last_events(self) -> List[Dict[str, Any]]:
+    def get_last_events(self) -> list[dict[str, Any]]:
         return list(self._last_events)
 
     def get_last_plan(self):
@@ -71,7 +75,7 @@ class KratosLiveRenderer:
 
     # ── Main Entry Point ───────────────────────────────────────────────────────
 
-    def invoke_with_live(self, messages: List[Dict[str, str]]) -> str:
+    def invoke_with_live(self, messages: list[dict[str, str]]) -> str:
         """Run runtime.invoke(messages) while rendering a live TUI."""
         self._cancel_flag.clear()
         self._last_events.clear()
@@ -82,8 +86,8 @@ class KratosLiveRenderer:
             mem = self.runtime.memory
             if mem.active_session:
                 session_id = mem.active_session.session_id
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         self._status_bar.reset(
             model_name=self.runtime.model_name,
@@ -105,9 +109,9 @@ class KratosLiveRenderer:
 
     # ── Live TTY Mode ──────────────────────────────────────────────────────────
 
-    def _run_with_live(self, messages: List[Dict[str, str]]) -> str:
-        result_holder: List[str] = []
-        exc_holder: List[BaseException] = []
+    def _run_with_live(self, messages: list[dict[str, str]]) -> str:
+        result_holder: list[str] = []
+        exc_holder: list[BaseException] = []
 
         def _run():
             try:
@@ -208,7 +212,7 @@ class KratosLiveRenderer:
 
     # ── Plain / Pipe Mode ──────────────────────────────────────────────────────
 
-    def _run_plain(self, messages: List[Dict[str, str]]) -> str:
+    def _run_plain(self, messages: list[dict[str, str]]) -> str:
         pipe_print_step("THINKING", "Kratos is thinking…")
         try:
             reply = self.runtime.invoke(messages)
@@ -230,13 +234,13 @@ class KratosLiveRenderer:
 
         try:
             self.runtime._event_store.append(event)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         try:
             self._last_events.append(event.to_dict())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         kind = event.kind
         payload = event.payload
@@ -296,8 +300,8 @@ class KratosLiveRenderer:
             if self._live is not None:
                 try:
                     self._live.console.print(f"[bold cyan]\\[tool call][/bold cyan] [white]{action_label}[/white]")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
             elif not self.live_mode or not self._is_tty:
                 from .stream_printer import plain_print
                 plain_print(display)
@@ -330,5 +334,5 @@ class KratosLiveRenderer:
                 self._last_live_update_time = now
                 try:
                     self._live.update(self._build_renderable())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)

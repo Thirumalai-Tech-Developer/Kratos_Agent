@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from typing import Optional
 import httpx
-
 from langchain_openai import ChatOpenAI
+
+from kratos_agent.brain.client import BrainClient
 from kratos_agent.brain.config import (
     get_api_key,
     get_base_url,
-    get_endpoint_url,
     get_default_model,
+    get_endpoint_url,
 )
-from kratos_agent.brain.client import BrainClient
 
 
 def get_http_client() -> httpx.Client:
@@ -19,9 +18,9 @@ def get_http_client() -> httpx.Client:
 
 
 def create_brain_llm(
-    model: Optional[str] = None,
-    base_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> ChatOpenAI:
     """Creates a LangChain ChatOpenAI instance configured for the Brain gateway."""
     target_model = model or get_default_model()
@@ -39,8 +38,8 @@ def create_brain_llm(
 
 def get_agent_response(
     query: str,
-    model: Optional[str] = None,
-    endpoint_url: Optional[str] = None,
+    model: str | None = None,
+    endpoint_url: str | None = None,
 ) -> str:
     """Sends a query to the LLM Brain and returns the response content."""
     target_model = model or get_default_model()

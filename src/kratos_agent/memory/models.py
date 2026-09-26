@@ -1,10 +1,11 @@
 """Core data models for Memory Engine V2."""
 from __future__ import annotations
+
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class MemoryScope(str, Enum):
@@ -48,7 +49,7 @@ class MemoryRecord:
     layer: MemoryLayer = MemoryLayer.SEMANTIC
     scope: MemoryScope = MemoryScope.GLOBAL
     content: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     importance: float = 0.5
     confidence: float = 0.8
     recency: float = field(default_factory=time.time)
@@ -60,9 +61,9 @@ class MemoryRecord:
     success_count: int = 1
     failure_count: int = 0
     decay_rate: float = 0.01  # Per day
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "layer": self.layer.value if isinstance(self.layer, MemoryLayer) else str(self.layer),
@@ -82,7 +83,7 @@ class MemoryRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MemoryRecord:
+    def from_dict(cls, data: dict[str, Any]) -> MemoryRecord:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:8]),
             layer=MemoryLayer(data.get("layer", "SEMANTIC")),
@@ -106,12 +107,12 @@ class MemoryRecord:
 class MemoryQuery:
     """Context-aware query container for memory retrieval."""
     text: str
-    task: Optional[str] = None
-    application: Optional[str] = None
-    platform: Optional[str] = None
-    project: Optional[str] = None
-    scope: Optional[MemoryScope] = None
-    layer: Optional[MemoryLayer] = None
+    task: str | None = None
+    application: str | None = None
+    platform: str | None = None
+    project: str | None = None
+    scope: MemoryScope | None = None
+    layer: MemoryLayer | None = None
     limit: int = 5
     min_confidence: float = 0.20
 
@@ -121,14 +122,14 @@ class WorkflowRecord:
     """Procedural memory workflow specification."""
     name: str
     trigger: str
-    steps: List[str]
+    steps: list[str]
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    application: Optional[str] = None
+    application: str | None = None
     success_count: int = 1
     failure_count: int = 0
     confidence: float = 0.90
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -141,7 +142,7 @@ class WorkflowRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> WorkflowRecord:
+    def from_dict(cls, data: dict[str, Any]) -> WorkflowRecord:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:8]),
             name=data.get("name", ""),
@@ -164,7 +165,7 @@ class ErrorRecoveryRecord:
     success_count: int = 1
     confidence: float = 0.85
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "error": self.error,
@@ -175,7 +176,7 @@ class ErrorRecoveryRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ErrorRecoveryRecord:
+    def from_dict(cls, data: dict[str, Any]) -> ErrorRecoveryRecord:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:8]),
             error=data.get("error", ""),

@@ -1,12 +1,12 @@
 """Core computer control tools for the agent runtime."""
 from __future__ import annotations
-import json
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.manager import get_computer_manager
-from kratos_agent.computer.gui.manager import get_gui_manager
-from kratos_agent.computer.state import ComputerAction
+import json
+
 from kratos_agent.ccs.perception.screenshot import take_screenshot
+from kratos_agent.computer.gui.manager import get_gui_manager
+from kratos_agent.computer.manager import get_computer_manager
+from kratos_agent.computer.state import ComputerAction
 
 
 def computer_observe(include_interactive: bool = True, max_elements: int = 100) -> str:
@@ -16,7 +16,7 @@ def computer_observe(include_interactive: bool = True, max_elements: int = 100) 
     return json.dumps(state.to_dict(), indent=2)
 
 
-def computer_inspect(query: Optional[str] = None, role: Optional[str] = None, app: Optional[str] = None) -> str:
+def computer_inspect(query: str | None = None, role: str | None = None, app: str | None = None) -> str:
     """Inspects the current UI to find controls matching semantic criteria without acting on them."""
     gm = get_gui_manager()
     try:
@@ -26,12 +26,12 @@ def computer_inspect(query: Optional[str] = None, role: Optional[str] = None, ap
         return json.dumps({"error": str(e)}, indent=2)
 
 
-def computer_find(query: str, role: Optional[str] = None) -> str:
+def computer_find(query: str, role: str | None = None) -> str:
     """Finds a specific UI control by label, text, or accessibility name."""
     return computer_inspect(query=query, role=role)
 
 
-def computer_click(name: Optional[str] = None, role: Optional[str] = None, id: Optional[str] = None, button: str = "left") -> str:
+def computer_click(name: str | None = None, role: str | None = None, id: str | None = None, button: str = "left") -> str:
     """Activates a semantic UI element by accessible name or role without pointer coordinates."""
     cm = get_computer_manager()
     target = {}
@@ -43,7 +43,7 @@ def computer_click(name: Optional[str] = None, role: Optional[str] = None, id: O
     return json.dumps(res.to_dict(), indent=2)
 
 
-def computer_type(text: str, name: Optional[str] = None, role: Optional[str] = None, id: Optional[str] = None) -> str:
+def computer_type(text: str, name: str | None = None, role: str | None = None, id: str | None = None) -> str:
     """Enters text into an input field, textbox, or active editor."""
     cm = get_computer_manager()
     target = {}
@@ -82,7 +82,7 @@ def computer_scroll(dy: int, dx: int = 0) -> str:
     return json.dumps(res.to_dict(), indent=2)
 
 
-def computer_focus(window_title: Optional[str] = None, window_id: Optional[str] = None) -> str:
+def computer_focus(window_title: str | None = None, window_id: str | None = None) -> str:
     """Brings a window into focus by title or handle."""
     cm = get_computer_manager()
     action = ComputerAction(action="window_focus", parameters={"title_regex": window_title, "handle": window_id})
@@ -90,7 +90,7 @@ def computer_focus(window_title: Optional[str] = None, window_id: Optional[str] 
     return json.dumps(res.to_dict(), indent=2)
 
 
-def computer_launch(target: str, args: Optional[List[str]] = None) -> str:
+def computer_launch(target: str, args: list[str] | None = None) -> str:
     """Launches an application, executable, or URI."""
     cm = get_computer_manager()
     action = ComputerAction(action="app_launch", parameters={"target": target, "args": args or []})
@@ -98,7 +98,7 @@ def computer_launch(target: str, args: Optional[List[str]] = None) -> str:
     return json.dumps(res.to_dict(), indent=2)
 
 
-def computer_close(window_id: Optional[str] = None, window_title: Optional[str] = None) -> str:
+def computer_close(window_id: str | None = None, window_title: str | None = None) -> str:
     """Closes an open window."""
     cm = get_computer_manager()
     action = ComputerAction(action="window_close", target={"id": window_id, "name": window_title})

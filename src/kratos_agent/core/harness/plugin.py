@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .kernel import HarnessKernel
@@ -30,8 +31,8 @@ class PluginMetadata:
     description: str = ""
     author: str = "Kratos Agent"
     category: str = "general"  # model, tool, memory, audit, preset, creator, general
-    dependencies: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 class HarnessPlugin:
@@ -39,7 +40,7 @@ class HarnessPlugin:
 
     metadata: PluginMetadata
 
-    def __init__(self, metadata: Optional[PluginMetadata] = None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, metadata: PluginMetadata | None = None, config: dict[str, Any] | None = None):
         if metadata is not None:
             self.metadata = metadata
         elif not hasattr(self, "metadata"):
@@ -49,13 +50,13 @@ class HarnessPlugin:
             )
 
         self.name: str = self.metadata.name
-        self.config: Dict[str, Any] = config or {}
-        self.kernel: Optional["HarnessKernel"] = None
+        self.config: dict[str, Any] = config or {}
+        self.kernel: HarnessKernel | None = None
         self.state: PluginState = PluginState.UNLOADED
-        self.error_message: Optional[str] = None
-        self._disposables: List[Callable[[], Any]] = []
+        self.error_message: str | None = None
+        self._disposables: list[Callable[[], Any]] = []
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         """Called when plugin is attached to the kernel context."""
         self.kernel = kernel
         self.state = PluginState.LOADED
@@ -80,7 +81,7 @@ class HarnessPlugin:
         self.state = PluginState.UNLOADED
         logger.debug(f"[Harness] Plugin '{self.name}' unloaded.")
 
-    def apply_preset(self, preset_name: str, config: Dict[str, Any]) -> None:
+    def apply_preset(self, preset_name: str, config: dict[str, Any]) -> None:
         """Reconfigure plugin based on active preset (standard, code, minimal, creator)."""
         self.config.update(config)
 
@@ -97,7 +98,7 @@ class HarnessPlugin:
                 logger.warning(f"[Harness] Error disposing resource in plugin '{self.name}': {e}")
         self._disposables.clear()
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return runtime status of the plugin."""
         return {
             "name": self.name,

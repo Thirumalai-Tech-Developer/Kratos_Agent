@@ -11,12 +11,13 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any
 
-from .runtime_contracts import EventKind, RuntimeEvent
 from .evidence import Evidence, OutcomeAssertion
+from .runtime_contracts import EventKind, RuntimeEvent
 
 
 @dataclass(slots=True)
@@ -25,22 +26,22 @@ class Verdict:
     code: str = ""
     reason: str = ""
     correction: str = ""
-    evidence: Optional[Evidence] = None
+    evidence: Evidence | None = None
 
 
 @dataclass
 class VerificationResult:
     passed: bool
     summary: str
-    details: List[str] = field(default_factory=list)
-    build_passed: Optional[bool] = None
-    tests_passed: Optional[bool] = None
-    browser_passed: Optional[bool] = None
+    details: list[str] = field(default_factory=list)
+    build_passed: bool | None = None
+    tests_passed: bool | None = None
+    browser_passed: bool | None = None
     files_checked: int = 0
 
 
 class VerificationManager:
-    def __init__(self, workspace: Path, emit: Optional[Callable[[RuntimeEvent], None]] = None) -> None:
+    def __init__(self, workspace: Path, emit: Callable[[RuntimeEvent], None] | None = None) -> None:
         self.workspace = workspace.resolve()
         self.emit = emit or (lambda e: None)
 
@@ -60,7 +61,7 @@ class VerificationManager:
         self,
         task: Any,
         declared_result: dict,
-        evidence: Optional[Evidence],
+        evidence: Evidence | None,
     ) -> Verdict:
         """THE gate. Called by agent_loop before any task may transition to COMPLETED."""
         if not getattr(task, "requires_observable_evidence", False):
@@ -95,14 +96,14 @@ class VerificationManager:
 
         return Verdict(allow=True, reason="evidence_met", evidence=evidence)
 
-    def _candidate_test_commands(self) -> List[Tuple[str, List[str]]]:
+    def _candidate_test_commands(self) -> list[tuple[str, list[str]]]:
         """Discover *existing* project verification commands.
 
         This intentionally ignores test files created during the current turn.
         A self-authored verifier is useful for debugging but is not authoritative.
         """
         root = self.workspace
-        candidates: List[Tuple[str, List[str]]] = []
+        candidates: list[tuple[str, list[str]]] = []
 
         for name in ("run-tests.sh", "test.sh"):
             path = root / name
@@ -146,8 +147,8 @@ class VerificationManager:
             ):
                 candidates.append(("pytest", [sys.executable, "-m", "pytest", "-q"]))
 
-        seen: set[Tuple[str, ...]] = set()
-        unique: List[Tuple[str, List[str]]] = []
+        seen: set[tuple[str, ...]] = set()
+        unique: list[tuple[str, list[str]]] = []
         for label, command in candidates:
             key = tuple(command)
             if key not in seen:
@@ -158,15 +159,15 @@ class VerificationManager:
     def _run_discovered_tests(
         self,
         *,
-        changed_files: List[str],
+        changed_files: list[str],
         timeout_seconds: int = 120,
-    ) -> Tuple[Optional[bool], List[str]]:
+    ) -> tuple[bool | None, list[str]]:
         """Run pre-existing project tests, if a trustworthy suite is discoverable."""
         commands = self._candidate_test_commands()
         if not commands:
             return None, ["No pre-existing project test suite was discovered; structural verification only."]
 
-        details: List[str] = []
+        details: list[str] = []
         all_passed = True
 
         for label, command in commands[:2]:
@@ -202,7 +203,7 @@ class VerificationManager:
 
     def verify_workspace(
         self,
-        changed_files: List[str],
+        changed_files: list[str],
         verification_type: str = "auto",
         require_files: bool = True,
         browser_performed: bool = False,
@@ -215,12 +216,12 @@ class VerificationManager:
             turn_id,
         ))
 
-        details: List[str] = []
+        details: list[str] = []
         passed = True
         files_checked = 0
-        build_passed: Optional[bool] = None
-        tests_passed: Optional[bool] = None
-        browser_passed: Optional[bool] = None
+        build_passed: bool | None = None
+        tests_passed: bool | None = None
+        browser_passed: bool | None = None
 
         if require_files and len(changed_files) == 0:
             passed = False

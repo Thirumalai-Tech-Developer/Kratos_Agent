@@ -1,12 +1,11 @@
-from typing import List, Optional
-import os
 
 try:
     from rapidocr_onnxruntime import RapidOCR
 except ImportError:
     RapidOCR = None
 
-from kratos_agent.ccs.base import Rect, ElementHandle, CapabilityUnavailable
+from kratos_agent.ccs.base import CapabilityUnavailable, ElementHandle, Rect
+
 
 class OcrEngine:
     def __init__(self):
@@ -21,7 +20,7 @@ class OcrEngine:
 
     def extract_text(self, image_path_or_bytes: str | bytes, 
                      app_context: str = "ocr", 
-                     window_context: str = "screen") -> List[ElementHandle]:
+                     window_context: str = "screen") -> list[ElementHandle]:
         """
         Runs RapidOCR on the given image and returns ElementHandles for each text line bounding box.
         """

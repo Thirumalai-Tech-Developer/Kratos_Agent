@@ -6,31 +6,33 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
+from kratos_agent.capabilities.discovery import discover_capabilities
 from kratos_agent.diagnostics.errors import error_from_exception
 from kratos_agent.orchestrator.mission import get_mission_coordinator
 from kratos_agent.orchestrator.state import MissionState
-from kratos_agent.capabilities.discovery import discover_capabilities
+
 from .protocol import MasterCommand, SlaveAck, SlaveResult, get_command_bus
 
 logger = logging.getLogger(__name__)
 
 
 class MasterSupervisor:
-    def __init__(self, session_id: Optional[str] = None) -> None:
+    def __init__(self, session_id: str | None = None) -> None:
         self.session_id = session_id or f"LIVE-{uuid.uuid4().hex[:6].upper()}"
         self.command_bus = get_command_bus()
-        self.active_task_id: Optional[str] = None
-        self.active_command_id: Optional[str] = None
-        self.active_objective: Optional[str] = None
-        self.last_result: Optional[Dict[str, Any]] = None
-        self.last_error: Optional[Dict[str, Any]] = None
-        self.last_task_id: Optional[str] = None
-        self.last_started_at: Optional[float] = None
-        self.last_completed_at: Optional[float] = None
+        self.active_task_id: str | None = None
+        self.active_command_id: str | None = None
+        self.active_objective: str | None = None
+        self.last_result: dict[str, Any] | None = None
+        self.last_error: dict[str, Any] | None = None
+        self.last_task_id: str | None = None
+        self.last_started_at: float | None = None
+        self.last_completed_at: float | None = None
         self._lock = threading.Lock()
-        self._on_speech_feedback: Optional[Callable[[str], None]] = None
+        self._on_speech_feedback: Callable[[str], None] | None = None
 
     def set_speech_callback(self, cb: Callable[[str], None]) -> None:
         self._on_speech_feedback = cb
@@ -43,15 +45,15 @@ class MasterSupervisor:
         self,
         objective: str,
         action: str = "generic_task",
-        parameters: Optional[Dict[str, Any]] = None,
-        constraints: Optional[Dict[str, Any]] = None,
-        expected_result: Optional[Dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        expected_result: dict[str, Any] | None = None,
         priority: str = "normal",
         timeout: float = 60.0,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         force: bool = False,
         wait_for_result: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         with self._lock:
             if self.active_task_id is not None and not force and priority.lower() != "cancel":
                 return {
@@ -63,7 +65,7 @@ class MasterSupervisor:
 
         context_data = dict(context or {})
         requested_capability = str(action or "").strip()
-        candidates: list[Dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         if requested_capability in {"", "generic_task", "auto", "null", "none"}:
             candidates = discover_capabilities(objective, limit=5)
             requested_capability = (
@@ -122,7 +124,7 @@ class MasterSupervisor:
         ack_fut, result_fut = await self.command_bus.send_command(cmd)
         try:
             ack: SlaveAck = await asyncio.wait_for(ack_fut, timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             ack = SlaveAck(command_id=cmd.command_id, task_id=cmd.task_id, accepted=True, status="accepted")
 
         if not ack.accepted:
@@ -169,7 +171,7 @@ class MasterSupervisor:
         result_fut: asyncio.Future[SlaveResult],
         *,
         emit_speech: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             result = await asyncio.wait_for(result_fut, timeout=cmd.timeout)
             result_dict = result.to_dict()
@@ -195,7 +197,7 @@ class MasterSupervisor:
             if emit_speech and self._on_speech_feedback and summary:
                 self._on_speech_feedback(summary)
             return result_dict
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             error = error_from_exception(
                 exc,
                 component="MasterSupervisor",
@@ -256,7 +258,7 @@ class MasterSupervisor:
                     self.active_command_id = None
                     self.active_objective = None
 
-    async def cancel_active_task(self, reason: str = "User cancelled") -> Dict[str, Any]:
+    async def cancel_active_task(self, reason: str = "User cancelled") -> dict[str, Any]:
         with self._lock:
             task_id = self.active_task_id
         if not task_id:
@@ -272,7 +274,7 @@ class MasterSupervisor:
         get_mission_coordinator().update_result(task_id, self.last_result)
         return self.last_result
 
-    def get_status(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_status(self, task_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             active_id = self.active_task_id
             objective = self.active_objective
@@ -324,7 +326,7 @@ class MasterSupervisor:
         return f"Mission status: {result.status}."
 
 
-_global_supervisor: Optional[MasterSupervisor] = None
+_global_supervisor: MasterSupervisor | None = None
 
 
 def get_master_supervisor() -> MasterSupervisor:

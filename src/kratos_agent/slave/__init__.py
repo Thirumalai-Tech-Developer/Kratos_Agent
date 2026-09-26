@@ -3,7 +3,7 @@ from .executor import SlaveExecutor, get_slave_executor
 from .prompts import KRATOS_SLAVE_SYSTEM_PROMPT
 
 __all__ = [
+    "KRATOS_SLAVE_SYSTEM_PROMPT",
     "SlaveExecutor",
     "get_slave_executor",
-    "KRATOS_SLAVE_SYSTEM_PROMPT",
 ]

@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
 
 from kratos_agent.search import get_search_router
 from kratos_agent.tools.discovery import get_tool_search
+
 from .models import RetrievalQuery, RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ class RetrievalRouter:
 
 
 # Global RetrievalRouter singleton
-_global_retrieval_router: Optional[RetrievalRouter] = None
+_global_retrieval_router: RetrievalRouter | None = None
 
 
 def get_retrieval_router() -> RetrievalRouter:

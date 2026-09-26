@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Union
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from .plugin import HarnessPlugin, PluginState
 
 if TYPE_CHECKING:
-    from .presets import HarnessPreset
     from kratos_agent.main import KratosRuntime
+
+    from .presets import HarnessPreset
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +19,14 @@ logger = logging.getLogger(__name__)
 class HarnessKernel:
     """The central runtime kernel coordinating plugins, services, presets, and events."""
 
-    def __init__(self, runtime: Optional["KratosRuntime"] = None):
-        self.runtime: Optional["KratosRuntime"] = runtime
-        self._plugins: Dict[str, HarnessPlugin] = {}
-        self._services: Dict[str, Any] = {}
-        self._event_handlers: Dict[str, List[Callable[..., Any]]] = {}
+    def __init__(self, runtime: KratosRuntime | None = None):
+        self.runtime: KratosRuntime | None = runtime
+        self._plugins: dict[str, HarnessPlugin] = {}
+        self._services: dict[str, Any] = {}
+        self._event_handlers: dict[str, list[Callable[..., Any]]] = {}
         self.active_preset_name: str = "standard"
-        self._preset_directives: List[str] = []
-        self._active_tools_filter: Optional[Set[str]] = None
+        self._preset_directives: list[str] = []
+        self._active_tools_filter: set[str] | None = None
 
     # --------------------------------------------------------------------------
     # Service Registry
@@ -39,7 +41,7 @@ class HarnessKernel:
         """Remove a service from the registry."""
         self._services.pop(name, None)
 
-    def get_service(self, name: str) -> Optional[Any]:
+    def get_service(self, name: str) -> Any | None:
         """Retrieve a registered service by name."""
         return self._services.get(name)
 
@@ -160,11 +162,11 @@ class HarnessKernel:
             logger.error(f"[HarnessKernel] Failed to disable plugin '{name}': {e}", exc_info=True)
             return False
 
-    def get_plugin(self, name: str) -> Optional[HarnessPlugin]:
+    def get_plugin(self, name: str) -> HarnessPlugin | None:
         """Get plugin instance by name."""
         return self._plugins.get(name)
 
-    def list_plugins(self) -> List[Dict[str, Any]]:
+    def list_plugins(self) -> list[dict[str, Any]]:
         """Return status information for all registered plugins."""
         return [p.get_status() for p in self._plugins.values()]
 
@@ -172,7 +174,7 @@ class HarnessKernel:
     # Preset Application
     # --------------------------------------------------------------------------
 
-    def apply_preset(self, preset_or_name: Union[str, "HarnessPreset"]) -> Dict[str, Any]:
+    def apply_preset(self, preset_or_name: str | HarnessPreset) -> dict[str, Any]:
         """Apply a harness preset (standard, code, minimal, creator)."""
         from .presets import get_preset
 
@@ -203,15 +205,15 @@ class HarnessKernel:
         logger.info(f"[HarnessKernel] Applied preset '{preset.name}'.")
         return preset.to_dict()
 
-    def get_allowed_tools(self) -> Optional[Set[str]]:
+    def get_allowed_tools(self) -> set[str] | None:
         """Return the allowed tool names under current preset, or None for unrestricted."""
         return self._active_tools_filter
 
-    def get_system_directives(self) -> List[str]:
+    def get_system_directives(self) -> list[str]:
         """Return additional system prompt directives enforced by the active preset."""
         return list(self._preset_directives)
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return comprehensive kernel status."""
         return {
             "active_preset": self.active_preset_name,

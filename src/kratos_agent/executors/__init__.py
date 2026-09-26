@@ -1,13 +1,19 @@
-from .youtube import YouTubeExecutor
-from .whatsapp import WhatsAppExecutor
-from .browser import BrowserExecutor
-from .windows_ui import WindowsUIExecutor
-from .terminal import TerminalExecutor
-from .filesystem import FileExecutor
 from .applications import ApplicationExecutor
+from .browser import BrowserExecutor
 from .code import CodeExecutor
+from .filesystem import FileExecutor
+from .terminal import TerminalExecutor
+from .whatsapp import WhatsAppExecutor
+from .windows_ui import WindowsUIExecutor
+from .youtube import YouTubeExecutor
 
 __all__ = [
-    "YouTubeExecutor", "WhatsAppExecutor", "BrowserExecutor", "WindowsUIExecutor",
-    "TerminalExecutor", "FileExecutor", "ApplicationExecutor", "CodeExecutor",
+    "ApplicationExecutor",
+    "BrowserExecutor",
+    "CodeExecutor",
+    "FileExecutor",
+    "TerminalExecutor",
+    "WhatsAppExecutor",
+    "WindowsUIExecutor",
+    "YouTubeExecutor",
 ]

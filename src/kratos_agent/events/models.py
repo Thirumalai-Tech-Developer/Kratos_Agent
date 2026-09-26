@@ -1,10 +1,11 @@
 """Structured event models for internal agent lifecycle and user-facing notifications."""
 from __future__ import annotations
+
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class EventType(str, Enum):
@@ -36,17 +37,17 @@ class AgentEvent:
     """Discrete event emitted during agent reasoning, execution, or verification."""
     type: EventType
     message: str = ""
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     timestamp: float = field(default_factory=time.time)
     source: str = "agent"
-    task_id: Optional[str] = None
-    turn_id: Optional[str] = None
-    request_id: Optional[str] = None
-    action_id: Optional[str] = None
-    tool_call_id: Optional[str] = None
+    task_id: str | None = None
+    turn_id: str | None = None
+    request_id: str | None = None
+    action_id: str | None = None
+    tool_call_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
             "type": self.type.value if isinstance(self.type, EventType) else str(self.type),
@@ -62,7 +63,7 @@ class AgentEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> AgentEvent:
+    def from_dict(cls, data: dict[str, Any]) -> AgentEvent:
         raw_type = data.get("type", "debug")
         try:
             evt_type = EventType(raw_type)

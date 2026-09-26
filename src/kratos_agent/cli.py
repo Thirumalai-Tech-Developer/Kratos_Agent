@@ -1,11 +1,11 @@
-import os
-import sys
-import re
 import json
-import time
 import logging
+import os
+import re
+import sys
+import time
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+
 from kratos_agent.core.memory import AgenticSession
 
 logger = logging.getLogger(__name__)
@@ -16,36 +16,34 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
         sys.stdin.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.markup import escape
+    except Exception as e:
+        logger.debug("Failed to reconfigure stdio encoding: %s", e)
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.styles import Style
-from prompt_toolkit.formatted_text import HTML, FormattedText
-from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.application import Application
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.styles import Style
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.markup import escape
+from rich.panel import Panel
+from rich.table import Table
 
-from kratos_agent.main import runtime
-from kratos_agent.brain import PUBLIC_MODELS
-from kratos_agent.utils.tool_creator import create_or_update_tool
-from kratos_agent.core.memory import memory
-from kratos_agent.core.reloader import code_reloader
-from kratos_agent.core.compactor import compactor
-from kratos_agent.core.prompt_library import prompt_library
-from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
 from kratos_agent.core.background_runner import background_runner
+from kratos_agent.core.compactor import compactor
+from kratos_agent.core.memory import memory
+from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.core.reloader import code_reloader
+from kratos_agent.main import runtime
 from kratos_agent.tui import KratosLiveRenderer, render_completion_card
-from kratos_agent.tui.debug_panel import render_step_log, render_event_log
+from kratos_agent.tui.debug_panel import render_event_log, render_step_log
+from kratos_agent.utils.tool_creator import create_or_update_tool
 
 console = Console(legacy_windows=False)
 
@@ -69,8 +67,9 @@ def get_kratos_banner():
     if os.environ.get("KRATOS_IMAGE_BANNER", "").lower() not in {"1", "true", "yes"}:
         return ASCII_BANNER
     try:
-        import climage
         from pathlib import Path
+
+        import climage
         img_path = Path("kratos_banner.png")
         if img_path.exists():
             # Generate terminal image string with climage
@@ -78,8 +77,8 @@ def get_kratos_banner():
             # Use rich's Text to properly handle ANSI colors and unicode block chars in terminal
             from rich.text import Text
             return Text.from_ansi(output)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to render banner image: %s", e)
     return ASCII_BANNER
 
 HELP_TEXT = """
@@ -148,9 +147,12 @@ prompt_style = Style.from_dict({
 # Models sourced dynamically from Brain Gateway
 from kratos_agent.brain.config import (
     PUBLIC_MODELS as _PUBLIC_MODELS,
+)
+from kratos_agent.brain.config import (
     get_available_models,
 )
-AVAILABLE_MODELS: List[str] = list(_PUBLIC_MODELS)
+
+AVAILABLE_MODELS: list[str] = list(_PUBLIC_MODELS)
 
 def normalize_command(cmd_str: str) -> str:
     """Automatically detects and removes duplicate leading slashes (e.g. //help -> /help, ///review -> /review)."""
@@ -311,11 +313,12 @@ class KratosCompleter(Completer):
                             display=f"@{match}",
                             display_meta="File Attachment"
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed checking file for completer: %s", e)
 
 def print_welcome():
     from datetime import datetime
+
     from kratos_agent.core.approval_mode import approval_gate
     from kratos_agent.core.project_memory import project_memory
 
@@ -365,8 +368,8 @@ def print_welcome():
         grid.add_row("🎤  Voice", f"{_mic_badge}  [dim]| /voice on|off[/dim]")
         grid.add_row("👁  Vision", f"Camera: {_cam_badge}  Screen: {_scr_badge}  [dim]| /vision camera|screen|both|off[/dim]")
         grid.add_row("🌐  Live", f"{_gemini_badge}  [dim]| /live status[/dim]")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to populate live subsystem badges: %s", e)
 
 
     grid.add_row("⚡  Quick Start", "[bold gold1]/[/bold gold1] for commands  [bold gold1]/model[/bold gold1] to switch  [bold green]@[/bold green] for files  [bold cyan]/bg-run[/bold cyan] background")
@@ -382,7 +385,7 @@ def print_welcome():
     )
     console.print()
 
-def parse_file_mentions(user_input: str) -> Tuple[str, List[str]]:
+def parse_file_mentions(user_input: str) -> tuple[str, list[str]]:
     """Finds @file patterns and injects their contents into prompt."""
     pattern = r'@(?:"([^"]+)"|([a-zA-Z0-9_\-./\\]+))'
     matches = re.findall(pattern, user_input)
@@ -409,7 +412,7 @@ def parse_file_mentions(user_input: str) -> Tuple[str, List[str]]:
     expanded_input = user_input + "".join(attachments_text)
     return expanded_input, attached_files
 
-def select_model_arrow_menu(model_ids: List[str], active_model: str) -> Optional[str]:
+def select_model_arrow_menu(model_ids: list[str], active_model: str) -> str | None:
     """Interactive terminal menu allowing selection using Up/Down arrow keys."""
     if not model_ids:
         return None
@@ -769,9 +772,8 @@ def handle_accounts_command():
     from kratos_agent.brain import (
         get_base_url,
         get_endpoint_url,
-        PUBLIC_MODELS,
-        get_request_timeout,
         get_max_retries,
+        get_request_timeout,
     )
     base_url = get_base_url()
     endpoint = get_endpoint_url()
@@ -797,8 +799,8 @@ def handle_accounts_command():
 def handle_system_status_command():
     """Print truthful live status, including the latest model and task failures."""
     from kratos_agent.ccs import get_capability_map
-    from kratos_agent.live import get_live_runtime
     from kratos_agent.core.latency_tracker import latency_tracker
+    from kratos_agent.live import get_live_runtime
     from kratos_agent.master.supervisor import get_master_supervisor
 
     table = Table(title="⚔  KRATOS STATUS", border_style="red")
@@ -890,13 +892,14 @@ def handle_health_command():
 
 def handle_doctor_command():
     """Runs a full diagnostic on Brain gateway connection, model configuration, and transport health."""
+    import requests
+
     from kratos_agent.brain import (
+        authenticate,
         get_base_url,
         get_endpoint_url,
         get_request_timeout,
-        authenticate,
     )
-    import requests
 
     base_url = get_base_url()
     endpoint = get_endpoint_url()
@@ -938,7 +941,7 @@ def handle_doctor_command():
         elif res.status_code == 404:
             error_msg = f"HTTP 404: Model '{runtime.model_name}' or endpoint not found on Brain gateway."
             table.add_row("Gateway Connection", "[bold green]✓ Online[/bold green]")
-            table.add_row("Test Completion", f"[bold red]✗ Failed (HTTP 404 Not Found)[/bold red]")
+            table.add_row("Test Completion", "[bold red]✗ Failed (HTTP 404 Not Found)[/bold red]")
         else:
             error_msg = f"HTTP {res.status_code}: {res.text[:200]}"
             table.add_row("Gateway Connection", f"[yellow]⚠ Returned HTTP {res.status_code}[/yellow]")
@@ -948,7 +951,7 @@ def handle_doctor_command():
         table.add_row("Test Completion", "[dim]Skipped[/dim]")
         error_msg = f"Brain LLM is not running on {base_url}. Please ensure Brain gateway is active on port 20128."
     except requests.exceptions.Timeout:
-        table.add_row("Gateway Connection", f"[bold yellow]⚠ Timeout (No response within 15s)[/bold yellow]")
+        table.add_row("Gateway Connection", "[bold yellow]⚠ Timeout (No response within 15s)[/bold yellow]")
         table.add_row("Test Completion", "[dim]Skipped[/dim]")
         error_msg = f"Request timed out connecting to {endpoint}."
     except Exception as e:
@@ -1052,7 +1055,7 @@ def handle_create_tool_command(user_prompt: str = ""):
         table.add_row("Tool Name:", f"[bold cyan]{tool_name}[/bold cyan]")
         table.add_row("Description:", description)
         table.add_row("Status:", "[bold green]Active & Hot-Loaded into Memory[/bold green]")
-        table.add_row("Command:", f"[dim]Available in /tools or by asking Kratos directly[/dim]")
+        table.add_row("Command:", "[dim]Available in /tools or by asking Kratos directly[/dim]")
 
         console.print()
         console.print(
@@ -1248,8 +1251,8 @@ def handle_session_command(arg: str = ""):
                 try:
                     s_data = json.loads(session_path.read_text(encoding="utf-8"))
                     s = AgenticSession.from_dict(s_data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Failed loading session %s: %s", sid, e)
         
         if not s:
             console.print(f"[bold red]Session '{sid}' not found.[/bold red]\n")
@@ -1426,7 +1429,7 @@ Target / Scope: {target if target else 'Working tree changes and project source 
     )
     console.print()
 
-def handle_compact_command(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def handle_compact_command(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     """Manually triggers conversation compression and displays savings metrics."""
     if len(messages) <= 2:
         console.print("[dim]Conversation history is too short to compact.[/dim]\n")
@@ -1529,7 +1532,11 @@ def handle_headroom_command(arg: str = ""):
 def handle_parallel_command(arg: str = ""):
     """Manages parallel tool & subagent execution (status, toggle on/off, worker count)."""
     import os
-    from kratos_agent.brain.config import is_parallel_execution_enabled, get_max_parallel_workers
+
+    from kratos_agent.brain.config import (
+        get_max_parallel_workers,
+        is_parallel_execution_enabled,
+    )
 
     arg = arg.strip().lower()
 
@@ -1613,7 +1620,7 @@ def start_interactive_cli():
 
     print_welcome()
     
-    messages: List[Dict[str, str]] = []
+    messages: list[dict[str, str]] = []
 
     while True:
         try:
@@ -1831,7 +1838,8 @@ def start_interactive_cli():
                     query = user_input.split(maxsplit=1)[1].strip()
 
                 import asyncio
-                from kratos_agent.retrieval import get_retrieval_router, RetrievalQuery
+
+                from kratos_agent.retrieval import RetrievalQuery, get_retrieval_router
                 router = get_retrieval_router()
                 console.print(f"\n[bold cyan]🔍 Searching {target.upper()} for:[/bold cyan] [bold white]'{query}'[/bold white]...")
                 try:
@@ -1844,7 +1852,7 @@ def start_interactive_cli():
                             t_cat = getattr(tool, "category", "")
                             console.print(f"  [bold gold1][{idx}][/bold gold1] [bold white]{t_name}[/bold white] [dim]({t_cat})[/dim]\n    [dim]{t_desc[:120]}...[/dim]")
                     elif target == "memory":
-                        console.print(f"\n[bold green]🧠 Retrieved Context:[/bold green]")
+                        console.print("\n[bold green]🧠 Retrieved Context:[/bold green]")
                         for item in res.items:
                             console.print(f"[dim]{item.get('content', '')}[/dim]")
                     else:
@@ -1867,9 +1875,11 @@ def start_interactive_cli():
                 parts = user_input.split(maxsplit=1)
                 d_arg = parts[1].strip().lower() if len(parts) > 1 else ""
                 if d_arg in ("errors", "error", "err"):
-                    from kratos_agent.live.screen import get_screen_stream
-                    from kratos_agent.computer.browser.manager import get_browser_manager
+                    from kratos_agent.computer.browser.manager import (
+                        get_browser_manager,
+                    )
                     from kratos_agent.core.error_pipeline import get_error_pipeline
+                    from kratos_agent.live.screen import get_screen_stream
                     s_health = get_screen_stream().health_check()
                     b_diag = get_browser_manager().diagnostics()
                     st = live_runtime.get_status() if live_runtime else None
@@ -2230,7 +2240,7 @@ def start_interactive_cli():
                         continue
                 except Exception as e:
                     logger.warning(f"[CLI] Gemini Live turn error, falling back to Kratos Agent: {e}")
-                    console.print(f"[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
+                    console.print("[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
 
 
             # ── Live TUI invoke (replaces bare runtime.invoke) ──────────────
@@ -2292,8 +2302,8 @@ def start_interactive_cli():
                 from kratos_agent.output.voice import get_tts_queue, get_voice_buffer
                 get_tts_queue().cancel_current()
                 get_voice_buffer().clear()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed clearing voice queue on exit: %s", e)
             live_runtime.stop_background()
             _tui.cancel()
             console.print("\n[bold red]Kratos departs. Strength and honor.[/bold red]\n")
@@ -2338,8 +2348,8 @@ def render_git_changes_card():
                 padding=(0, 2)
             )
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed rendering git status changes card: %s", e)
 
 def main():
     args = [a.strip() for a in sys.argv[1:]]

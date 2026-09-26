@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -41,7 +40,7 @@ class LiveConfig:
     avatar_size: int = 110
 
     # Audio stream settings
-    microphone_device: Optional[int | str] = field(
+    microphone_device: int | str | None = field(
         default_factory=lambda: os.getenv("KRATOS_MIC_DEVICE")
     )
     send_sample_rate: int = 16000

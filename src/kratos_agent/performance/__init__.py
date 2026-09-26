@@ -1,10 +1,4 @@
 """Kratos Performance Engine."""
-from kratos_agent.performance.router import (
-    RequestCategory,
-    RouteDecision,
-    RequestRouter,
-    get_request_router,
-)
 from kratos_agent.performance.profiler import (
     LATENCY_BUDGET,
     PerformanceMetrics,
@@ -12,15 +6,21 @@ from kratos_agent.performance.profiler import (
     get_active_profiler,
     reset_active_profiler,
 )
+from kratos_agent.performance.router import (
+    RequestCategory,
+    RequestRouter,
+    RouteDecision,
+    get_request_router,
+)
 
 __all__ = [
-    "RequestCategory",
-    "RouteDecision",
-    "RequestRouter",
-    "get_request_router",
     "LATENCY_BUDGET",
     "PerformanceMetrics",
     "Profiler",
+    "RequestCategory",
+    "RequestRouter",
+    "RouteDecision",
     "get_active_profiler",
+    "get_request_router",
     "reset_active_profiler",
 ]

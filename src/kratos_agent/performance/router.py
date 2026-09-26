@@ -1,9 +1,10 @@
 """High-speed RequestRouter for classifying tasks and enabling fast paths."""
 from __future__ import annotations
+
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class RequestCategory(str, Enum):
@@ -21,13 +22,13 @@ class RequestCategory(str, Enum):
 class RouteDecision:
     category: RequestCategory
     is_fast_path: bool
-    target_tool_categories: List[str]
+    target_tool_categories: list[str]
     requires_planning: bool
     requires_memory: bool
     requires_observation: bool
     confidence: float
-    direct_tool: Optional[str] = None
-    direct_tool_args: Optional[Dict[str, Any]] = None
+    direct_tool: str | None = None
+    direct_tool_args: dict[str, Any] | None = None
 
 
 class RequestRouter:
@@ -52,7 +53,7 @@ class RequestRouter:
     _COMPUTER_PATTERNS = re.compile(r"\b(open|launch|click|type|scroll|press|window|desktop|app)\b", re.IGNORECASE)
     _MEMORY_PATTERNS = re.compile(r"\b(what do you remember|recall|my preference|saved memory|what is my name)\b", re.IGNORECASE)
 
-    def classify(self, request: str, history: Optional[List[Any]] = None) -> RouteDecision:
+    def classify(self, request: str, history: list[Any] | None = None) -> RouteDecision:
         """Determines the optimal execution route for a request."""
         clean = request.strip()
         clean_lower = clean.lower()
@@ -188,7 +189,7 @@ class RequestRouter:
         )
 
 
-_router: Optional[RequestRouter] = None
+_router: RequestRouter | None = None
 
 
 def get_request_router() -> RequestRouter:

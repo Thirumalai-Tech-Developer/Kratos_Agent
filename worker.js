@@ -186,6 +186,8 @@ CREATE TABLE IF NOT EXISTS workspace_files (
 );
 `;
 
+let workerSchemaInitialized = false;
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -199,14 +201,21 @@ export default {
     }
 
     // Initialize D1 Schema on first request if DB binding exists
-    if (env.DB && !env._schema_initialized) {
+    if (env.DB && !workerSchemaInitialized) {
       try {
-        const statements = SCHEMA_SQL.split(";").map(s => s.trim()).filter(Boolean);
+        const statements = SCHEMA_SQL
+          .replace(/--.*$/gm, "")
+          .split(/;\s*$/m)
+          .map(s => s.trim())
+          .filter(Boolean);
         for (const st of statements) {
-          await env.DB.prepare(st).run().catch(() => {});
+          await env.DB.prepare(st).run();
         }
-        env._schema_initialized = true;
-      } catch (_) {}
+        workerSchemaInitialized = true;
+      } catch (err) {
+        console.error("D1 schema auto-init error:", err);
+        return jsonResponse({ error: `D1 schema initialization failed: ${err.message || err}` }, 500);
+      }
     }
 
     // API Routes
@@ -545,11 +554,15 @@ async function handleApi(request, env, url) {
     }
 
     // ── NATIVE EDGE AUTONOMOUS AGENT RUNTIME ──────────────────────────────────
+    const abortController = new AbortController();
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         const send = (data) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          if (abortController.signal.aborted) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          } catch (_) {}
         };
 
         try {
@@ -560,15 +573,23 @@ async function handleApi(request, env, url) {
             isAgentMode,
             env,
             send,
-            now
+            now,
+            signal: abortController.signal
           });
         } catch (err) {
-          console.error("Edge agent loop error:", err);
-          send({ type: "error", message: String(err.message || err) });
-          send({ type: "done", result: `Execution error: ${err.message}`, session_id: sessionId });
+          if (!abortController.signal.aborted) {
+            console.error("Edge agent loop error:", err);
+            send({ type: "error", message: String(err.message || err) });
+            send({ type: "done", result: `Execution error: ${err.message}`, session_id: sessionId });
+          }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch (_) {}
         }
+      },
+      cancel(reason) {
+        abortController.abort(reason);
       }
     });
 
@@ -693,7 +714,8 @@ async function handleApi(request, env, url) {
 }
 
 // ── EDGE AUTONOMOUS AGENT LOOP ────────────────────────────────────────────────
-async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, env, send, now }) {
+async function runEdgeAgentLoop({ prompt, sessionId, activeModel, isAgentMode, env, send, now, signal }) {
+  if (signal?.aborted) return;
   const turnId = `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const eventTs = Date.now() / 1000;
   const toolsUsed = [];

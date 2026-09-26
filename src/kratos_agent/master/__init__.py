@@ -1,25 +1,25 @@
 """Master layer for Kratos Agent (Gemini Live perception, supervision, voice)."""
+from .prompts import KRATOS_MASTER_SYSTEM_PROMPT
 from .protocol import (
     CommandAction,
+    CommandBus,
     CommandPriority,
     MasterCommand,
     SlaveAck,
     SlaveResult,
-    CommandBus,
     get_command_bus,
 )
 from .supervisor import MasterSupervisor, get_master_supervisor
-from .prompts import KRATOS_MASTER_SYSTEM_PROMPT
 
 __all__ = [
+    "KRATOS_MASTER_SYSTEM_PROMPT",
     "CommandAction",
+    "CommandBus",
     "CommandPriority",
     "MasterCommand",
+    "MasterSupervisor",
     "SlaveAck",
     "SlaveResult",
-    "CommandBus",
     "get_command_bus",
-    "MasterSupervisor",
     "get_master_supervisor",
-    "KRATOS_MASTER_SYSTEM_PROMPT",
 ]

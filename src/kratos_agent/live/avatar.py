@@ -8,11 +8,10 @@ from __future__ import annotations
 import logging
 import math
 import os
-import sys
 import threading
-import time
 import webbrowser
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 TRANSPARENT_COLOR = "#010101"
 
 # State color palette for the dynamic halo
-STATE_COLORS: Dict[LiveState, str] = {
+STATE_COLORS: dict[LiveState, str] = {
     LiveState.CONNECTING: "#F59E0B",     # Amber pulse
     LiveState.CONNECTED: "#06B6D4",      # Cyan steady
     LiveState.LISTENING: "#10B981",      # Neon emerald green
@@ -35,7 +34,7 @@ STATE_COLORS: Dict[LiveState, str] = {
     LiveState.IDLE: "#3B82F6",           # Calm blue
 }
 
-STATE_LABELS: Dict[LiveState, str] = {
+STATE_LABELS: dict[LiveState, str] = {
     LiveState.CONNECTING: "Connecting...",
     LiveState.CONNECTED: "Ready",
     LiveState.LISTENING: "Listening...",
@@ -48,7 +47,7 @@ STATE_LABELS: Dict[LiveState, str] = {
 }
 
 
-def _make_circular_avatar(image_path: str, size: int, border_color: Optional[str] = None) -> Image.Image:
+def _make_circular_avatar(image_path: str, size: int, border_color: str | None = None) -> Image.Image:
     """Loads and crops an image to an antialiased circular avatar on transparent background."""
     if not os.path.exists(image_path):
         # Create a fallback placeholder image
@@ -78,11 +77,11 @@ class FloatingAvatar:
     def __init__(
         self,
         image_path: str = "kratos-illu.png",
-        status_hub: Optional[LiveStatusHub] = None,
-        on_text_submit: Optional[Callable[[str], Any]] = None,
-        on_screen_capture: Optional[Callable[[], Any]] = None,
-        on_mute_toggle: Optional[Callable[[], Any]] = None,
-        on_interrupt: Optional[Callable[[], Any]] = None,
+        status_hub: LiveStatusHub | None = None,
+        on_text_submit: Callable[[str], Any] | None = None,
+        on_screen_capture: Callable[[], Any] | None = None,
+        on_mute_toggle: Callable[[], Any] | None = None,
+        on_interrupt: Callable[[], Any] | None = None,
         web_url: str = "http://127.0.0.1:8000",
         avatar_size: int = 110,
     ) -> None:
@@ -114,7 +113,7 @@ class FloatingAvatar:
         self._status_text_item: Any = None
         self._halo_step: float = 0.0
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
         # Window drag offset coordinates
@@ -142,8 +141,8 @@ class FloatingAvatar:
         # Schedule thread-safe GUI update
         try:
             self._root.after(0, self._apply_state_update, new_state, transcript)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def _apply_state_update(self, state: LiveState, transcript: str) -> None:
         """Applies state update on Tkinter main thread."""
@@ -157,8 +156,8 @@ class FloatingAvatar:
         if self._canvas and self._status_text_item:
             try:
                 self._canvas.itemconfig(self._status_text_item, text=label)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     def start(self) -> None:
         """Starts the floating avatar in a dedicated background thread."""
@@ -180,8 +179,8 @@ class FloatingAvatar:
         if self._root:
             try:
                 self._root.quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self._root = None
         if self._thread and self._thread.is_alive():
             if threading.current_thread() != self._thread:
@@ -192,8 +191,8 @@ class FloatingAvatar:
         if self._root:
             try:
                 self._root.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self._root = None
 
     def _run_gui(self) -> None:
@@ -362,8 +361,8 @@ class FloatingAvatar:
         if self.current_state == LiveState.SPEAKING and self.on_interrupt:
             try:
                 self.on_interrupt()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     def _on_mouse_drag(self, event: Any) -> None:
         """Moves window smoothly across the desktop."""
@@ -507,10 +506,10 @@ class FloatingAvatar:
                 self._canvas.itemconfig(self._ring_items[0], outline=color)
                 self._canvas.coords(self._ring_items[1], cx - r2, cy - r2, cx + r2, cy + r2)
                 self._canvas.itemconfig(self._ring_items[1], outline=color)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         try:
             self._root.after(50, self._animate_halo)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)

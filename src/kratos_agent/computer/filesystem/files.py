@@ -1,10 +1,9 @@
 """Semantic object-oriented filesystem operations."""
 from __future__ import annotations
-import os
+
 import shutil
-import glob
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.computer.state import ActionResult
 
@@ -12,13 +11,13 @@ from kratos_agent.computer.state import ActionResult
 class FileSystemEngine:
     """Provides high-level filesystem operations without requiring GUI File Explorer."""
 
-    def list_files(self, path: str = ".", recursive: bool = False, max_items: int = 100) -> List[Dict[str, Any]]:
+    def list_files(self, path: str = ".", recursive: bool = False, max_items: int = 100) -> list[dict[str, Any]]:
         """Lists files and directories with metadata (size, is_dir, modified)."""
         p = Path(path).resolve()
         if not p.exists():
             return []
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         iterator = p.rglob("*") if recursive else p.iterdir()
 
         for item in iterator:
@@ -38,10 +37,10 @@ class FileSystemEngine:
 
         return results
 
-    def search_files(self, query: str, root: str = ".", limit: int = 50) -> List[str]:
+    def search_files(self, query: str, root: str = ".", limit: int = 50) -> list[str]:
         """Searches for files matching a glob pattern or substring."""
         p = Path(root).resolve()
-        matches: List[str] = []
+        matches: list[str] = []
         pattern = f"*{query}*" if "*" not in query else query
 
         for item in p.rglob(pattern):
@@ -109,7 +108,7 @@ class FileSystemEngine:
             return ActionResult(ok=False, action="file_delete", detail=str(e))
 
 
-_filesystem_engine: Optional[FileSystemEngine] = None
+_filesystem_engine: FileSystemEngine | None = None
 
 
 def get_filesystem_engine() -> FileSystemEngine:

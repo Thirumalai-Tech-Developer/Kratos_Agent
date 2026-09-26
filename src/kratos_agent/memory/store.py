@@ -1,27 +1,35 @@
 """Memory storage abstraction with hot caching and TTL."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
-from kratos_agent.memory.models import MemoryLayer, MemoryQuery, MemoryRecord, MemoryScope
-from kratos_agent.memory.ranking import rank_memories
 from kratos_agent.memory.consolidation import consolidate_memories, should_store
+from kratos_agent.memory.models import (
+    MemoryLayer,
+    MemoryQuery,
+    MemoryRecord,
+    MemoryScope,
+)
+from kratos_agent.memory.ranking import rank_memories
 
 
 class MemoryStore:
     """In-memory and file-backed memory store with hot cache (§44)."""
 
-    def __init__(self, storage_path: Optional[Path] = None, cache_ttl: float = 60.0) -> None:
+    def __init__(self, storage_path: Path | None = None, cache_ttl: float = 60.0) -> None:
         self.storage_path = storage_path or (Path.cwd() / ".kratos" / "memory_v2.json")
         self.cache_ttl = cache_ttl
-        self._records: Dict[str, MemoryRecord] = {}
+        self._records: dict[str, MemoryRecord] = {}
         self._lock = threading.RLock()
         self._cache_max_entries = 128
-        self._hot_cache: Dict[str, Tuple[float, List[MemoryRecord]]] = {}
+        self._hot_cache: dict[str, tuple[float, list[MemoryRecord]]] = {}
         self._dirty_accesses = 0
         self._last_save = 0.0
         self._load()
@@ -33,8 +41,8 @@ class MemoryStore:
                 for item in data.get("records", []):
                     rec = MemoryRecord.from_dict(item)
                     self._records[rec.id] = rec
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     def save(self) -> None:
         """Atomically persist memory so recent facts survive crashes."""
@@ -47,8 +55,8 @@ class MemoryStore:
                 os.replace(temp, self.storage_path)
                 self._dirty_accesses = 0
                 self._last_save = time.time()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def add(self, record: MemoryRecord) -> None:
         if not should_store(record):
@@ -66,7 +74,7 @@ class MemoryStore:
             self.invalidate_cache()
         self.save()
 
-    def get(self, record_id: str) -> Optional[MemoryRecord]:
+    def get(self, record_id: str) -> MemoryRecord | None:
         return self._records.get(record_id)
 
     def remove(self, record_id: str) -> bool:
@@ -80,9 +88,9 @@ class MemoryStore:
 
     def list_records(
         self,
-        scope: Optional[MemoryScope] = None,
-        layer: Optional[MemoryLayer] = None,
-    ) -> List[MemoryRecord]:
+        scope: MemoryScope | None = None,
+        layer: MemoryLayer | None = None,
+    ) -> list[MemoryRecord]:
         results = list(self._records.values())
         if scope:
             results = [r for r in results if r.scope == scope]
@@ -90,7 +98,7 @@ class MemoryStore:
             results = [r for r in results if r.layer == layer]
         return results
 
-    def query(self, query: MemoryQuery) -> List[MemoryRecord]:
+    def query(self, query: MemoryQuery) -> list[MemoryRecord]:
         cache_key = json.dumps({
             "text": query.text, "task": query.task, "application": query.application,
             "project": query.project, "platform": query.platform, "scope": str(query.scope),

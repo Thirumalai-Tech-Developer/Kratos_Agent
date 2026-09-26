@@ -6,12 +6,16 @@ Enforces strict separation of responsibilities:
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 
 class CommandPriority(str, Enum):
@@ -71,10 +75,10 @@ class MasterCommand:
     turn_id: str = ""
     action_id: str = ""
     tool_call_id: str = ""
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    constraints: Dict[str, Any] = field(default_factory=dict)
-    expected_result: Dict[str, Any] = field(default_factory=dict)
-    context: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    constraints: dict[str, Any] = field(default_factory=dict)
+    expected_result: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     priority: str = CommandPriority.NORMAL.value
     timeout: float = 60.0
     created_at: float = field(default_factory=time.time)
@@ -84,18 +88,18 @@ class MasterCommand:
         cls,
         objective: str,
         action: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        constraints: Optional[Dict[str, Any]] = None,
-        expected_result: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        expected_result: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
         priority: str = "normal",
         timeout: float = 60.0,
-        session_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        turn_id: Optional[str] = None,
-        action_id: Optional[str] = None,
-        tool_call_id: Optional[str] = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+        request_id: str | None = None,
+        turn_id: str | None = None,
+        action_id: str | None = None,
+        tool_call_id: str | None = None,
     ) -> MasterCommand:
         cid = f"CMD-{uuid.uuid4().hex[:8].upper()}"
         tid = task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
@@ -118,7 +122,7 @@ class MasterCommand:
             timeout=timeout,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "command_id": self.command_id,
             "session_id": self.session_id,
@@ -139,7 +143,7 @@ class MasterCommand:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MasterCommand:
+    def from_dict(cls, data: dict[str, Any]) -> MasterCommand:
         return cls(
             command_id=data["command_id"],
             session_id=data.get("session_id", "default"),
@@ -168,10 +172,10 @@ class SlaveAck:
     accepted: bool
     status: str = "accepted"  # accepted, rejected, busy, blocked, failed
     type: str = "ACK"
-    message: Optional[str] = None
+    message: str | None = None
     created_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "command_id": self.command_id,
@@ -183,7 +187,7 @@ class SlaveAck:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SlaveAck:
+    def from_dict(cls, data: dict[str, Any]) -> SlaveAck:
         return cls(
             command_id=data["command_id"],
             task_id=data["task_id"],
@@ -204,9 +208,9 @@ class SlaveResult:
     verified: bool
     type: str = "RESULT"
     terminal: bool = True
-    state: Optional[str] = None
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[Dict[str, Any]] = None
+    state: str | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    error: dict[str, Any] | None = None
     recovery_attempts: int = 0
     duration_ms: float = 0.0
     created_at: float = field(default_factory=time.time)
@@ -214,7 +218,7 @@ class SlaveResult:
     def is_success(self) -> bool:
         return self.status == "success" and self.verified
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "command_id": self.command_id,
@@ -231,7 +235,7 @@ class SlaveResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SlaveResult:
+    def from_dict(cls, data: dict[str, Any]) -> SlaveResult:
         return cls(
             command_id=data["command_id"],
             task_id=data["task_id"],
@@ -252,13 +256,13 @@ class CommandBus:
     """Asynchronous, thread-safe message bus correlating MasterCommands, SlaveAcks, and SlaveResults."""
 
     def __init__(self) -> None:
-        self._commands: Optional[asyncio.PriorityQueue[tuple[int, float, MasterCommand]]] = None
-        self._results: Dict[str, asyncio.Future[SlaveResult]] = {}
-        self._acks: Dict[str, asyncio.Future[SlaveAck]] = {}
-        self._active_tasks: Dict[str, MasterCommand] = {}
-        self._listeners: List[Callable[[Dict[str, Any]], None]] = []
-        self._lock: Optional[asyncio.Lock] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._commands: asyncio.PriorityQueue[tuple[int, float, MasterCommand]] | None = None
+        self._results: dict[str, asyncio.Future[SlaveResult]] = {}
+        self._acks: dict[str, asyncio.Future[SlaveAck]] = {}
+        self._active_tasks: dict[str, MasterCommand] = {}
+        self._listeners: list[Callable[[dict[str, Any]], None]] = []
+        self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _ensure_queue(self) -> tuple[asyncio.PriorityQueue[tuple[int, float, MasterCommand]], asyncio.Lock]:
         try:
@@ -272,15 +276,15 @@ class CommandBus:
             self._lock = asyncio.Lock()
         return self._commands, self._lock
 
-    def add_listener(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def add_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
         self._listeners.append(callback)
 
-    def _notify(self, event: Dict[str, Any]) -> None:
+    def _notify(self, event: dict[str, Any]) -> None:
         for listener in self._listeners:
             try:
                 listener(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     def _priority_score(self, priority: str) -> int:
         mapping = {
@@ -356,15 +360,15 @@ class CommandBus:
         await self.send_command(cancel_cmd)
         return True
 
-    def get_active_task(self, task_id: str) -> Optional[MasterCommand]:
+    def get_active_task(self, task_id: str) -> MasterCommand | None:
         return self._active_tasks.get(task_id)
 
-    def list_active_tasks(self) -> List[MasterCommand]:
+    def list_active_tasks(self) -> list[MasterCommand]:
         return list(self._active_tasks.values())
 
 
 # Global singleton command bus
-_global_command_bus: Optional[CommandBus] = None
+_global_command_bus: CommandBus | None = None
 
 
 def get_command_bus() -> CommandBus:

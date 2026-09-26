@@ -1,19 +1,24 @@
 """Application launcher using native OS APIs (§18, §19, §23, §35)."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import re
+import subprocess
 import sys
 import time
-import subprocess
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from kratos_agent.computer.state import ActionResult
+from kratos_agent.computer.apps.focus import (
+    ensure_task_window_foreground,
+    get_active_window,
+)
 from kratos_agent.computer.apps.windows import get_window_manager
-from kratos_agent.computer.apps.focus import ensure_task_window_foreground, get_active_window
+from kratos_agent.computer.state import ActionResult
 
-
-KNOWN_APPLICATIONS: Dict[str, Dict[str, Any]] = {
+KNOWN_APPLICATIONS: dict[str, dict[str, Any]] = {
     "chrome": {
         "win": ["chrome.exe"],
         "linux": ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"],
@@ -80,7 +85,7 @@ KNOWN_APPLICATIONS: Dict[str, Dict[str, Any]] = {
 class AppLauncher:
     """Launches desktop applications and processes with deterministic resolution and foreground verification (§18, §19, §35)."""
 
-    def resolve_application(self, target: str) -> Optional[Tuple[str, str, str]]:
+    def resolve_application(self, target: str) -> tuple[str, str, str] | None:
         """Resolves friendly application name to (executable, title_regex, display_name)."""
         clean = target.strip().lower()
         clean = re.sub(r"^(open|launch|start)\s+", "", clean).strip()
@@ -100,11 +105,11 @@ class AppLauncher:
     def launch(
         self,
         target: str,
-        args: Optional[List[str]] = None,
-        cwd: Optional[str] = None,
+        args: list[str] | None = None,
+        cwd: str | None = None,
         elevated: bool = False,
         wait: bool = False,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> ActionResult:
         """Launches target executable, shortcut, or URI."""
         # 1. Elevated launch if requested
@@ -121,8 +126,8 @@ class AppLauncher:
             try:
                 os.startfile(target)
                 return ActionResult(ok=True, action="app_launch", detail=f"Launched via os.startfile: {target}")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         # 3. Subprocess execution
         try:
@@ -225,7 +230,7 @@ class AppLauncher:
         )
 
 
-_launcher: Optional[AppLauncher] = None
+_launcher: AppLauncher | None = None
 
 
 def get_launcher() -> AppLauncher:

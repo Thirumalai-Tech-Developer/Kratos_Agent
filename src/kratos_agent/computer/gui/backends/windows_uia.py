@@ -1,15 +1,20 @@
 """Windows UI Automation (UIA) backend using COM and UIAutomationCore."""
 from __future__ import annotations
-import sys
+
+import logging
+logger = logging.getLogger(__name__)
+
 import queue
+import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from kratos_agent.computer.gui.backends.base import GUIBackend
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
+from kratos_agent.computer.gui.errors import BackendUnavailableError
+from kratos_agent.computer.gui.models import GUIElement
 from kratos_agent.computer.state import ActionResult
-from kratos_agent.computer.gui.errors import FailureType, BackendUnavailableError
 
 # Pattern IDs in UI Automation
 UIA_InvokePatternId = 10000
@@ -138,7 +143,7 @@ class _UIAThreadWorker:
         return res
 
 
-_worker_instance: Optional[_UIAThreadWorker] = None
+_worker_instance: _UIAThreadWorker | None = None
 
 
 def get_uia_worker() -> _UIAThreadWorker:
@@ -153,7 +158,7 @@ class WindowsUIABackend(GUIBackend):
 
     def __init__(self) -> None:
         self._worker = get_uia_worker()
-        self._native_element_cache: Dict[str, Any] = {}
+        self._native_element_cache: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
@@ -168,17 +173,17 @@ class WindowsUIABackend(GUIBackend):
 
     def dump_tree(
         self,
-        app: Optional[str] = None,
-        root_window: Optional[str] = None,
+        app: str | None = None,
+        root_window: str | None = None,
         max_depth: int = 8,
         max_nodes: int = 400,
         visible_only: bool = True,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         if not self.is_available():
             return []
 
-        def _do_dump(uia: Any, walker: Any, root: Any) -> List[GUIElement]:
-            elements: List[GUIElement] = []
+        def _do_dump(uia: Any, walker: Any, root: Any) -> list[GUIElement]:
+            elements: list[GUIElement] = []
             elem_id_counter = [1]
             self._native_element_cache.clear()
 
@@ -216,13 +221,15 @@ class WindowsUIABackend(GUIBackend):
                     # Read value if available
                     val_str = None
                     try:
-                        from comtypes.gen.UIAutomationClient import IUIAutomationValuePattern
+                        from comtypes.gen.UIAutomationClient import (
+                            IUIAutomationValuePattern,
+                        )
                         val_pat = node.GetCurrentPattern(UIA_ValuePatternId)
                         if val_pat:
                             vp = val_pat.QueryInterface(IUIAutomationValuePattern)
                             val_str = vp.CurrentValue
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
                     elem = GUIElement(
                         id=elem_id,
@@ -247,8 +254,8 @@ class WindowsUIABackend(GUIBackend):
                     while child:
                         traverse(child, depth + 1)
                         child = walker.GetNextSiblingElement(child)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             traverse(root, 0)
             return elements
@@ -260,16 +267,16 @@ class WindowsUIABackend(GUIBackend):
 
     def find_elements(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
         limit: int = 25,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         tree = self.dump_tree(app=app, max_nodes=500)
         q_lower = query.lower() if query else None
         role_lower = role.lower() if role else None
 
-        matches: List[GUIElement] = []
+        matches: list[GUIElement] = []
         for el in tree:
             match = True
             if q_lower:
@@ -288,10 +295,10 @@ class WindowsUIABackend(GUIBackend):
 
     def find_element(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
-    ) -> Optional[GUIElement]:
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
+    ) -> GUIElement | None:
         matches = self.find_elements(query=query, role=role, app=app, limit=1)
         return matches[0] if matches else None
 
@@ -299,7 +306,7 @@ class WindowsUIABackend(GUIBackend):
         self,
         element: GUIElement,
         pattern: str = "Invoke",
-        value: Optional[str] = None,
+        value: str | None = None,
     ) -> ActionResult:
         """Invokes pattern (Invoke, Value, Toggle, SelectionItem) natively without mouse movement."""
         if not self.is_available():
@@ -320,8 +327,8 @@ class WindowsUIABackend(GUIBackend):
                         inv_pat = pat.QueryInterface(uia_types.IUIAutomationInvokePattern)
                         inv_pat.Invoke()
                         return ActionResult(ok=True, action="invoke_element", detail="Invoked via IUIAutomationInvokePattern", method_used="InvokePattern")
-                except Exception as e:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             # 2. ValuePattern
             if pattern.lower() in ("value", "set_value", "type") and value is not None:
@@ -331,8 +338,8 @@ class WindowsUIABackend(GUIBackend):
                         val_pat = pat.QueryInterface(uia_types.IUIAutomationValuePattern)
                         val_pat.SetValue(value)
                         return ActionResult(ok=True, action="invoke_element", detail=f"Set value via IUIAutomationValuePattern: {value}", method_used="ValuePattern")
-                except Exception as e:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             # 3. TogglePattern
             if pattern.lower() in ("toggle", "check", "uncheck"):
@@ -342,8 +349,8 @@ class WindowsUIABackend(GUIBackend):
                         tog_pat = pat.QueryInterface(uia_types.IUIAutomationTogglePattern)
                         tog_pat.Toggle()
                         return ActionResult(ok=True, action="invoke_element", detail="Toggled via IUIAutomationTogglePattern", method_used="TogglePattern")
-                except Exception as e:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             # 4. SelectionItemPattern
             if pattern.lower() in ("select", "selection"):
@@ -353,8 +360,8 @@ class WindowsUIABackend(GUIBackend):
                         sel_pat = pat.QueryInterface(uia_types.IUIAutomationSelectionItemPattern)
                         sel_pat.Select()
                         return ActionResult(ok=True, action="invoke_element", detail="Selected via IUIAutomationSelectionItemPattern", method_used="SelectionItemPattern")
-                except Exception as e:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             # Fallback: Focus element
             try:

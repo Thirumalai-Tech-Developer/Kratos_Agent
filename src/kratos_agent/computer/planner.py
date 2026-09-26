@@ -1,7 +1,7 @@
 """Long-horizon computer task planner and action decomposer."""
 from __future__ import annotations
+
 import re
-from typing import Any, Dict, List, Optional
 
 from kratos_agent.computer.state import ComputerAction, ComputerState
 
@@ -9,9 +9,9 @@ from kratos_agent.computer.state import ComputerAction, ComputerState
 class ComputerPlanner:
     """Decomposes complex computer goals into ordered sequences of semantic actions."""
 
-    def plan_task(self, goal: str, initial_state: ComputerState) -> List[ComputerAction]:
+    def plan_task(self, goal: str, initial_state: ComputerState) -> list[ComputerAction]:
         """Decomposes user goal into a concrete plan of semantic ComputerActions."""
-        actions: List[ComputerAction] = []
+        actions: list[ComputerAction] = []
         g_lower = goal.lower()
 
         # Pattern: Launch / Open app

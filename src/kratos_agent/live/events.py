@@ -1,12 +1,14 @@
 """Live event contracts and status tracking for Kratos Multimodal Live."""
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import time
-from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional
-
-
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class LiveState(str, Enum):
@@ -45,15 +47,15 @@ class LiveStatus:
     speaker_active: bool = False
     camera_active: bool = False
     screen_active: bool = False
-    active_task_id: Optional[str] = None
-    active_session_id: Optional[str] = None
+    active_task_id: str | None = None
+    active_session_id: str | None = None
     muted: bool = False
     video_mode: str = "camera"
     current_state: LiveState = LiveState.DISCONNECTED
     last_transcript: str = ""
-    last_error: Optional[str] = None
-    last_error_component: Optional[str] = None
-    errors: Dict[str, str] = field(default_factory=dict)
+    last_error: str | None = None
+    last_error_component: str | None = None
+    errors: dict[str, str] = field(default_factory=dict)
     microphone_health: str = "offline"
     screen_health: str = "offline"
     camera_health: str = "offline"
@@ -62,7 +64,7 @@ class LiveStatus:
     last_heartbeat: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "gemini_connected": self.gemini_connected,
             "microphone_active": self.microphone_active,
@@ -95,9 +97,9 @@ StatusListener = Callable[[LiveStatus], None]
 class LiveStatusHub:
     """Publishes Live status updates to registered listeners (CLI, Web, SSE)."""
 
-    def __init__(self, initial_status: Optional[LiveStatus] = None) -> None:
+    def __init__(self, initial_status: LiveStatus | None = None) -> None:
         self.status = initial_status or LiveStatus()
-        self._listeners: List[StatusListener] = []
+        self._listeners: list[StatusListener] = []
 
     def subscribe(self, listener: StatusListener) -> None:
         if listener not in self._listeners:
@@ -115,8 +117,8 @@ class LiveStatusHub:
         for listener in list(self._listeners):
             try:
                 listener(self.status)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return self.status
 
     def get_status(self) -> LiveStatus:
@@ -133,8 +135,8 @@ class LiveStatusHub:
         for listener in list(self._listeners):
             try:
                 listener(self.status)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return self.status
 
     def clear_error(self, component: str) -> LiveStatus:
@@ -153,6 +155,6 @@ class LiveStatusHub:
         for listener in list(self._listeners):
             try:
                 listener(self.status)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return self.status

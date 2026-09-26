@@ -2,8 +2,9 @@
 Budget: <= 60 ms.
 """
 from __future__ import annotations
+
 import io
-from typing import Optional, Tuple
+
 try:
     from PIL import Image, ImageChops
 except ImportError:
@@ -15,7 +16,7 @@ def compute_screen_diff(
     frame_b_bytes: bytes,
     min_changed_px: int = 64,
     threshold: int = 25,
-) -> Tuple[bool, int]:
+) -> tuple[bool, int]:
     """Compares two frames and returns (changed: bool, changed_px: int).
     Downsamples to grayscale for high performance (typically < 30 ms).
     """

@@ -5,13 +5,17 @@ returned as a ToolResult, never raised into the loop and never discarded.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
+
 import inspect
 import json
 import re
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from .runtime_contracts import ToolCall, ToolPermission, ToolResult, ToolSpec
 
@@ -55,12 +59,12 @@ def categorize_tool(name: str) -> ToolCategory:
 
 class ToolRegistry:
     def __init__(self) -> None:
-        self._tools: Dict[str, RegisteredTool] = {}
+        self._tools: dict[str, RegisteredTool] = {}
 
     def register(self, spec: ToolSpec, handler: Callable[..., str]) -> None:
         self._tools[spec.name] = RegisteredTool(spec=spec, handler=handler)
 
-    def search(self, query: str, context: Optional[Any] = None, max_results: int = 15) -> List[Dict[str, Any]]:
+    def search(self, query: str, context: Any | None = None, max_results: int = 15) -> list[dict[str, Any]]:
         """Performs semantic search across the tool catalog and returns top 5-15 candidate tool schemas."""
         from kratos_agent.tools.discovery import get_tool_search
         ts = get_tool_search()
@@ -100,9 +104,9 @@ class ToolRegistry:
                 })
         return results[:max_results]
 
-    def get_tools(self, context: Optional[Any] = None, categories: Optional[List[str]] = None, max_tools: int = 15) -> List[Dict[str, Any]]:
+    def get_tools(self, context: Any | None = None, categories: list[str] | None = None, max_tools: int = 15) -> list[dict[str, Any]]:
         """Dynamically loads and returns only relevant tool schemas (5-15 tools) for the given context."""
-        searched: List[Dict[str, Any]] = []
+        searched: list[dict[str, Any]] = []
         if context:
             ctx_str = str(context)
             searched = self.search(ctx_str, context=context, max_results=max_tools)
@@ -132,7 +136,7 @@ class ToolRegistry:
         # Always include GENERAL category
         selected_cats.add(ToolCategory.GENERAL.value)
 
-        def schema(item: RegisteredTool) -> Dict[str, Any]:
+        def schema(item: RegisteredTool) -> dict[str, Any]:
             return {
                 "type": "function",
                 "function": {
@@ -149,7 +153,7 @@ class ToolRegistry:
         # Semantic search ranks the best matches but may omit tools required for
         # the inferred task (for example, file writers for a pytest repair).
         # Merge its ranked results with all tools in the relevant categories.
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         seen: set[str] = set()
         for result in searched:
             name = result.get("function", {}).get("name")
@@ -164,7 +168,7 @@ class ToolRegistry:
                 seen.add(name)
         return results[:max_tools] if (categories or context) else results
 
-    def schemas(self, categories: Optional[List[str]] = None, context: Optional[Any] = None) -> List[Dict[str, Any]]:
+    def schemas(self, categories: list[str] | None = None, context: Any | None = None) -> list[dict[str, Any]]:
         if categories or context:
             return self.get_tools(context=context, categories=categories)
         return [
@@ -173,10 +177,10 @@ class ToolRegistry:
         ]
 
 
-    def specs(self) -> List[ToolSpec]:
+    def specs(self) -> list[ToolSpec]:
         return [item.spec for item in self._tools.values()]
 
-    def execute(self, call: ToolCall, allow: Callable[[ToolSpec, Dict[str, Any]], tuple[bool, str]]) -> ToolResult:
+    def execute(self, call: ToolCall, allow: Callable[[ToolSpec, dict[str, Any]], tuple[bool, str]]) -> ToolResult:
         started = time.monotonic()
         registered = self._tools.get(call.name)
         if registered is None:
@@ -188,7 +192,7 @@ class ToolRegistry:
         forbidden, forbid_reason = self._forbidden_target(call)
         if forbidden:
             try:
-                from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+                from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
                 if approval_gate.mode is not ApprovalMode.SOVEREIGN:
                     return ToolResult(call.call_id, call.name, f"Forbidden target: {forbid_reason}", is_error=True)
                 approval_gate._audit.record(call.name, str(call.arguments), "SOVEREIGN_OVERRIDE", "sovereign")
@@ -208,7 +212,7 @@ class ToolRegistry:
 
 
     @staticmethod
-    def _validate(spec: ToolSpec, arguments: Dict[str, Any]) -> tuple[bool, str]:
+    def _validate(spec: ToolSpec, arguments: dict[str, Any]) -> tuple[bool, str]:
         if not isinstance(arguments, dict):
             return False, "Tool arguments must be an object."
         schema = spec.parameters or {}
@@ -225,11 +229,11 @@ class ToolRegistry:
     def _forbidden_target(self, call: ToolCall) -> tuple[bool, str]:
         """Return application-level target blocks outside Sovereign mode."""
         try:
-            from kratos_agent.core.approval_mode import approval_gate, ApprovalMode
+            from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
             if approval_gate.mode is ApprovalMode.SOVEREIGN:
                 return False, ""
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         args_str = json.dumps(call.arguments).lower()
         if call.name in ("run_terminal_command", "app_launch", "system_elevate"):
             if any(x in args_str for x in ["taskkill /f /im kratos", "killall kratos", "format c:", "mkfs"]):
@@ -265,11 +269,11 @@ def _terminal_command_failed(content: str) -> bool:
 
 def legacy_tool_registry(workspace: Path) -> ToolRegistry:
     """Adapt existing curated Kratos tools without exposing arbitrary Python code."""
-    from kratos_agent.utils import tools as legacy
-    from kratos_agent.utils import computer_tools
     # Computer Control Subsystem tools live in dedicated modules.
-    from kratos_agent.computer.tools import browser_tools, computer_tools as ccs_computer_tools
-    from kratos_agent.computer.tools import gui_tools, system_tools
+    from kratos_agent.computer.tools import browser_tools, gui_tools, system_tools
+    from kratos_agent.computer.tools import computer_tools as ccs_computer_tools
+    from kratos_agent.utils import computer_tools
+    from kratos_agent.utils import tools as legacy
     # Tools are shipped with Kratos; the workspace is the *target* project and
     # must not be required to contain the Kratos source tree.
     manifest = Path(__file__).resolve().parents[1] / "utils" / "tools_list.json"
@@ -321,7 +325,7 @@ def _permission_for(name: str) -> ToolPermission:
     return ToolPermission.EXECUTE
 
 
-def _signature_schema(handler: Callable[..., Any]) -> Dict[str, Any]:
+def _signature_schema(handler: Callable[..., Any]) -> dict[str, Any]:
     properties, required = {}, []
     for parameter in inspect.signature(handler).parameters.values():
         if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):

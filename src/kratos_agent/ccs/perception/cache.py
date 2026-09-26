@@ -2,9 +2,10 @@
 Budget: O(1) cache lookups, TTL invalidation.
 """
 from __future__ import annotations
+
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 DEFAULT_TTL_MS = 1500
 
@@ -17,11 +18,11 @@ class CachedFrame:
 class PerceptionCache:
     def __init__(self, ttl_ms: int = DEFAULT_TTL_MS):
         self.ttl_ms = ttl_ms
-        self._last_frame: Optional[CachedFrame] = None
-        self._element_handles: Dict[str, Any] = {}
-        self._window_refs: Dict[str, Any] = {}
+        self._last_frame: CachedFrame | None = None
+        self._element_handles: dict[str, Any] = {}
+        self._window_refs: dict[str, Any] = {}
 
-    def get_frame(self) -> Optional[CachedFrame]:
+    def get_frame(self) -> CachedFrame | None:
         if not self._last_frame:
             return None
         age_ms = (time.monotonic() - self._last_frame.timestamp_ms) * 1000
@@ -38,10 +39,10 @@ class PerceptionCache:
         )
         return self._last_frame
 
-    def get_element(self, ref: str) -> Optional[Any]:
+    def get_element(self, ref: str) -> Any | None:
         return self._element_handles.get(ref)
 
-    def store_elements(self, elements: Dict[str, Any]) -> None:
+    def store_elements(self, elements: dict[str, Any]) -> None:
         self._element_handles.update(elements)
 
     def invalidate(self) -> None:

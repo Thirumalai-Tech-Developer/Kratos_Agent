@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
 class WindowsUIExecutor:
-    async def click(self, target: Dict[str, Any]) -> Dict[str, Any]:
+    async def click(self, target: dict[str, Any]) -> dict[str, Any]:
         from kratos_agent.computer.gui.resolver import get_resolver
         element = get_resolver().resolve(target)
         backend = element.backend

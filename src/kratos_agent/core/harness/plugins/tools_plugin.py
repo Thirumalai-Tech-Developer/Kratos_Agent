@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ToolsPlugin(HarnessPlugin):
     """Bridges the tool execution runtime and enforces preset permissions."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(
             metadata=PluginMetadata(
                 name="tools",
@@ -26,9 +26,9 @@ class ToolsPlugin(HarnessPlugin):
             ),
             config=config,
         )
-        self._custom_tool_registry: Dict[str, Any] = {}
+        self._custom_tool_registry: dict[str, Any] = {}
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
         kernel.register_service("tools", self)
 
@@ -46,7 +46,7 @@ class ToolsPlugin(HarnessPlugin):
             return True
         return tool_name in allowed
 
-    def filter_tool_definitions(self, tool_defs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def filter_tool_definitions(self, tool_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Filter standard tool definitions based on active preset."""
         if not self.kernel:
             return tool_defs
@@ -67,7 +67,7 @@ class ToolsPlugin(HarnessPlugin):
                 filtered.append(tool)
         return filtered
 
-    def register_custom_tool(self, name: str, callable_handler: Any, schema: Dict[str, Any]) -> None:
+    def register_custom_tool(self, name: str, callable_handler: Any, schema: dict[str, Any]) -> None:
         """Register a dynamic tool created at runtime."""
         self._custom_tool_registry[name] = {
             "handler": callable_handler,
@@ -76,5 +76,5 @@ class ToolsPlugin(HarnessPlugin):
         if self.kernel:
             self.kernel.emit("custom_tool_registered", name=name)
 
-    def get_custom_tools(self) -> Dict[str, Any]:
+    def get_custom_tools(self) -> dict[str, Any]:
         return dict(self._custom_tool_registry)

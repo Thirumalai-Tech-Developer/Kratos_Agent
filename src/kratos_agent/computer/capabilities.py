@@ -1,11 +1,11 @@
 """Cross-platform capability probing for computer control."""
 from __future__ import annotations
+
 import platform
-import sys
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def probe_capabilities() -> Dict[str, Any]:
+def probe_capabilities() -> dict[str, Any]:
     """Detects available subsystem capabilities on the host."""
     system = platform.system().lower()
 

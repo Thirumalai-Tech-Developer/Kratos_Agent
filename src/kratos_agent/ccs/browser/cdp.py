@@ -2,11 +2,15 @@
 Provides sub-150ms evaluation, navigation, and DOM/video inspection.
 """
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import json
-import urllib.request
-import urllib.error
 import time
-from typing import Any, Dict, List, Optional
+import urllib.error
+import urllib.request
+from typing import Any
 
 try:
     import websocket
@@ -18,8 +22,8 @@ class CdpClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 9222):
         self.host = host
         self.port = port
-        self._ws: Optional[Any] = None
-        self._ws_url: Optional[str] = None
+        self._ws: Any | None = None
+        self._ws_url: str | None = None
         self._msg_id = 0
 
     def is_available(self) -> bool:
@@ -31,7 +35,7 @@ class CdpClient:
         except Exception:
             return False
 
-    def list_tabs(self) -> List[Dict[str, Any]]:
+    def list_tabs(self) -> list[dict[str, Any]]:
         """Lists all active page tabs via CDP."""
         try:
             url = f"http://{self.host}:{self.port}/json/list"
@@ -46,7 +50,7 @@ class CdpClient:
         """Returns current count of page tabs."""
         return len(self.list_tabs())
 
-    def create_tab(self, url: str = "about:blank") -> Optional[Dict[str, Any]]:
+    def create_tab(self, url: str = "about:blank") -> dict[str, Any] | None:
         """Creates a new tab via CDP HTTP endpoint and activates it (§16, §18)."""
         try:
             import urllib.parse
@@ -65,8 +69,8 @@ class CdpClient:
                     target_id = res["targetId"]
                     self.activate_tab(target_id)
                     return {"id": target_id, "url": url}
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return None
 
     def activate_tab(self, target_id: str) -> bool:
@@ -91,7 +95,7 @@ class CdpClient:
             res = self.send_command("Target.closeTarget", {"targetId": target_id})
             return "error" not in res
 
-    def _get_active_tab_ws_url(self) -> Optional[str]:
+    def _get_active_tab_ws_url(self) -> str | None:
         try:
             url = f"http://{self.host}:{self.port}/json/list"
             req = urllib.request.Request(url, headers={"User-Agent": "Kratos/1.0"})
@@ -100,8 +104,8 @@ class CdpClient:
                 for target in data:
                     if target.get("type") == "page" and "webSocketDebuggerUrl" in target:
                         return target["webSocketDebuggerUrl"]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         return None
 
     def connect(self) -> bool:
@@ -118,7 +122,7 @@ class CdpClient:
             self._ws = None
             return False
 
-    def send_command(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def send_command(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._ws:
             if not self.connect():
                 return {"error": "CDP not connected"}
@@ -162,7 +166,7 @@ class CdpClient:
         res = self.send_command("Page.navigate", {"url": url})
         return "error" not in res
 
-    def get_video_state(self, selector: str = "video") -> Dict[str, Any]:
+    def get_video_state(self, selector: str = "video") -> dict[str, Any]:
         probe_js = (
             f"(() => {{"
             f"  const v = document.querySelector('{selector}');"

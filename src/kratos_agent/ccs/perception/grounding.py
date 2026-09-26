@@ -1,15 +1,16 @@
-from typing import List, Optional
-from kratos_agent.ccs.base import ElementHandle, Rect
+
+from kratos_agent.ccs.base import ElementHandle
 from kratos_agent.ccs.perception.a11y_windows import WindowsA11yEngine
 from kratos_agent.ccs.perception.ocr import OcrEngine
+
 
 class GroundingEngine:
     def __init__(self, a11y: WindowsA11yEngine, ocr: OcrEngine):
         self.a11y = a11y
         self.ocr = ocr
-        self._last_elements: List[ElementHandle] = []
+        self._last_elements: list[ElementHandle] = []
 
-    def refresh_scene(self, image_path_or_bytes: str | bytes) -> List[ElementHandle]:
+    def refresh_scene(self, image_path_or_bytes: str | bytes) -> list[ElementHandle]:
         """Runs A11y and OCR to build a combined representation of the current screen."""
         elements = []
         
@@ -31,7 +32,7 @@ class GroundingEngine:
         self._last_elements = elements
         return elements
 
-    def find_element(self, query: str) -> Optional[ElementHandle]:
+    def find_element(self, query: str) -> ElementHandle | None:
         """
         Implements the resolution ladder:
         1. Exact reference ID match (e.g. 'e17', 'ocr_5')

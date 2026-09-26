@@ -1,10 +1,13 @@
 """Normalized tool catalog index for Kratos Agent (supporting 181+ tools)."""
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -13,17 +16,17 @@ class ToolMetadata:
     name: str
     description: str
     category: str
-    capabilities: List[str] = field(default_factory=list)
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    arguments: List[str] = field(default_factory=list)
-    examples: List[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    arguments: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
     risk_level: str = "low"  # low, medium, high, destructive
     platform: str = "windows"
-    requirements: List[str] = field(default_factory=list)
-    keywords: List[str] = field(default_factory=list)
-    aliases: List[str] = field(default_factory=list)
+    requirements: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
@@ -44,8 +47,8 @@ class ToolIndex:
     """Stores and indexes all registered tools for high-speed dynamic semantic discovery."""
 
     def __init__(self) -> None:
-        self._tools: Dict[str, ToolMetadata] = {}
-        self._categories: Dict[str, List[str]] = {}
+        self._tools: dict[str, ToolMetadata] = {}
+        self._categories: dict[str, list[str]] = {}
         self._initialized = False
 
     def register(self, meta: ToolMetadata) -> None:
@@ -56,13 +59,13 @@ class ToolIndex:
         if meta.name not in self._categories[cat]:
             self._categories[cat].append(meta.name)
 
-    def get(self, name: str) -> Optional[ToolMetadata]:
+    def get(self, name: str) -> ToolMetadata | None:
         return self._tools.get(name)
 
-    def list_all(self) -> List[ToolMetadata]:
+    def list_all(self) -> list[ToolMetadata]:
         return list(self._tools.values())
 
-    def initialize_from_catalog(self, json_path: Optional[Path] = None) -> None:
+    def initialize_from_catalog(self, json_path: Path | None = None) -> None:
         """Loads and indexes the complete 181+ tool catalog from tools_list.json."""
         if self._initialized:
             return
@@ -130,12 +133,12 @@ class ToolIndex:
                     self.register(meta)
 
                 self._initialized = True
-            except Exception as e:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
 
 # Global ToolIndex singleton
-_global_tool_index: Optional[ToolIndex] = None
+_global_tool_index: ToolIndex | None = None
 
 
 def get_tool_index() -> ToolIndex:

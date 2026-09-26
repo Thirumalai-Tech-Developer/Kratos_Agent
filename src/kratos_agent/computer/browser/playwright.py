@@ -1,10 +1,13 @@
 """Playwright browser automation driver with CDP fallback."""
 from __future__ import annotations
-import json
-import time
-from typing import Any, Dict, List, Optional
 
+import logging
+logger = logging.getLogger(__name__)
+
+import time
 from dataclasses import dataclass, field
+from typing import Any
+
 from kratos_agent.ccs.browser.cdp import cdp_client
 from kratos_agent.computer.state import ActionResult
 
@@ -33,8 +36,8 @@ class BrowserActionResult:
     executed: bool
     verified: bool
     state: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
     detail: str = ""
     terminal: bool = False
     retryable: bool = False
@@ -60,7 +63,7 @@ class BrowserActionResult:
     def task_success(self) -> bool:
         return can_report_success(self)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "operation": self.operation,
             "executed": self.executed,
@@ -89,11 +92,11 @@ def can_report_success(result: Any) -> bool:
     return False
 
 
-def fetch_first_youtube_watch_id(query: str) -> Optional[str]:
+def fetch_first_youtube_watch_id(query: str) -> str | None:
     """Resolves the first YouTube video watch ID via search query without opening extra tabs (§15)."""
-    import urllib.request
-    import urllib.parse
     import re
+    import urllib.parse
+    import urllib.request
     search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -107,8 +110,8 @@ def fetch_first_youtube_watch_id(query: str) -> Optional[str]:
                 seen = set()
                 deduped = [m for m in matches if not (m in seen or seen.add(m))]
                 return deduped[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
     return None
 
 
@@ -132,7 +135,7 @@ class PlaywrightDriver:
         except ImportError:
             return False
 
-    def diagnostics(self, page: Any = None) -> Dict[str, Any]:
+    def diagnostics(self, page: Any = None) -> dict[str, Any]:
         """Diagnostic state of active Playwright / CDP page (§21)."""
         if page is not None:
             try:
@@ -154,7 +157,7 @@ class PlaywrightDriver:
         return {"url": None, "title": None, "closed": True}
 
 
-    def click(self, role: Optional[str] = None, name: Optional[str] = None, selector: Optional[str] = None) -> ActionResult:
+    def click(self, role: str | None = None, name: str | None = None, selector: str | None = None) -> ActionResult:
         """Clicks an element using semantic role/name or CSS selector."""
         if cdp_client.is_available():
             if selector:
@@ -181,7 +184,7 @@ class PlaywrightDriver:
 
         return ActionResult(ok=False, action="browser_click", detail="Browser not connected")
 
-    def fill(self, text: str, role: Optional[str] = None, name: Optional[str] = None, selector: Optional[str] = None) -> ActionResult:
+    def fill(self, text: str, role: str | None = None, name: str | None = None, selector: str | None = None) -> ActionResult:
         """Fills an input or textarea element."""
         if cdp_client.is_available():
             clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
@@ -287,9 +290,9 @@ class PlaywrightDriver:
 
     def pause_video(self) -> ActionResult:
         """Pauses the active video in the current browser window and task tab (§15, §46, §47)."""
-        from kratos_agent.computer.browser.target import get_target_manager
         from kratos_agent.computer.apps.focus import focus_window
         from kratos_agent.computer.apps.focus_policy import FocusPolicy
+        from kratos_agent.computer.browser.target import get_target_manager
 
         target_mgr = get_target_manager()
         task_target = target_mgr.get_active_task_target()
@@ -337,9 +340,9 @@ class PlaywrightDriver:
 
     def resume_video(self) -> ActionResult:
         """Resumes the active video in the current browser window and task tab (§15, §46, §47)."""
-        from kratos_agent.computer.browser.target import get_target_manager
         from kratos_agent.computer.apps.focus import focus_window
         from kratos_agent.computer.apps.focus_policy import FocusPolicy
+        from kratos_agent.computer.browser.target import get_target_manager
 
         target_mgr = get_target_manager()
         task_target = target_mgr.get_active_task_target()
@@ -385,16 +388,16 @@ class PlaywrightDriver:
             verified=True,
         )
 
-    def search_and_play_youtube(self, query: str, task_id: Optional[str] = None) -> BrowserActionResult:
+    def search_and_play_youtube(self, query: str, task_id: str | None = None) -> BrowserActionResult:
         """Automates YouTube search, result selection, and verified video playback within a single locked tab (§1, §2, §4, §5, §13, §14, §15, §20)."""
-        from kratos_agent.computer.browser.target import (
-            get_target_manager,
-            TabContinuityViolation,
-            BrowserTaskTabLost,
-        )
         from kratos_agent.computer.apps.focus import focus_window
         from kratos_agent.computer.apps.focus_policy import FocusPolicy
         from kratos_agent.computer.browser.manager import get_browser_manager
+        from kratos_agent.computer.browser.target import (
+            BrowserTaskTabLost,
+            TabContinuityViolation,
+            get_target_manager,
+        )
 
         bm = get_browser_manager()
         target_mgr = get_target_manager()
@@ -615,7 +618,7 @@ class PlaywrightDriver:
         )
 
 
-    def dump_interactive_dom(self) -> List[Dict[str, Any]]:
+    def dump_interactive_dom(self) -> list[dict[str, Any]]:
         """Dumps interactive DOM elements (buttons, inputs, links) with bounding rects."""
 
         if not cdp_client.is_available():

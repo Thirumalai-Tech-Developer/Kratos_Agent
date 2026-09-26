@@ -1,8 +1,11 @@
 """
 Harness Plugin for Computer Control Subsystem (CCS).
 """
+
+import logging
+logger = logging.getLogger(__name__)
 from kratos_agent.core.harness.plugins import HarnessPlugin
-from kratos_agent.core.runtime_contracts import ToolSpec, ToolPermission
+
 
 class CCSHarnessPlugin(HarnessPlugin):
     @property
@@ -19,5 +22,5 @@ class CCSHarnessPlugin(HarnessPlugin):
                     if callable(fn):
                         try:
                             harness.register_tool(fn_name, fn)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Operation error suppressed: %s", exc)

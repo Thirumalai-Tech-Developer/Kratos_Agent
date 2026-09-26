@@ -1,9 +1,12 @@
+
+import logging
+logger = logging.getLogger(__name__)
 import ast
-import re
-import json
 import importlib
+import json
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 TOOLS_PY_PATH = Path(__file__).parent / "tools.py"
 TOOLS_JSON_PATH = Path(__file__).parent / "tools_list.json"
@@ -21,14 +24,14 @@ def notify_tools_updated():
     if _on_tools_updated_callback:
         try:
             _on_tools_updated_callback()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
 def create_or_update_tool(
     tool_name: str,
     description: str,
     python_code: str,
-    parameters_schema: Optional[Dict[str, Any]] = None
+    parameters_schema: dict[str, Any] | None = None
 ) -> str:
     """
     Validates Python code, writes the function to tools.py,

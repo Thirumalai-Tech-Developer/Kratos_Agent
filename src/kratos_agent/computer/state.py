@@ -1,8 +1,9 @@
 """Unified computer state and action representation models."""
 from __future__ import annotations
+
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -11,9 +12,9 @@ class ActionResult:
     ok: bool = True
     action: str = ""
     detail: str = ""
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
     duration_ms: int = 0
-    screenshot_ref: Optional[str] = None
+    screenshot_ref: str | None = None
     verified: bool = False
     method_used: str = "unknown"
     success: bool = True
@@ -21,8 +22,8 @@ class ActionResult:
     retryable: bool = False
     changed_state: bool = False
     observation: str = ""
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Synchronize success and ok
@@ -52,7 +53,7 @@ class ActionResult:
         elif self.metadata and self.data is None:
             self.data = dict(self.metadata)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "success": self.success,
@@ -76,13 +77,13 @@ class ActionResult:
 class ComputerAction:
     """Unified normalized action format for computer operations."""
     action: str  # click, type, press, hotkey, scroll, drag, launch, close, navigate, read
-    target: Optional[Dict[str, Any]] = None
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    expected_state: Optional[Dict[str, Any]] = None
+    target: dict[str, Any] | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+    expected_state: dict[str, Any] | None = None
     timeout: float = 10.0
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "action": self.action,
             "parameters": self.parameters,
             "timeout": self.timeout,
@@ -98,15 +99,15 @@ class ComputerAction:
 class ObservationDiff:
     """Represents differences between two ComputerStates for verification."""
     state_changed: bool
-    changes: List[str] = field(default_factory=list)
+    changes: list[str] = field(default_factory=list)
     active_window_changed: bool = False
-    new_windows: List[str] = field(default_factory=list)
-    closed_windows: List[str] = field(default_factory=list)
+    new_windows: list[str] = field(default_factory=list)
+    closed_windows: list[str] = field(default_factory=list)
     dialog_appeared: bool = False
     dialog_closed: bool = False
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "state_changed": self.state_changed,
             "changes": self.changes,
@@ -123,20 +124,20 @@ class ObservationDiff:
 class ComputerState:
     """Unified representation of the computer environment."""
     platform: str
-    desktop: Optional[str] = None
-    active_window: Optional[Dict[str, Any]] = None
-    windows: List[Dict[str, Any]] = field(default_factory=list)
-    applications: List[Dict[str, Any]] = field(default_factory=list)
-    focused_element: Optional[Dict[str, Any]] = None
-    clipboard: Optional[str] = None
-    screen_size: Optional[Tuple[int, int]] = None
-    browser_state: Optional[Dict[str, Any]] = None
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-    interactive_elements: List[Dict[str, Any]] = field(default_factory=list)
+    desktop: str | None = None
+    active_window: dict[str, Any] | None = None
+    windows: list[dict[str, Any]] = field(default_factory=list)
+    applications: list[dict[str, Any]] = field(default_factory=list)
+    focused_element: dict[str, Any] | None = None
+    clipboard: str | None = None
+    screen_size: tuple[int, int] | None = None
+    browser_state: dict[str, Any] | None = None
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    interactive_elements: list[dict[str, Any]] = field(default_factory=list)
     generation: int = 1
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "platform": self.platform,
             "desktop": self.desktop,

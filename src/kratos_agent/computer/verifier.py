@@ -1,12 +1,11 @@
 """Action verification engine comparing expected vs actual computer state (§12, §13, §17, §18, §19, §36)."""
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from kratos_agent.computer.state import ComputerState, ObservationDiff, ActionResult
 from kratos_agent.computer.observer import get_observer
+from kratos_agent.computer.state import ComputerState
 
 
 @dataclass
@@ -15,13 +14,13 @@ class ComputerTaskResult:
     task_id: str
     success: bool
     verified: bool
-    target: Optional[str] = None
+    target: str | None = None
     action_count: int = 0
     retries: int = 0
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "success": self.success,
@@ -68,7 +67,7 @@ class ActionVerifier:
         st = drv.verify_video_playing()
         return st.video_present and st.visible
 
-    def verify_video_playing(self) -> Tuple[bool, Dict[str, Any]]:
+    def verify_video_playing(self) -> tuple[bool, dict[str, Any]]:
         """Verifies progressing video playback using time advancement (§12, §13)."""
         from kratos_agent.computer.browser.playwright import PlaywrightDriver
         drv = PlaywrightDriver()
@@ -102,8 +101,8 @@ class ActionVerifier:
         action: str,
         before_state: ComputerState,
         after_state: ComputerState,
-        expected_state: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, str]:
+        expected_state: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
         """Compares before and after states against expected state.
         
         Returns (verified: bool, detail: str).
@@ -164,7 +163,7 @@ class ActionVerifier:
         return False, "No observable change in computer state was detected after action execution"
 
 
-_verifier: Optional[ActionVerifier] = None
+_verifier: ActionVerifier | None = None
 
 
 def get_verifier() -> ActionVerifier:

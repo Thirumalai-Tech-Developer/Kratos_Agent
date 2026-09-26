@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class BrowserSessionManager:
@@ -10,7 +10,7 @@ class BrowserSessionManager:
         from kratos_agent.computer.browser.manager import get_browser_manager
         self._manager = get_browser_manager()
 
-    def discover(self) -> Dict[str, Any]:
+    def discover(self) -> dict[str, Any]:
         target = getattr(self._manager, "active_target", None)
         return {
             "manager": type(self._manager).__name__,

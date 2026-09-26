@@ -1,14 +1,15 @@
 """Central ComputerManager orchestrating observe, plan, act, verify, and recover."""
 from __future__ import annotations
-import time
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.state import ComputerState, ComputerAction, ActionResult
-from kratos_agent.computer.observer import get_observer
-from kratos_agent.computer.executor import get_executor
-from kratos_agent.computer.verifier import get_verifier
-from kratos_agent.computer.planner import ComputerPlanner
+import time
+from typing import Any
+
 from kratos_agent.computer.capabilities import probe_capabilities
+from kratos_agent.computer.executor import get_executor
+from kratos_agent.computer.observer import get_observer
+from kratos_agent.computer.planner import ComputerPlanner
+from kratos_agent.computer.state import ActionResult, ComputerAction, ComputerState
+from kratos_agent.computer.verifier import get_verifier
 
 
 class ComputerManager:
@@ -27,7 +28,7 @@ class ComputerManager:
         include_interactive: bool = True,
         max_elements: int = 150,
         force_refresh: bool = False,
-        targeted_query: Optional[str] = None,
+        targeted_query: str | None = None,
     ) -> ComputerState:
         """Captures the current state of the computer environment with state caching."""
         return self.observer.observe(
@@ -91,12 +92,12 @@ class ComputerManager:
             verified=True,
         )
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """Returns the detected capabilities of the computer engine."""
         return probe_capabilities()
 
 
-_computer_manager: Optional[ComputerManager] = None
+_computer_manager: ComputerManager | None = None
 
 
 def get_computer_manager() -> ComputerManager:

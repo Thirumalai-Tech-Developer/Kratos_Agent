@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from kratos_agent.core.d1_client import d1_db, DEFAULT_SCHEMA_PATH
+from kratos_agent.core.d1_client import DEFAULT_SCHEMA_PATH, d1_db
 
 console = Console(highlight=False)
 

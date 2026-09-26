@@ -12,12 +12,15 @@ Dual-Tier Storage:
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import time
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.core.d1_client import D1DatabaseClient, d1_db
 
@@ -42,7 +45,7 @@ class CognitiveMemoryStore:
 
     VALID_TYPES = {m.value for m in MemoryType}
 
-    def __init__(self, db: Optional[D1DatabaseClient] = None, storage_dir: Optional[Path] = None):
+    def __init__(self, db: D1DatabaseClient | None = None, storage_dir: Path | None = None):
         self.db = db or d1_db
         self.storage_dir = storage_dir or (Path.cwd() / ".kratos" / "memory")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -54,17 +57,17 @@ class CognitiveMemoryStore:
             if not f.exists():
                 try:
                     f.write_text("[]", encoding="utf-8")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
     def store(
         self,
         memory_type: str | MemoryType,
         key: str,
         content: str,
-        session_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Stores or updates a memory record in both D1/SQLite and disk mirror."""
         m_type = memory_type.value if isinstance(memory_type, MemoryType) else MemoryType.from_string(memory_type).value
         key_clean = key.strip()
@@ -72,18 +75,18 @@ class CognitiveMemoryStore:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
         # 1. Query if an entry with this key & type exists to update it, or generate new id
-        existing_id: Optional[str] = None
+        existing_id: str | None = None
         try:
             query = "SELECT id FROM cognitive_memory WHERE memory_type = ? AND key = ?"
-            params: List[Any] = [m_type, key_clean]
+            params: list[Any] = [m_type, key_clean]
             if session_id and m_type in ("working", "episodic"):
                 query += " AND session_id = ?"
                 params.append(session_id)
             rows = self.db.execute(query, params)
             if rows:
                 existing_id = rows[0]["id"]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         mem_id = existing_id or f"mem_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
         meta_json = json.dumps(metadata or {}, ensure_ascii=False)
@@ -116,8 +119,8 @@ class CognitiveMemoryStore:
                     timestamp,
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 3. Write to disk mirror backup
         self._save_to_disk_mirror(m_type, record)
@@ -125,12 +128,12 @@ class CognitiveMemoryStore:
 
     def recall(
         self,
-        memory_type: Optional[str | MemoryType] = None,
-        key: Optional[str] = None,
-        query: Optional[str] = None,
-        session_id: Optional[str] = None,
+        memory_type: str | MemoryType | None = None,
+        key: str | None = None,
+        query: str | None = None,
+        session_id: str | None = None,
         limit: int = 15,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Recalls memories by type, key, substring query, or active session."""
         m_type = (
             memory_type.value
@@ -141,7 +144,7 @@ class CognitiveMemoryStore:
         # 1. Try D1 / SQLite query
         try:
             conditions = []
-            params: List[Any] = []
+            params: list[Any] = []
 
             if m_type:
                 conditions.append("memory_type = ?")
@@ -169,13 +172,13 @@ class CognitiveMemoryStore:
             rows = self.db.execute(sql, params)
             if rows:
                 return rows
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Fallback to disk mirror
         return self._recall_from_disk_mirror(m_type, key, query, session_id, limit)
 
-    def clear(self, memory_type: Optional[str | MemoryType] = None, session_id: Optional[str] = None) -> int:
+    def clear(self, memory_type: str | MemoryType | None = None, session_id: str | None = None) -> int:
         """Clears memories by type and/or session."""
         m_type = (
             memory_type.value
@@ -186,7 +189,7 @@ class CognitiveMemoryStore:
         cleared_count = 0
         try:
             conditions = []
-            params: List[Any] = []
+            params: list[Any] = []
             if m_type:
                 conditions.append("memory_type = ?")
                 params.append(m_type)
@@ -200,8 +203,8 @@ class CognitiveMemoryStore:
 
             self.db.execute(sql, params)
             cleared_count += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Update disk mirror
         types_to_clear = [m_type] if m_type else list(self.VALID_TYPES)
@@ -215,12 +218,12 @@ class CognitiveMemoryStore:
                         disk_file.write_text(json.dumps(filtered, indent=2, ensure_ascii=False), encoding="utf-8")
                     else:
                         disk_file.write_text("[]", encoding="utf-8")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
         return cleared_count
 
-    def _save_to_disk_mirror(self, m_type: str, record: Dict[str, Any]) -> None:
+    def _save_to_disk_mirror(self, m_type: str, record: dict[str, Any]) -> None:
         disk_file = self.storage_dir / f"{m_type}.json"
         try:
             items = []
@@ -230,19 +233,19 @@ class CognitiveMemoryStore:
             items = [item for item in items if item.get("key") != record["key"] or item.get("session_id") != record["session_id"]]
             items.insert(0, record)
             disk_file.write_text(json.dumps(items[:100], indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def _recall_from_disk_mirror(
         self,
-        m_type: Optional[str],
-        key: Optional[str],
-        query: Optional[str],
-        session_id: Optional[str],
+        m_type: str | None,
+        key: str | None,
+        query: str | None,
+        session_id: str | None,
         limit: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         types_to_check = [m_type] if m_type else list(self.VALID_TYPES)
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for t in types_to_check:
             disk_file = self.storage_dir / f"{t}.json"
@@ -260,13 +263,13 @@ class CognitiveMemoryStore:
                         if q_lower not in item.get("content", "").lower() and q_lower not in item.get("key", "").lower():
                             continue
                     results.append(item)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         results.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
         return results[:limit]
 
-    def get_summary(self) -> Dict[str, int]:
+    def get_summary(self) -> dict[str, int]:
         """Returns the number of stored memories per type."""
         summary = {m_type: 0 for m_type in self.VALID_TYPES}
         try:
@@ -281,11 +284,11 @@ class CognitiveMemoryStore:
                     try:
                         items = json.loads(disk_file.read_text(encoding="utf-8"))
                         summary[m_type] = len(items)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
         return summary
 
-    def get_prompt_context(self, session_id: Optional[str] = None, max_per_type: int = 4, include_episodic: bool = False) -> str:
+    def get_prompt_context(self, session_id: str | None = None, max_per_type: int = 4, include_episodic: bool = False) -> str:
         """Constructs a high-density markdown block of primary cognitive memory.
         
         Per user directive:

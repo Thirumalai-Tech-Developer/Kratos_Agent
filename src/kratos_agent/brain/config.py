@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import requests
 from dotenv import load_dotenv
 
@@ -16,14 +20,14 @@ DEFAULT_TIMEOUT_SECONDS: float = 60.0
 DEFAULT_MAX_RETRIES: int = 2
 
 # Dynamic fallback list (no longer hardcoded with static models)
-DEFAULT_PUBLIC_MODELS: List[str] = []
+DEFAULT_PUBLIC_MODELS: list[str] = []
 
-_cached_models: List[str] = []
+_cached_models: list[str] = []
 _cache_timestamp: float = 0.0
 _CACHE_TTL_SECONDS: float = 30.0
 
 
-def get_api_key(explicit_key: Optional[str] = None) -> str:
+def get_api_key(explicit_key: str | None = None) -> str:
     """Returns configured API key from argument or environment."""
     if explicit_key:
         return explicit_key
@@ -37,7 +41,7 @@ def get_api_key(explicit_key: Optional[str] = None) -> str:
     )
 
 
-def authenticate(explicit_key: Optional[str] = None) -> Dict[str, str]:
+def authenticate(explicit_key: str | None = None) -> dict[str, str]:
     key = explicit_key or get_api_key()
     headers = {
         "Content-Type": "application/json",
@@ -98,9 +102,9 @@ def get_default_model() -> str:
     )
 
 
-def _extract_model_ids(payload: Any) -> List[str]:
+def _extract_model_ids(payload: Any) -> list[str]:
     """Extracts unique model IDs from various LLM gateway response schemas."""
-    raw_list: List[Any] = []
+    raw_list: list[Any] = []
     if isinstance(payload, list):
         raw_list = payload
     elif isinstance(payload, dict):
@@ -113,7 +117,7 @@ def _extract_model_ids(payload: Any) -> List[str]:
         elif "id" in payload:
             raw_list = [payload]
 
-    model_ids: List[str] = []
+    model_ids: list[str] = []
     for item in raw_list:
         mid = ""
         if isinstance(item, str):
@@ -126,10 +130,10 @@ def _extract_model_ids(payload: Any) -> List[str]:
 
 
 def get_model(
-    endpoint: Optional[str] = None,
+    endpoint: str | None = None,
     timeout: float = 3.0,
     refresh: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Dynamically fetches available models from the active model endpoint or cache."""
     global _cached_models, _cache_timestamp, PUBLIC_MODELS
 
@@ -155,8 +159,8 @@ def get_model(
                     PUBLIC_MODELS.clear()
                     PUBLIC_MODELS.extend(model_list)
                 return list(model_list)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
 
     # If fetch failed, fall back to cached models if available
     if _cached_models:
@@ -171,17 +175,17 @@ def get_model(
     return [default_model] if default_model else []
 
 
-def fetch_models(endpoint: Optional[str] = None, timeout: float = 3.0, refresh: bool = False) -> List[str]:
+def fetch_models(endpoint: str | None = None, timeout: float = 3.0, refresh: bool = False) -> list[str]:
     """Alias for get_model."""
     return get_model(endpoint=endpoint, timeout=timeout, refresh=refresh)
 
 
-def get_available_models(refresh: bool = False, timeout: float = 3.0) -> List[str]:
+def get_available_models(refresh: bool = False, timeout: float = 3.0) -> list[str]:
     """Fetches currently available models dynamically from the active gateway."""
     return get_model(refresh=refresh, timeout=timeout)
 
 
-PUBLIC_MODELS: List[str] = []
+PUBLIC_MODELS: list[str] = []
 
 
 def get_normal_mode_model() -> str:
@@ -225,37 +229,30 @@ DEFAULT_OMNIROUTE_URL = DEFAULT_CHAT_ENDPOINT
 
 class BrainError(Exception):
     """Base error for Brain API calls."""
-    pass
 
 
 class BrainConnectionError(BrainError):
     """Raised when the Brain endpoint is unreachable."""
-    pass
 
 
 class BrainTimeoutError(BrainError):
     """Raised when a Brain request times out."""
-    pass
 
 
 class BrainRateLimitError(BrainError):
     """Raised when the endpoint returns HTTP 429."""
-    pass
 
 
 class BrainBadRequestError(BrainError):
     """Raised when the endpoint returns HTTP 400."""
-    pass
 
 
 class BrainNotFoundError(BrainError):
     """Raised when the endpoint or model is not found (HTTP 404)."""
-    pass
 
 
 class BrainServerError(BrainError):
     """Raised when the Brain server returns HTTP 5xx."""
-    pass
 
 
 # Backward compatibility aliases
@@ -283,7 +280,7 @@ def get_headroom_model() -> str:
     return os.getenv("HEADROOM_MODEL", "gpt-4o").strip()
 
 
-def get_headroom_proxy_port() -> Optional[int]:
+def get_headroom_proxy_port() -> int | None:
     """Returns the Headroom proxy port if configured (e.g. 8787)."""
     raw = os.getenv("HEADROOM_PROXY_PORT")
     if raw:

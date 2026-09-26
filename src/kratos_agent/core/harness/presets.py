@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +16,17 @@ class HarnessPreset:
 
     name: str
     description: str
-    enabled_plugins: Optional[List[str]] = None  # None means all available plugins
-    allowed_tools: Optional[List[str]] = None  # None means unrestricted
-    model_config: Dict[str, Any] = field(default_factory=dict)
-    plugin_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    directives: List[str] = field(default_factory=list)
+    enabled_plugins: list[str] | None = None  # None means all available plugins
+    allowed_tools: list[str] | None = None  # None means unrestricted
+    model_config: dict[str, Any] = field(default_factory=dict)
+    plugin_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    directives: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HarnessPreset":
+    def from_dict(cls, data: dict[str, Any]) -> HarnessPreset:
         return cls(
             name=data.get("name", "custom"),
             description=data.get("description", ""),
@@ -142,7 +141,7 @@ CreatorPreset = HarnessPreset(
     ],
 )
 
-PRESET_REGISTRY: Dict[str, HarnessPreset] = {
+PRESET_REGISTRY: dict[str, HarnessPreset] = {
     "standard": StandardPreset,
     "code": CodePreset,
     "minimal": MinimalPreset,
@@ -150,7 +149,7 @@ PRESET_REGISTRY: Dict[str, HarnessPreset] = {
 }
 
 
-def get_preset(name: str) -> Optional[HarnessPreset]:
+def get_preset(name: str) -> HarnessPreset | None:
     """Retrieve preset by name from registry."""
     return PRESET_REGISTRY.get(name.lower())
 
@@ -160,7 +159,7 @@ def register_preset(preset: HarnessPreset) -> None:
     PRESET_REGISTRY[preset.name.lower()] = preset
 
 
-def load_preset_from_file(file_path: Union[str, Path]) -> HarnessPreset:
+def load_preset_from_file(file_path: str | Path) -> HarnessPreset:
     """Load a custom preset from JSON or YAML file."""
     path = Path(file_path)
     if not path.exists():

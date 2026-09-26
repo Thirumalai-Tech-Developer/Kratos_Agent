@@ -1,7 +1,11 @@
 """Thread-safe event bus for decoupled agent event dispatch."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import threading
-from typing import Callable, Dict, List, Optional, Set
+from collections.abc import Callable
 
 from kratos_agent.events.models import AgentEvent, EventType
 
@@ -11,8 +15,8 @@ class EventBus:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._subscribers: Dict[EventType, List[Callable[[AgentEvent], None]]] = {}
-        self._global_subscribers: List[Callable[[AgentEvent], None]] = []
+        self._subscribers: dict[EventType, list[Callable[[AgentEvent], None]]] = {}
+        self._global_subscribers: list[Callable[[AgentEvent], None]] = []
 
     def subscribe(self, event_type: EventType, handler: Callable[[AgentEvent], None]) -> None:
         with self._lock:
@@ -42,11 +46,11 @@ class EventBus:
         for handler in handlers + global_handlers:
             try:
                 handler(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
 
-_agent_event_bus: Optional[EventBus] = None
+_agent_event_bus: EventBus | None = None
 
 
 def get_agent_event_bus() -> EventBus:

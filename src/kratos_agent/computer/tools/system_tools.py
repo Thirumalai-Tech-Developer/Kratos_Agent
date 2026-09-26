@@ -1,10 +1,10 @@
 """System and filesystem computer tools."""
 from __future__ import annotations
-import json
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.filesystem.files import get_filesystem_engine
+import json
+
 from kratos_agent.computer.apps.processes import get_process_manager
+from kratos_agent.computer.filesystem.files import get_filesystem_engine
 
 
 def computer_file_list(path: str = ".", recursive: bool = False, max_items: int = 100) -> str:
@@ -48,7 +48,7 @@ def computer_file_delete(path: str) -> str:
     return json.dumps(res.to_dict(), indent=2)
 
 
-def computer_process_list(filter: Optional[str] = None, limit: int = 50) -> str:
+def computer_process_list(filter: str | None = None, limit: int = 50) -> str:
     """Lists running processes with CPU and memory usage."""
     pm = get_process_manager()
     res = pm.list_processes(filter_query=filter, limit=limit)

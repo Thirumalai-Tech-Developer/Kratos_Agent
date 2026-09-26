@@ -7,7 +7,7 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .citations import attach_citations
 from .models import SearchResponse, SearchResult
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class SearXNGProvider(SearchProvider):
     """Integrates with self-hosted SearXNG meta-search instances via HTTP JSON API."""
 
-    def __init__(self, base_url: Optional[str] = None) -> None:
+    def __init__(self, base_url: str | None = None) -> None:
         self.base_url = (
             base_url
             or os.environ.get("KRATOS_SEARXNG_URL")
@@ -43,13 +43,13 @@ class SearXNGProvider(SearchProvider):
         self,
         query: str,
         *,
-        category: Optional[str] = None,
-        domains: Optional[List[str]] = None,
-        language: Optional[str] = None,
+        category: str | None = None,
+        domains: list[str] | None = None,
+        language: str | None = None,
         max_results: int = 10,
     ) -> SearchResponse:
         start_time = time.monotonic()
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "q": query,
             "format": "json",
         }
@@ -72,7 +72,7 @@ class SearXNGProvider(SearchProvider):
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
 
             raw_results = data.get("results", [])
-            results: List[SearchResult] = []
+            results: list[SearchResult] = []
 
             for idx, item in enumerate(raw_results[:max_results], start=1):
                 item_url = item.get("url") or ""

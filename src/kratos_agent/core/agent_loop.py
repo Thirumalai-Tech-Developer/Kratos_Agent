@@ -3,20 +3,27 @@ live task tree progression, workspace tracking, verification, and resilient inte
 """
 from __future__ import annotations
 
-import json
+import logging
+logger = logging.getLogger(__name__)
+
 import inspect
+import json
 import os
 import re
 import threading
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.brain.config import (
     get_max_parallel_workers,
     is_parallel_execution_enabled,
 )
+from kratos_agent.performance.profiler import reset_active_profiler
+from kratos_agent.performance.router import RequestCategory, get_request_router
+
 from .context_pipeline import ContextBuilder
 from .event_bus import event_bus
 from .planner import IntentKind, classify_intent, formulate_agent_plan
@@ -32,18 +39,6 @@ from .runtime_contracts import (
 from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
-from kratos_agent.performance.router import get_request_router, RequestCategory
-from kratos_agent.performance.profiler import get_active_profiler, reset_active_profiler
-from kratos_agent.core.structured_action import (
-    AgentAction,
-    TaskResult,
-    TaskStatus,
-    ActionStateMachine,
-    ActionState,
-    CachedPlan,
-)
-
-
 
 # Tools that are read-only and have zero side effects on filesystem or workspace state.
 # These can always execute concurrently with other read-only tools.
@@ -102,7 +97,7 @@ BARRIER_TOOLS = {
 }
 
 
-def partition_tool_waves(calls: List[ToolCall]) -> List[List[ToolCall]]:
+def partition_tool_waves(calls: list[ToolCall]) -> list[list[ToolCall]]:
     """Partitions a sequence of tool calls into waves of mutually independent batches.
 
     Guarantees:
@@ -112,8 +107,8 @@ def partition_tool_waves(calls: List[ToolCall]) -> List[List[ToolCall]]:
     - Barrier tools (shell commands, plan state transitions) run in their own single-call wave.
     - Preserves execution dependencies while maximizing parallelism.
     """
-    waves: List[List[ToolCall]] = []
-    current_wave: List[ToolCall] = []
+    waves: list[list[ToolCall]] = []
+    current_wave: list[ToolCall] = []
     current_wave_write_paths: set[str] = set()
     current_wave_read_paths: set[str] = set()
     current_has_barrier = False
@@ -182,7 +177,7 @@ def partition_tool_waves(calls: List[ToolCall]) -> List[List[ToolCall]]:
     return waves
 
 
-def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
+def format_tool_action_label(name: str, args: dict[str, Any]) -> str:
     """Formats a concise lowercase action string such as 'inspecting file'."""
     if name == "read_file":
         fp = str(args.get("file_path", "")).strip()
@@ -238,7 +233,7 @@ def format_tool_action_label(name: str, args: Dict[str, Any]) -> str:
     return f"executing {name}"
 
 
-def _format_tool_substep(name: str, args: Dict[str, Any]) -> str:
+def _format_tool_substep(name: str, args: dict[str, Any]) -> str:
     action = format_tool_action_label(name, args)
     return f"[tool call] {action}"
 
@@ -261,7 +256,7 @@ def user_requested_artifact(user_request: str) -> bool:
     return bool(asks_to_create and names_artifact)
 
 
-def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -> str:
+def _format_tool_result_substep(name: str, args: dict[str, Any], content: str) -> str:
     if name == "write_file":
         fp = str(args.get("file_path", "")).strip()
         return f"[tool call] created {fp}" if fp else "[tool call] created file"
@@ -309,10 +304,10 @@ def _format_tool_result_substep(name: str, args: Dict[str, Any], content: str) -
     return f"[tool call] completed {name}"
 
 
-def _extract_target_dir_and_deliverables(query: str, workspace: Path) -> tuple[Optional[str], List[str]]:
+def _extract_target_dir_and_deliverables(query: str, workspace: Path) -> tuple[str | None, list[str]]:
     """Parses target workspace directory and expected output deliverables from user query."""
     target_dir = None
-    deliverables: List[str] = []
+    deliverables: list[str] = []
 
     # 1. Detect explicit directory in quotes or Windows drive path:
     win_quoted_m = re.search(r'["\']([a-zA-Z]:[/\\][^"\'*?<>|\r\n]+)["\']', query)
@@ -382,7 +377,7 @@ def _is_no_task_hallucination(text: str) -> bool:
     return any(ind in t for ind in indicators)
 
 
-def _verify_deliverables(deliverables: List[str], target_dir: Optional[str], workspace: Path) -> tuple[bool, List[str], List[str]]:
+def _verify_deliverables(deliverables: list[str], target_dir: str | None, workspace: Path) -> tuple[bool, list[str], list[str]]:
     """Checks if all target deliverables exist on disk and are non-empty."""
     existing = []
     missing = []
@@ -401,8 +396,8 @@ def _verify_deliverables(deliverables: List[str], target_dir: Optional[str], wor
                     found = True
                     existing.append(str(c))
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         if not found:
             missing.append(d)
     return len(missing) == 0, existing, missing
@@ -417,7 +412,7 @@ class AgentLoop:
         model: Any,
         emit: Callable[[RuntimeEvent], None],
         workspace: Path,
-        cancellation_flag: Optional[threading.Event] = None,
+        cancellation_flag: threading.Event | None = None,
     ) -> None:
         self.context = context
         self.instructions = instructions
@@ -432,20 +427,20 @@ class AgentLoop:
         self.workspace_tracker = WorkspaceTracker(self.workspace)
         self.verification_manager = VerificationManager(self.workspace, self.emit)
         self.terminal_latch = TerminalLatch()
-        self.current_plan: Optional[ExecutionPlan] = None
-        self.last_verification: Optional[VerificationResult] = None
-        self.current_run: Optional[AgentRunState] = None
+        self.current_plan: ExecutionPlan | None = None
+        self.last_verification: VerificationResult | None = None
+        self.current_run: AgentRunState | None = None
         self._current_turn_id: str = ""
 
         # Wire dynamic todo_write and exit_plan_mode tool handlers
         try:
-            from kratos_agent.utils.tools import set_todo_handler, set_plan_mode_handler
+            from kratos_agent.utils.tools import set_plan_mode_handler, set_todo_handler
             set_todo_handler(self._on_todo_update)
             set_plan_mode_handler(self._on_plan_mode_exit)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
-    def _tool_schemas(self, context: str, categories: Optional[List[str]]) -> List[Dict[str, Any]]:
+    def _tool_schemas(self, context: str, categories: list[str] | None) -> list[dict[str, Any]]:
         """Call context-aware registries while preserving the legacy schemas() contract."""
         schema_method = self.tools.schemas
         try:
@@ -456,14 +451,14 @@ class AgentLoop:
             parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
         )
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         if "context" in parameters or accepts_kwargs:
             kwargs["context"] = context
         if "categories" in parameters or accepts_kwargs:
             kwargs["categories"] = categories
         return schema_method(**kwargs)
 
-    def _check_task_completion_gate(self, task: TaskItem, turn_id: str) -> tuple[bool, Optional[str]]:
+    def _check_task_completion_gate(self, task: TaskItem, turn_id: str) -> tuple[bool, str | None]:
         """Checks completion gate for a task. Returns (allowed, correction)."""
         if not getattr(task, "requires_observable_evidence", False):
             return True, None
@@ -487,7 +482,7 @@ class AgentLoop:
 
         # Rejected by gate!
         attempts = getattr(task, "_completion_attempts", 0) + 1
-        setattr(task, "_completion_attempts", attempts)
+        task._completion_attempts = attempts
 
         if attempts < 3:
             self.emit(RuntimeEvent(
@@ -520,9 +515,14 @@ class AgentLoop:
 
     def _on_todo_update(self, todos: list) -> None:
         """Handles whole-list todo updates from todo_write tool call."""
-        from kratos_agent.core.task_manager import ExecutionPlan, TaskItem, TaskState, AgentState
+        from kratos_agent.core.task_manager import (
+            AgentState,
+            ExecutionPlan,
+            TaskItem,
+            TaskState,
+        )
 
-        task_items: List[TaskItem] = []
+        task_items: list[TaskItem] = []
         for i, item in enumerate(todos):
             content = str(item.get("content", f"Task {i+1}")).strip()
             status = str(item.get("status", "pending")).lower()
@@ -559,12 +559,12 @@ class AgentLoop:
         """Emits event through both the direct callback and the global EventBus."""
         try:
             self.emit_fn(event)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         try:
             event_bus.publish(event)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def cancel(self) -> None:
         """Signal this loop to cancel at the next tool boundary."""
@@ -577,7 +577,7 @@ class AgentLoop:
     def _execute_tool_call_worker(
         self,
         call: ToolCall,
-        allow_tool: Callable[[Any, Dict[str, Any]], tuple[bool, str]],
+        allow_tool: Callable[[Any, dict[str, Any]], tuple[bool, str]],
     ) -> ToolResult:
         """Executes a single tool call and prunes its result text."""
         try:
@@ -645,8 +645,8 @@ class AgentLoop:
                         content = str(call.arguments.get("content", ""))
                         if content:
                             target_fp.write_text(content, encoding="utf-8")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
             output, truncated = self.context.prune_tool_result(result.content)
             result.content, result.truncated = output, truncated
             return result
@@ -660,7 +660,7 @@ class AgentLoop:
             )
 
 
-    def _track_tool_side_effects(self, name: str, args: Dict[str, Any], is_error: bool, turn_id: str) -> None:
+    def _track_tool_side_effects(self, name: str, args: dict[str, Any], is_error: bool, turn_id: str) -> None:
         fp = str(args.get("file_path", "") or args.get("path", "") or args.get("target_file", "")).strip()
 
         if self.current_run:
@@ -694,11 +694,11 @@ class AgentLoop:
 
     def run(
         self,
-        history: List[ChatMessage],
+        history: list[ChatMessage],
         allow_tool: Callable[..., tuple[bool, str]],
-        max_steps: Optional[int] = None,
-        resume_plan: Optional[ExecutionPlan] = None,
-    ) -> tuple[str, List[ChatMessage]]:
+        max_steps: int | None = None,
+        resume_plan: ExecutionPlan | None = None,
+    ) -> tuple[str, list[ChatMessage]]:
         turn_id = uuid.uuid4().hex
         self._current_turn_id = turn_id
         self.workspace_tracker.reset()
@@ -886,10 +886,10 @@ class AgentLoop:
                         conversational_nudge_count += 1
                         history.append(ChatMessage(role="assistant", content=final_text or "Continuing execution..."))
                         nudge_text = (
-                            f"[RUNTIME VERIFICATION REQUIRED]: The following requested deliverable file(s) have NOT been created on disk yet:\n"
+                            "[RUNTIME VERIFICATION REQUIRED]: The following requested deliverable file(s) have NOT been created on disk yet:\n"
                             + "\n".join(f"- {m}" for m in missing_files) + "\n\n"
-                            f"You must now invoke `write_file` to write the required report/deliverable to disk. "
-                            f"Do NOT stop or return conversational monologue until the file has been written."
+                            "You must now invoke `write_file` to write the required report/deliverable to disk. "
+                            "Do NOT stop or return conversational monologue until the file has been written."
                         )
                         history.append(ChatMessage(role="user", content=nudge_text))
                         continue
@@ -1211,7 +1211,7 @@ class AgentLoop:
         return message, history
 
 
-def _redacted_request(request: Dict[str, Any]) -> Dict[str, Any]:
+def _redacted_request(request: dict[str, Any]) -> dict[str, Any]:
     secret_keys = {"api_key", "authorization", "access_token", "refresh_token", "client_secret", "password"}
     clean = dict(request)
     for k in list(clean.keys()):

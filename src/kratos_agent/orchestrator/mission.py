@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .state import MissionState, MissionStateMachine
 
@@ -15,12 +15,12 @@ class Mission:
     request_id: str
     goal: str
     capability: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
-    constraints: Dict[str, Any] = field(default_factory=dict)
-    expected_result: Dict[str, Any] = field(default_factory=dict)
+    arguments: dict[str, Any] = field(default_factory=dict)
+    constraints: dict[str, Any] = field(default_factory=dict)
+    expected_result: dict[str, Any] = field(default_factory=dict)
     priority: str = "normal"
-    state_machine: Optional[MissionStateMachine] = None
-    last_result: Dict[str, Any] = field(default_factory=dict)
+    state_machine: MissionStateMachine | None = None
+    last_result: dict[str, Any] = field(default_factory=dict)
 
     def transition(self, state: MissionState, **payload: Any) -> None:
         if self.state_machine is None:
@@ -31,19 +31,19 @@ class Mission:
 class MissionCoordinator:
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._missions: Dict[str, Mission] = {}
+        self._missions: dict[str, Mission] = {}
 
     def create(
         self,
         *,
         goal: str,
         capability: str,
-        arguments: Optional[Dict[str, Any]] = None,
-        constraints: Optional[Dict[str, Any]] = None,
-        expected_result: Optional[Dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        expected_result: dict[str, Any] | None = None,
         priority: str = "normal",
-        request_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        request_id: str | None = None,
+        task_id: str | None = None,
     ) -> Mission:
         task_id = task_id or f"TASK-{uuid.uuid4().hex[:10].upper()}"
         mission_id = f"MISSION-{uuid.uuid4().hex[:10].upper()}"
@@ -63,11 +63,11 @@ class MissionCoordinator:
             self._missions[task_id] = mission
         return mission
 
-    def get(self, task_id: str) -> Optional[Mission]:
+    def get(self, task_id: str) -> Mission | None:
         with self._lock:
             return self._missions.get(task_id)
 
-    def update_result(self, task_id: str, result: Dict[str, Any]) -> None:
+    def update_result(self, task_id: str, result: dict[str, Any]) -> None:
         with self._lock:
             mission = self._missions.get(task_id)
             if not mission:
@@ -83,13 +83,13 @@ class MissionCoordinator:
             else:
                 mission.transition(MissionState.FAILED, result=result)
 
-    def latest(self) -> Optional[Mission]:
+    def latest(self) -> Mission | None:
         with self._lock:
             values = list(self._missions.values())
             return values[-1] if values else None
 
 
-_global_coordinator: Optional[MissionCoordinator] = None
+_global_coordinator: MissionCoordinator | None = None
 
 
 def get_mission_coordinator() -> MissionCoordinator:

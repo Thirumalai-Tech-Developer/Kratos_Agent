@@ -1,19 +1,20 @@
 """Action executor enforcing the interaction priority ladder."""
 from __future__ import annotations
-import time
-from typing import Any, Dict, Optional
 
+import time
 from dataclasses import dataclass, field
-from kratos_agent.computer.state import ComputerAction, ActionResult
-from kratos_agent.computer.gui.resolver import get_resolver
-from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
-from kratos_agent.computer.browser.manager import get_browser_manager
-from kratos_agent.computer.apps.launcher import get_launcher
-from kratos_agent.computer.apps.windows import get_window_manager
+from typing import Any
+
 from kratos_agent.computer.apps.adapters import find_adapter
 from kratos_agent.computer.apps.focus import get_active_window
-from kratos_agent.computer.recovery import get_recovery_engine
+from kratos_agent.computer.apps.launcher import get_launcher
+from kratos_agent.computer.apps.windows import get_window_manager
+from kratos_agent.computer.browser.manager import get_browser_manager
+from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
+from kratos_agent.computer.gui.resolver import get_resolver
 from kratos_agent.computer.permissions import get_permission_policy
+from kratos_agent.computer.recovery import get_recovery_engine
+from kratos_agent.computer.state import ActionResult, ComputerAction
 from kratos_agent.core.errors import KratosError, create_kratos_error
 
 
@@ -22,8 +23,8 @@ class ExecutionOutcome:
     """Standardized execution outcome contract (§29, §30)."""
     success: bool
     verified: bool = False
-    error: Optional[KratosError] = None
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    error: KratosError | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
     detail: str = ""
 
     @classmethod
@@ -152,10 +153,14 @@ class ActionExecutor:
                 if act_name == "click":
                     # Try native invoke / click
                     if element.backend == "windows_uia":
-                        from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
+                        from kratos_agent.computer.gui.backends.windows_uia import (
+                            WindowsUIABackend,
+                        )
                         return WindowsUIABackend().click_element(element, button=params.get("button", "left"))
                     elif element.backend == "playwright":
-                        from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
+                        from kratos_agent.computer.gui.backends.playwright import (
+                            PlaywrightBackend,
+                        )
                         return PlaywrightBackend().click_element(element, button=params.get("button", "left"))
                     else:
                         return ActionResult(
@@ -166,10 +171,14 @@ class ActionExecutor:
                 else:
                     # Type into element
                     if element.backend == "windows_uia":
-                        from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
+                        from kratos_agent.computer.gui.backends.windows_uia import (
+                            WindowsUIABackend,
+                        )
                         return WindowsUIABackend().type_element(element, text=params.get("text", ""))
                     elif element.backend == "playwright":
-                        from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
+                        from kratos_agent.computer.gui.backends.playwright import (
+                            PlaywrightBackend,
+                        )
                         return PlaywrightBackend().type_element(element, text=params.get("text", ""))
                     else:
                         return ActionResult(
@@ -202,7 +211,7 @@ class ActionExecutor:
         return ActionResult(ok=False, action=action.action, detail=f"Action could not be executed at tier {tier}")
 
 
-_executor: Optional[ActionExecutor] = None
+_executor: ActionExecutor | None = None
 
 
 def get_executor() -> ActionExecutor:

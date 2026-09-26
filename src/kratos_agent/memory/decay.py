@@ -1,7 +1,7 @@
 """Memory decay policies and reinforcement mechanisms."""
 from __future__ import annotations
+
 import time
-from typing import List
 
 from kratos_agent.memory.models import MemoryLayer, MemoryRecord
 

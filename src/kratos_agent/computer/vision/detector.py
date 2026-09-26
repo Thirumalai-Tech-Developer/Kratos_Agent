@@ -1,23 +1,22 @@
 """Vision-based UI element detector using OCR and screen analysis."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
-from kratos_agent.ccs.perception.screenshot import take_screenshot
 from kratos_agent.ccs.perception.ocr import OcrEngine
+from kratos_agent.ccs.perception.screenshot import take_screenshot
+from kratos_agent.computer.gui.models import GUIElement
 
 
 class VisionDetector:
     """Detects UI controls and text from screen captures."""
 
     def __init__(self) -> None:
-        self._ocr: Optional[OcrEngine] = None
+        self._ocr: OcrEngine | None = None
         try:
             self._ocr = OcrEngine()
         except Exception:
             self._ocr = None
 
-    def detect_elements(self, screenshot_bytes: Optional[bytes] = None) -> List[GUIElement]:
+    def detect_elements(self, screenshot_bytes: bytes | None = None) -> list[GUIElement]:
         """Runs visual detection / OCR on screen to identify interactive elements."""
         if not screenshot_bytes:
             try:
@@ -30,7 +29,7 @@ class VisionDetector:
 
         try:
             ocr_elements = self._ocr.extract_text(screenshot_bytes)
-            gui_elements: List[GUIElement] = []
+            gui_elements: list[GUIElement] = []
             for item in ocr_elements:
                 r = {"x": item.rect.x, "y": item.rect.y, "w": item.rect.w, "h": item.rect.h}
                 elem = GUIElement(
@@ -49,7 +48,7 @@ class VisionDetector:
             return []
 
 
-_vision_detector: Optional[VisionDetector] = None
+_vision_detector: VisionDetector | None = None
 
 
 def get_vision_detector() -> VisionDetector:

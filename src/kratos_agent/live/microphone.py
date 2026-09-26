@@ -6,9 +6,10 @@ import logging
 import math
 import struct
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
-from .events import LiveState, LiveStatusHub
+from .events import LiveStatusHub
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,9 @@ except ImportError:
     _HAS_NUMPY = False
 
 
-def get_input_devices() -> List[Dict[str, Any]]:
+def get_input_devices() -> list[dict[str, Any]]:
     """Enumerate all available audio input devices (microphones)."""
-    devices: List[Dict[str, Any]] = []
+    devices: list[dict[str, Any]] = []
 
     # 1. Try sounddevice
     try:
@@ -98,8 +99,8 @@ def _calculate_rms(data: bytes) -> int:
             if len(samples) == 0:
                 return 0
             return int(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     # Pure Python / struct fallback
     count = len(data) // 2
@@ -112,10 +113,10 @@ def _calculate_rms(data: bytes) -> int:
         return 0
 
 
-def get_windows_endpoint_mute_states() -> Dict[str, bool]:
+def get_windows_endpoint_mute_states() -> dict[str, bool]:
     """Queries Windows CoreAudio endpoint mute states for active audio capture devices."""
     import sys
-    states: Dict[str, bool] = {}
+    states: dict[str, bool] = {}
     if sys.platform != "win32":
         return states
     try:
@@ -201,17 +202,17 @@ class MicrophoneListener:
 
     def __init__(
         self,
-        out_queue: asyncio.Queue[Dict[str, Any]],
+        out_queue: asyncio.Queue[dict[str, Any]],
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_size: int = 1024,
-        device: Optional[int | str] = None,
+        device: int | str | None = None,
         vad_threshold: int = 80,
         vad_silence_seconds: float = 1.2,
-        on_speech_started: Optional[Callable[[], Any]] = None,
-        on_speech_stopped: Optional[Callable[[], Any]] = None,
-        on_interruption: Optional[Callable[[], Any]] = None,
-        status_hub: Optional[LiveStatusHub] = None,
+        on_speech_started: Callable[[], Any] | None = None,
+        on_speech_stopped: Callable[[], Any] | None = None,
+        on_interruption: Callable[[], Any] | None = None,
+        status_hub: LiveStatusHub | None = None,
     ) -> None:
         self.out_queue = out_queue
         self.sample_rate = sample_rate
@@ -255,7 +256,7 @@ class MicrophoneListener:
                 microphone_health="muted" if is_hw_muted else ("online" if self.is_running else "offline"),
             )
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """Returns structured microphone health without crashing if muted (§36)."""
         mute_states = get_windows_endpoint_mute_states()
         is_hw_muted = self._is_device_muted(self.device_name, mute_states) if self.device_name else False
@@ -276,7 +277,7 @@ class MicrophoneListener:
             "error": None,
         }
 
-    def _resolve_device(self) -> tuple[Optional[int], str]:
+    def _resolve_device(self) -> tuple[int | None, str]:
         """Resolves device index and display name from configured device setting."""
         devices = get_input_devices()
         if not devices:
@@ -349,7 +350,7 @@ class MicrophoneListener:
 
         return devices[0]["index"], devices[0]["name"]
 
-    def _is_device_muted(self, dev_name: str, mute_states: Dict[str, bool]) -> bool:
+    def _is_device_muted(self, dev_name: str, mute_states: dict[str, bool]) -> bool:
         """Helper to match device name against Windows CoreAudio mute states."""
         dev_lower = dev_name.lower().strip()
         for k, muted in mute_states.items():
@@ -357,7 +358,7 @@ class MicrophoneListener:
                 return muted
         return False
 
-    def _check_and_warn_muted(self, dev_name: str, mute_states: Dict[str, bool]) -> None:
+    def _check_and_warn_muted(self, dev_name: str, mute_states: dict[str, bool]) -> None:
         """Warn user once if explicitly configured device is muted (§35)."""
         if self._is_device_muted(dev_name, mute_states):
             warn_key = (dev_name.lower().strip(), "muted")
@@ -446,7 +447,7 @@ class MicrophoneListener:
             self.device_name = "Default Microphone"
 
         try:
-            stream_kwargs: Dict[str, Any] = {
+            stream_kwargs: dict[str, Any] = {
                 "samplerate": self.sample_rate,
                 "blocksize": self.chunk_size,
                 "channels": self.channels,
@@ -497,8 +498,8 @@ class MicrophoneListener:
                 try:
                     self._stream.stop()
                     self._stream.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 self._stream = None
             if self.status_hub:
                 self.status_hub.update(microphone_active=False, microphone_health="offline")
@@ -520,7 +521,7 @@ class MicrophoneListener:
             self.device_index, self.device_name = self._resolve_device()
             logger.info(f"[Microphone] PyAudio using input device [{self.device_index}]: {self.device_name}")
 
-            stream_kwargs: Dict[str, Any] = {
+            stream_kwargs: dict[str, Any] = {
                 "format": pyaudio.paInt16,
                 "channels": self.channels,
                 "rate": self.sample_rate,
@@ -542,8 +543,8 @@ class MicrophoneListener:
             if pya:
                 try:
                     pya.terminate()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
             return
 
         try:
@@ -572,14 +573,14 @@ class MicrophoneListener:
                 try:
                     self._stream.stop_stream()
                     self._stream.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 self._stream = None
             if pya:
                 try:
                     pya.terminate()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
             if self.status_hub:
                 self.status_hub.update(microphone_active=False)
 
@@ -592,14 +593,14 @@ class MicrophoneListener:
                 elif hasattr(self._stream, "stop_stream"):
                     self._stream.stop_stream()
                 self._stream.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self._stream = None
         if self.status_hub:
             self.status_hub.update(microphone_active=False)
 
 
-def get_microphone_health() -> Dict[str, Any]:
+def get_microphone_health() -> dict[str, Any]:
     """Module-level helper to check microphone health without instantiating listener (§36)."""
     devices = get_input_devices()
     mute_states = get_windows_endpoint_mute_states()

@@ -1,12 +1,15 @@
 """Thread-safe terminal renderer supporting NORMAL, DEBUG, and SILENT output modes."""
 from __future__ import annotations
+
 import sys
 import threading
-from typing import Optional
 
 from kratos_agent.events.models import AgentEvent, EventType
-from kratos_agent.output.user_output import OutputMode, UserOutputFilter, get_user_output_filter
 from kratos_agent.output.aggregator import OutputAggregator
+from kratos_agent.output.user_output import (
+    OutputMode,
+    get_user_output_filter,
+)
 
 
 class TerminalRenderer:
@@ -59,7 +62,7 @@ class TerminalRenderer:
             sys.stdout.flush()
 
 
-_terminal_renderer: Optional[TerminalRenderer] = None
+_terminal_renderer: TerminalRenderer | None = None
 
 
 def get_terminal_renderer() -> TerminalRenderer:

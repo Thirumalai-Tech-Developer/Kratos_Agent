@@ -1,10 +1,8 @@
 """Vision grounding engine mapping visual regions to semantic actions."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
+from kratos_agent.computer.gui.models import GUIElement
 from kratos_agent.computer.vision.detector import get_vision_detector
-from kratos_agent.computer.state import ActionResult
 
 
 class VisionGrounding:
@@ -15,7 +13,7 @@ class VisionGrounding:
     Before clicking, always attempt semantic resolution again.
     """
 
-    def find_visual_target(self, query: str) -> Optional[GUIElement]:
+    def find_visual_target(self, query: str) -> GUIElement | None:
         """Finds a visual target on screen matching the text query."""
         elements = get_vision_detector().detect_elements()
         q_lower = query.lower()
@@ -33,7 +31,7 @@ class VisionGrounding:
         return None
 
 
-_vision_grounding: Optional[VisionGrounding] = None
+_vision_grounding: VisionGrounding | None = None
 
 
 def get_vision_grounding() -> VisionGrounding:

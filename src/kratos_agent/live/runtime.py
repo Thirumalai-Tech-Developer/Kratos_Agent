@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .audio import AudioManager
 from .avatar import FloatingAvatar
@@ -31,7 +32,7 @@ def _is_generic_live_failure(reply: str) -> bool:
     ))
 
 
-def _resolve_live_chat_reply(reply: str, before_task_id: Optional[str], status: Dict[str, Any]) -> str:
+def _resolve_live_chat_reply(reply: str, before_task_id: str | None, status: dict[str, Any]) -> str:
     """Use a correlated structured Kratos result instead of generic Live apology text."""
     if reply and not _is_generic_live_failure(reply):
         return reply
@@ -64,17 +65,17 @@ class LiveRuntime:
 
     def __init__(
         self,
-        config: Optional[LiveConfig] = None,
-        runtime: Optional[Any] = None,
-        on_user_transcript: Optional[Callable[[str], None]] = None,
-        on_model_transcript: Optional[Callable[[str], None]] = None,
+        config: LiveConfig | None = None,
+        runtime: Any | None = None,
+        on_user_transcript: Callable[[str], None] | None = None,
+        on_model_transcript: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config or LiveConfig()
         self.status_hub = LiveStatusHub(
             initial_status=LiveStatus(video_mode=self.config.video_mode)
         )
 
-        self.out_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue(maxsize=10)
+        self.out_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=10)
 
         # Core subsystems
         self.audio = AudioManager(
@@ -124,7 +125,7 @@ class LiveRuntime:
         )
         self.router.set_diagnostics_handler(self.session.get_diagnostics)
 
-        self.avatar: Optional[FloatingAvatar] = None
+        self.avatar: FloatingAvatar | None = None
 
         # Narration sends spoken updates via the LiveSession
         def _send_narration_speech(text: str) -> None:
@@ -136,15 +137,15 @@ class LiveRuntime:
 
         self.narration = NarrationManager(send_speech_fn=_send_narration_speech)
 
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
         self._is_running = False
-        self._session_task: Optional[asyncio.Task[Any]] = None
+        self._session_task: asyncio.Task[Any] | None = None
 
     def get_status(self) -> LiveStatus:
         return self.status_hub.get_status()
 
-    def get_input_devices(self) -> list[Dict[str, Any]]:
+    def get_input_devices(self) -> list[dict[str, Any]]:
         """Returns list of available microphone input devices."""
         return self.audio.get_input_devices()
 
@@ -152,7 +153,7 @@ class LiveRuntime:
         """Returns the name of the currently active microphone device."""
         return self.audio.get_active_microphone_name()
 
-    def set_microphone_device(self, device: Optional[int | str]) -> str:
+    def set_microphone_device(self, device: int | str | None) -> str:
         """Dynamically switches active microphone device."""
         if self._loop and self._loop.is_running() and self._is_running and self.config.is_valid():
             future = asyncio.run_coroutine_threadsafe(self.audio.set_device(device), self._loop)
@@ -185,7 +186,7 @@ class LiveRuntime:
                 self._loop,
             )
 
-    def send_chat_turn_sync(self, text: str, timeout: float = 600.0) -> Optional[str]:
+    def send_chat_turn_sync(self, text: str, timeout: float = 600.0) -> str | None:
         """Sends user text to Gemini Live synchronously, waits for turn completion, and returns the spoken text."""
         if not self._loop or not self._loop.is_running() or not self.session:
             return None
@@ -245,11 +246,11 @@ class LiveRuntime:
         if self.avatar:
             try:
                 self.avatar.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self.avatar = None
 
-    async def set_vision_mode(self, mode: str) -> Dict[str, Any]:
+    async def set_vision_mode(self, mode: str) -> dict[str, Any]:
         return await self.vision.set_mode(mode)
 
 
@@ -320,8 +321,8 @@ class LiveRuntime:
             finally:
                 try:
                     loop.run_until_complete(self.stop())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 loop.close()
 
         self._thread = threading.Thread(
@@ -340,8 +341,8 @@ class LiveRuntime:
             future = asyncio.run_coroutine_threadsafe(self.stop(), loop)
             try:
                 future.result(timeout=5.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             loop.call_soon_threadsafe(loop.stop)
         if thread and thread is not threading.current_thread():
             thread.join(timeout=5.0)
@@ -351,7 +352,7 @@ class LiveRuntime:
 
 
 # Global runtime instance
-_global_live_runtime: Optional[LiveRuntime] = None
+_global_live_runtime: LiveRuntime | None = None
 
 
 def get_live_runtime() -> LiveRuntime:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from dataclasses import asdict
-from typing import Any, Dict, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 
 class TerminalExecutor:
@@ -14,9 +14,9 @@ class TerminalExecutor:
         *,
         cwd: str | None = None,
         timeout: float = 120.0,
-        env: Dict[str, str] | None = None,
-    ) -> Dict[str, Any]:
-        def _run() -> Dict[str, Any]:
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        def _run() -> dict[str, Any]:
             completed = subprocess.run(
                 [executable, *list(argv)],
                 cwd=cwd,

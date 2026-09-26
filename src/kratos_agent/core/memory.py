@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .d1_client import D1DatabaseClient, d1_db
-from .cognitive_memory import CognitiveMemoryStore, cognitive_memory, MemoryType
+from .cognitive_memory import CognitiveMemoryStore, MemoryType
+from .d1_client import D1DatabaseClient
 
 KRATOS_DIR = Path.cwd() / ".kratos"
 SESSIONS_DIR = KRATOS_DIR / "sessions"
@@ -16,22 +19,22 @@ INDEX_FILE = SESSIONS_DIR / "index.json"
 
 
 class AgenticSession:
-    def __init__(self, session_id: str, title: str = "New Session", model: str = "gemini-3.6-flash-high", created_at: Optional[str] = None):
+    def __init__(self, session_id: str, title: str = "New Session", model: str = "gemini-3.6-flash-high", created_at: str | None = None):
         self.session_id = session_id
         self.title = title
         self.model = model
         self.created_at = created_at or time.strftime("%Y-%m-%d %H:%M:%S")
         self.updated_at = self.created_at
-        self.turns: List[Dict[str, Any]] = []
-        self.executed_commands: List[Dict[str, Any]] = []
-        self.created_artifacts: List[Dict[str, Any]] = []
-        self.notes: Dict[str, Any] = {}
-        self.plan: Optional[Dict[str, Any]] = None
-        self.files_changed: Dict[str, List[str]] = {"created": [], "modified": [], "deleted": []}
+        self.turns: list[dict[str, Any]] = []
+        self.executed_commands: list[dict[str, Any]] = []
+        self.created_artifacts: list[dict[str, Any]] = []
+        self.notes: dict[str, Any] = {}
+        self.plan: dict[str, Any] | None = None
+        self.files_changed: dict[str, list[str]] = {"created": [], "modified": [], "deleted": []}
         self.last_status: str = "idle"
-        self.verification_status: Dict[str, Any] = {}
+        self.verification_status: dict[str, Any] = {}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "title": self.title,
@@ -49,7 +52,7 @@ class AgenticSession:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> AgenticSession:
+    def from_dict(cls, data: dict[str, Any]) -> AgenticSession:
         session = cls(
             session_id=data.get("session_id", str(uuid.uuid4())[:8]),
             title=data.get("title", "Untitled Session"),
@@ -75,7 +78,7 @@ class AgenticSession:
         else:
             self.plan = None
 
-    def get_plan(self) -> Optional[Any]:
+    def get_plan(self) -> Any | None:
         if not self.plan:
             return None
         from kratos_agent.core.task_manager import ExecutionPlan
@@ -103,9 +106,9 @@ class AgenticMemory:
 
     def __init__(
         self,
-        sessions_dir: Optional[Path] = None,
-        db: Optional[D1DatabaseClient] = None,
-        d1_db: Optional[D1DatabaseClient] = None,
+        sessions_dir: Path | None = None,
+        db: D1DatabaseClient | None = None,
+        d1_db: D1DatabaseClient | None = None,
         **kwargs: Any,
     ):
         self.sessions_dir = sessions_dir or SESSIONS_DIR
@@ -117,11 +120,11 @@ class AgenticMemory:
             self.db = default_d1
         try:
             self.db.init_schema()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         self.cognitive = CognitiveMemoryStore(db=self.db, storage_dir=self.sessions_dir.parent / "memory")
-        self.active_session: Optional[AgenticSession] = None
+        self.active_session: AgenticSession | None = None
         self._init_or_load_latest()
 
     def _init_or_load_latest(self):
@@ -150,27 +153,27 @@ class AgenticMemory:
                     session.executed_commands = legacy_cmds
                     self.save()
                     return
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         # Create initial session
         self.create_session("Default Session")
 
-    def _load_index(self) -> Dict[str, Any]:
+    def _load_index(self) -> dict[str, Any]:
         if self.index_file.exists():
             try:
                 return json.loads(self.index_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return {"sessions": [], "active_session_id": None}
 
-    def _save_index(self, index: Dict[str, Any]):
+    def _save_index(self, index: dict[str, Any]):
         try:
             self.index_file.write_text(json.dumps(index, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
-    def create_session(self, title: Optional[str] = None, model: str = "gemini-3.6-flash-high") -> AgenticSession:
+    def create_session(self, title: str | None = None, model: str = "gemini-3.6-flash-high") -> AgenticSession:
         """Creates, persists to Cloudflare D1, and activates a new session."""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         short_id = uuid.uuid4().hex[:6]
@@ -199,8 +202,8 @@ class AgenticMemory:
                     json.dumps(session.notes or {}),
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Save session file for local backup
         self._save_file_backup()
@@ -293,8 +296,8 @@ class AgenticMemory:
                 index["active_session_id"] = session_id
                 self._save_index(index)
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Fallback to local JSON file
         session_path = self.sessions_dir / f"{session_id}.json"
@@ -308,8 +311,8 @@ class AgenticMemory:
             # Sync into D1 for future lookups
             try:
                 self.save()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
             index = self._load_index()
             index["active_session_id"] = session_id
@@ -344,8 +347,8 @@ class AgenticMemory:
                     json.dumps(self.active_session.notes or {}),
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Local File Backup
         self._save_file_backup()
@@ -366,10 +369,10 @@ class AgenticMemory:
                     s["model"] = self.active_session.model
                     break
             self._save_index(index)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(self) -> list[dict[str, Any]]:
         """Returns all sessions from Cloudflare D1 database or local index sorted by last updated."""
         # Try D1 database query
         try:
@@ -381,8 +384,8 @@ class AgenticMemory:
             )
             if rows:
                 return rows
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Fallback to local files & index
         index = self._load_index()
@@ -408,8 +411,8 @@ class AgenticMemory:
                         "turns_count": len(data.get("turns", [])),
                         "model": data.get("model", "")
                     })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
         return valid
 
@@ -421,16 +424,16 @@ class AgenticMemory:
             self.db.execute("DELETE FROM commands WHERE session_id = ?", [session_id])
             self.db.execute("DELETE FROM agentic_events WHERE session_id = ?", [session_id])
             self.db.execute("DELETE FROM sessions WHERE id = ?", [session_id])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Local file deletion
         session_path = self.sessions_dir / f"{session_id}.json"
         if session_path.exists():
             try:
                 session_path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         index = self._load_index()
         index["sessions"] = [s for s in index.get("sessions", []) if s.get("session_id") != session_id]
@@ -448,13 +451,13 @@ class AgenticMemory:
         self,
         user_query: str,
         agent_reply: str = "",
-        assistant_response: Optional[str] = None,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        plan: Optional[Any] = None,
-        files_changed: Optional[Dict[str, List[str]]] = None,
-        verification_status: Optional[Dict[str, Any]] = None,
+        assistant_response: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        plan: Any | None = None,
+        files_changed: dict[str, list[str]] | None = None,
+        verification_status: dict[str, Any] | None = None,
         status: str = "completed"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Records a completed turn into Cloudflare D1 turns table and updates session metadata."""
         if not self.active_session:
             self.create_session()
@@ -504,8 +507,8 @@ class AgenticMemory:
                     json.dumps(tool_calls or []),
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Record to Cognitive Memory (Episodic Experience & Working Task state)
         try:
@@ -529,8 +532,8 @@ class AgenticMemory:
                     content=f"Goal: {plan_title}\nStatus: {status}\nSummary: {self.active_session.get_unfinished_tasks_summary()}",
                     session_id=sid
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         self.save()
         return turn
@@ -565,8 +568,8 @@ class AgenticMemory:
                     output_preview[:200],
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         self.save()
 
@@ -583,19 +586,19 @@ class AgenticMemory:
             lines.append(f"Kratos: {t.get('agent')}")
         return "\n".join(lines)
 
-    def save_cognitive_memory(self, memory_type: str, key: str, content: str, session_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def save_cognitive_memory(self, memory_type: str, key: str, content: str, session_id: str | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         sid = session_id or (self.active_session.session_id if self.active_session else None)
         return self.cognitive.store(memory_type, key, content, session_id=sid, metadata=metadata)
 
-    def recall_cognitive_memory(self, memory_type: Optional[str] = None, key: Optional[str] = None, query: Optional[str] = None, session_id: Optional[str] = None, limit: int = 15) -> List[Dict[str, Any]]:
+    def recall_cognitive_memory(self, memory_type: str | None = None, key: str | None = None, query: str | None = None, session_id: str | None = None, limit: int = 15) -> list[dict[str, Any]]:
         sid = session_id or (self.active_session.session_id if self.active_session else None)
         return self.cognitive.recall(memory_type, key, query, session_id=sid, limit=limit)
 
-    def clear_cognitive_memory(self, memory_type: Optional[str] = None, session_id: Optional[str] = None) -> int:
+    def clear_cognitive_memory(self, memory_type: str | None = None, session_id: str | None = None) -> int:
         sid = session_id or (self.active_session.session_id if self.active_session else None)
         return self.cognitive.clear(memory_type, session_id=sid)
 
-    def get_cognitive_context(self, session_id: Optional[str] = None) -> str:
+    def get_cognitive_context(self, session_id: str | None = None) -> str:
         sid = session_id or (self.active_session.session_id if self.active_session else None)
         return self.cognitive.get_prompt_context(session_id=sid)
 
@@ -607,8 +610,8 @@ class AgenticMemory:
                 self.db.execute("DELETE FROM commands WHERE session_id = ?", [self.active_session.session_id])
                 self.db.execute("DELETE FROM agentic_events WHERE session_id = ?", [self.active_session.session_id])
                 self.cognitive.clear(memory_type=MemoryType.WORKING, session_id=self.active_session.session_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self.active_session.turns = []
             self.active_session.executed_commands = []
             self.active_session.created_artifacts = []

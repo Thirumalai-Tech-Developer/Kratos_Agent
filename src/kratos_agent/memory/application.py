@@ -1,17 +1,18 @@
 """Application memory for app-specific facts, shortcuts, and quirks."""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
 class ApplicationKnowledge:
     application: str
-    facts: List[str] = field(default_factory=list)
-    shortcuts: Dict[str, str] = field(default_factory=dict)
-    workflows: List[str] = field(default_factory=list)
+    facts: list[str] = field(default_factory=list)
+    shortcuts: dict[str, str] = field(default_factory=dict)
+    workflows: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "application": self.application,
             "facts": self.facts,
@@ -24,7 +25,7 @@ class ApplicationMemoryStore:
     """Stores application-specific knowledge to speed up automation (§25)."""
 
     def __init__(self) -> None:
-        self._apps: Dict[str, ApplicationKnowledge] = {}
+        self._apps: dict[str, ApplicationKnowledge] = {}
 
     def add_fact(self, application: str, fact: str) -> None:
         app_key = application.strip().lower()
@@ -39,5 +40,5 @@ class ApplicationMemoryStore:
             self._apps[app_key] = ApplicationKnowledge(application=application)
         self._apps[app_key].shortcuts[action] = hotkey
 
-    def get_knowledge(self, application: str) -> Optional[ApplicationKnowledge]:
+    def get_knowledge(self, application: str) -> ApplicationKnowledge | None:
         return self._apps.get(application.strip().lower())

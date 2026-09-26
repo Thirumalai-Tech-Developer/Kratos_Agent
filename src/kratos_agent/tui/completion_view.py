@@ -5,7 +5,8 @@ and next-step prompt readiness with strict truthfulness.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
+
 from rich.console import Group
 from rich.panel import Panel
 from rich.text import Text
@@ -13,9 +14,9 @@ from rich.text import Text
 
 def render_completion_card(
     summary_text: str,
-    plan_dict: Optional[Dict[str, Any]] = None,
-    files_summary: Optional[Dict[str, Any]] = None,
-    verification: Optional[Dict[str, Any]] = None,
+    plan_dict: dict[str, Any] | None = None,
+    files_summary: dict[str, Any] | None = None,
+    verification: dict[str, Any] | None = None,
     model_name: str = "",
 ) -> Panel:
     """Renders the truthful completion or failure panel."""

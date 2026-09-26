@@ -10,12 +10,15 @@ Modes:
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import os
 import re
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from dataclasses import dataclass
 
 from rich.console import Console
 from rich.prompt import Prompt
@@ -64,8 +67,8 @@ class AuditLogger:
         try:
             from kratos_agent.ccs.safety_ops import safety
             safety.record_audit(capability, target, decision, mode)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
 class ApprovalGate:
     """
@@ -95,8 +98,8 @@ class ApprovalGate:
                 mode_val = data.get("approval_mode", "sovereign")
                 self._mode = ApprovalMode(mode_val)
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         self._mode = ApprovalMode.SOVEREIGN
 
     def _save(self):
@@ -106,12 +109,12 @@ class ApprovalGate:
             if self.SETTINGS_FILE.exists():
                 try:
                     data = json.loads(self.SETTINGS_FILE.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
             data["approval_mode"] = self._mode.value
             self.SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     @property
     def mode(self) -> ApprovalMode:

@@ -5,11 +5,12 @@ runtime persists them as JSON events, making a turn inspectable and recoverable.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional
 import time
 import uuid
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
+from enum import Enum
+from typing import Any
 
 
 class EventKind(str, Enum):
@@ -108,18 +109,18 @@ class TerminalLatch:
 class ChatMessage:
     role: str
     content: str
-    name: Optional[str] = None
-    tool_call_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    name: str | None = None
+    tool_call_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class ToolCall:
     name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
     call_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
@@ -145,20 +146,20 @@ class ModelCapabilities:
 @dataclass
 class ModelResponse:
     text: str = ""
-    tool_calls: List[ToolCall] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = "stop"
-    usage: Dict[str, int] = field(default_factory=dict)
+    usage: dict[str, int] = field(default_factory=dict)
     raw: Any = None
 
 
 @dataclass
 class RuntimeEvent:
     kind: EventKind
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
     turn_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["kind"] = self.kind.value
         return data
@@ -176,7 +177,7 @@ class ToolPermission(str, Enum):
 class ToolSpec:
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     permission: ToolPermission
     timeout_seconds: int = 300
     source: str = "builtin"
@@ -187,17 +188,17 @@ class AgentRunState:
     run_id: str
     user_request: str
     workspace: Any
-    target_dir: Optional[str] = None
-    target_deliverables: List[str] = field(default_factory=list)
-    completed_tools: List[Dict[str, Any]] = field(default_factory=list)
-    inspected_files: List[str] = field(default_factory=list)
-    written_files: List[str] = field(default_factory=list)
-    commands_run: List[str] = field(default_factory=list)
+    target_dir: str | None = None
+    target_deliverables: list[str] = field(default_factory=list)
+    completed_tools: list[dict[str, Any]] = field(default_factory=list)
+    inspected_files: list[str] = field(default_factory=list)
+    written_files: list[str] = field(default_factory=list)
+    commands_run: list[str] = field(default_factory=list)
     phase: str = "planning"
     status: str = "running"
     start_time: float = field(default_factory=time.monotonic)
 
-    def record_tool_call(self, name: str, args: Dict[str, Any], is_error: bool = False) -> None:
+    def record_tool_call(self, name: str, args: dict[str, Any], is_error: bool = False) -> None:
         self.completed_tools.append({"name": name, "args": args, "is_error": is_error})
 
     def record_inspected_file(self, file_path: str) -> None:
@@ -212,7 +213,7 @@ class AgentRunState:
         if cmd and cmd not in self.commands_run:
             self.commands_run.append(cmd)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "user_request": self.user_request,

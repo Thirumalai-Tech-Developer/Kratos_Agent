@@ -1,8 +1,11 @@
+
+import logging
+logger = logging.getLogger(__name__)
+import importlib
 import sys
 import time
-import importlib
 from pathlib import Path
-from typing import List, Dict, Optional, Set
+
 from rich.console import Console
 
 console = Console(highlight=False)
@@ -33,7 +36,7 @@ IGNORED_DIRS = {
 class CodeReloader:
     """Watches Kratos codebase and auto-reloads modules on change during runtime with zero-lag throttling."""
 
-    def __init__(self, watch_roots: Optional[List[Path]] = None):
+    def __init__(self, watch_roots: list[Path] | None = None):
         if watch_roots is None:
             base_dir = Path(__file__).resolve().parent.parent
             self.watch_roots = [
@@ -43,7 +46,7 @@ class CodeReloader:
         else:
             self.watch_roots = watch_roots
 
-        self.file_mtimes: Dict[str, float] = {}
+        self.file_mtimes: dict[str, float] = {}
         self.last_check_time: float = 0.0
         self.check_throttle_seconds: float = 1.0
         self._record_mtimes()
@@ -68,10 +71,10 @@ class CodeReloader:
                 if p.is_file() and p.suffix in (".py", ".json", ".md"):
                     try:
                         self.file_mtimes[str(p.resolve())] = p.stat().st_mtime
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
-    def check_for_changes(self) -> List[str]:
+    def check_for_changes(self) -> list[str]:
         """Checks if any watched source files have been modified or added with throttling."""
         now = time.time()
         if now - self.last_check_time < self.check_throttle_seconds:
@@ -79,7 +82,7 @@ class CodeReloader:
         self.last_check_time = now
 
         changed_files = []
-        current_files: Set[str] = set()
+        current_files: set[str] = set()
 
         for root in self.watch_roots:
             if not root.exists():
@@ -92,14 +95,11 @@ class CodeReloader:
                     current_files.add(p_str)
                     try:
                         mtime = p.stat().st_mtime
-                        if p_str not in self.file_mtimes:
+                        if p_str not in self.file_mtimes or self.file_mtimes[p_str] != mtime:
                             self.file_mtimes[p_str] = mtime
                             changed_files.append(p.name)
-                        elif self.file_mtimes[p_str] != mtime:
-                            self.file_mtimes[p_str] = mtime
-                            changed_files.append(p.name)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
         # Check deleted files
         deleted = set(self.file_mtimes.keys()) - current_files
@@ -109,15 +109,15 @@ class CodeReloader:
 
         return list(set(changed_files))
 
-    def reload(self, changed_files: Optional[List[str]] = None) -> bool:
+    def reload(self, changed_files: list[str] | None = None) -> bool:
         """Reloads all Python modules and refreshes the Kratos runtime."""
         try:
             for mod_name in MODULES_IN_ORDER:
                 if mod_name in sys.modules:
                     try:
                         importlib.reload(sys.modules[mod_name])
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
             # Refresh runtime instance
             main_mod = sys.modules.get("kratos_agent.main")

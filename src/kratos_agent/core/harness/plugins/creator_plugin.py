@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class CreatorPlugin(HarnessPlugin):
     """Meta-programming runtime allowing autonomous authoring, hot-reloading, and inspection of plugins."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(
             metadata=PluginMetadata(
                 name="creator",
@@ -28,7 +28,7 @@ class CreatorPlugin(HarnessPlugin):
             config=config,
         )
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
         kernel.register_service("creator", self)
 
@@ -42,7 +42,7 @@ class CreatorPlugin(HarnessPlugin):
         name: str,
         description: str = "",
         category: str = "general",
-        dependencies: Optional[List[str]] = None,
+        dependencies: list[str] | None = None,
     ) -> str:
         """Generate boilerplate Python code for a new HarnessPlugin."""
         deps = dependencies or []
@@ -86,7 +86,7 @@ class {class_name}(HarnessPlugin):
         # Final cleanup
 '''
 
-    def validate_plugin_code(self, source_code: str) -> Tuple[bool, Optional[str]]:
+    def validate_plugin_code(self, source_code: str) -> tuple[bool, str | None]:
         """Validate Python source code for AST syntax correctness."""
         try:
             tree = ast.parse(source_code)
@@ -105,7 +105,7 @@ class {class_name}(HarnessPlugin):
         source_code: str,
         class_name: str,
         enable: bool = True,
-    ) -> Tuple[Optional[HarnessPlugin], Optional[str]]:
+    ) -> tuple[HarnessPlugin | None, str | None]:
         """Dynamically compile and register a plugin from source code into the active kernel."""
         if not self.kernel:
             return None, "Kernel is not attached."
@@ -118,7 +118,7 @@ class {class_name}(HarnessPlugin):
         if not valid:
             return None, err
 
-        namespace: Dict[str, Any] = {}
+        namespace: dict[str, Any] = {}
         try:
             compiled = compile(source_code, f"<dynamic_plugin_{class_name}>", "exec")
             exec(compiled, namespace)
@@ -138,7 +138,7 @@ class {class_name}(HarnessPlugin):
         except Exception as e:
             return None, f"Error instantiating plugin: {e}"
 
-    def inspect_system(self) -> Dict[str, Any]:
+    def inspect_system(self) -> dict[str, Any]:
         """Return full introspection of the kernel, presets, and registered services."""
         if not self.kernel:
             return {"error": "No kernel attached."}

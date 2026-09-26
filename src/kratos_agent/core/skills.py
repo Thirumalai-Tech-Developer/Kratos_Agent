@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
+import json
 import re
 import shutil
 import urllib
-import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
+
 from rich.console import Console
 
 console = Console(highlight=False)
@@ -13,7 +17,7 @@ console = Console(highlight=False)
 DEFAULT_SKILLS_DIR = Path.cwd() / ".kratos" / "skills"
 
 class Skill:
-    def __init__(self, name: str, description: str, path: Path, content: str = "", tags: Optional[List[str]] = None, source_url: Optional[str] = None):
+    def __init__(self, name: str, description: str, path: Path, content: str = "", tags: list[str] | None = None, source_url: str | None = None):
         self.name = name
         self.description = description
         self.path = path
@@ -21,7 +25,7 @@ class Skill:
         self.tags = tags or []
         self.source_url = source_url
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
@@ -32,14 +36,14 @@ class Skill:
 
 class SkillManager:
     """Manages discovery, installation, internet fetching, and prompt injection of Kratos Skills."""
-    def __init__(self, skills_dir: Optional[Path] = None):
+    def __init__(self, skills_dir: Path | None = None):
         self.skills_dir = skills_dir or DEFAULT_SKILLS_DIR
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.workspace = self.skills_dir.parent.parent.resolve()
-        self.extra_roots: List[Path] = []
+        self.extra_roots: list[Path] = []
         self.source_config = self.skills_dir / "sources.json"
         self._load_extra_roots()
-        self.skills: Dict[str, Skill] = {}
+        self.skills: dict[str, Skill] = {}
         self.load_skills()
 
     def set_workspace(self, workspace: Path) -> None:
@@ -61,7 +65,7 @@ class SkillManager:
         except (OSError, ValueError, TypeError):
             self.extra_roots = []
 
-    def skill_roots(self) -> List[Path]:
+    def skill_roots(self) -> list[Path]:
         """Return standard Agent Skills locations used by Claude Code, OpenClaw, and Codex."""
         home = Path.home()
         roots = [
@@ -79,7 +83,7 @@ class SkillManager:
             home / ".openclaw" / "workspace" / "skills",
             *self.extra_roots,
         ]
-        unique: List[Path] = []
+        unique: list[Path] = []
         seen = set()
         for root in roots:
             resolved = root.resolve()
@@ -119,7 +123,7 @@ class SkillManager:
         self.load_skills()
         return len(found)
 
-    def load_skills(self) -> Dict[str, Skill]:
+    def load_skills(self) -> dict[str, Skill]:
         """Loads all installed skills from the skills directory."""
         self.skills = {}
         for root in self.skill_roots():
@@ -147,8 +151,8 @@ class SkillManager:
                             self.skills[name.lower()] = skill_obj
                         if item.name.lower() not in self.skills:
                             self.skills[item.name.lower()] = skill_obj
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
             if root.name == "commands":
                 for command_file in sorted(root.glob("*.md"), key=lambda path: path.name.lower()):
                     try:
@@ -157,11 +161,11 @@ class SkillManager:
                         command = Skill(name=name, description=desc, path=command_file, content=body or raw, tags=tags, source_url=source_url)
                         if name.lower() not in self.skills:
                             self.skills[name.lower()] = command
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
         return self.skills
 
-    def _parse_skill_md(self, default_name: str, raw_text: str) -> Tuple[str, str, List[str], Optional[str], str]:
+    def _parse_skill_md(self, default_name: str, raw_text: str) -> tuple[str, str, list[str], str | None, str]:
         """Parses YAML frontmatter and body from SKILL.md."""
         name = default_name
         description = f"Skill {default_name}"
@@ -199,7 +203,7 @@ class SkillManager:
 
         return name, description, tags, source_url, body
 
-    def add_skill_from_url(self, url: str, brain: Optional[Any] = None) -> List[Skill]:
+    def add_skill_from_url(self, url: str, brain: Any | None = None) -> list[Skill]:
         """Downloads, parses, and installs skills from a remote URL or Git repository."""
         # 1. Handle Git Repositories (e.g. https://github.com/anthropics/skills.git)
         if url.endswith(".git") or ("github.com/" in url and "/raw/" not in url and not url.endswith(".md")):
@@ -242,8 +246,8 @@ class SkillManager:
             finally:
                 try:
                     shutil.rmtree(temp_dir, ignore_errors=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Handle Single File / Markdown URLs
         req = urllib.request.Request(
@@ -294,8 +298,8 @@ source_url: {url}
                 results = list(ddgs.text(f"{query} best practices documentation guide cheat sheet", max_results=4))
                 if results:
                     search_results = "\n\n".join([f"[{r.get('title')}]\n{r.get('body')}\nURL: {r.get('href')}" for r in results])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Ask Model to forge comprehensive SKILL.md
         prompt = (

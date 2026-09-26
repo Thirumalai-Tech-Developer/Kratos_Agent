@@ -5,27 +5,31 @@ Usage:
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.ccs import get_computer_controller, get_capability_map
-from kratos_agent.core.evidence import OutcomeAssertion, Evidence
+from kratos_agent.ccs import get_computer_controller
 from kratos_agent.ccs.assertions import assertion_runner
 from kratos_agent.core.command_lint import lint_command
-from kratos_agent.utils.shell_quote import quote_powershell, powershell_encoded, youtube_search_url
+from kratos_agent.core.evidence import OutcomeAssertion
 from kratos_agent.utils import computer_tools as ct
+from kratos_agent.utils.shell_quote import (
+    powershell_encoded,
+    quote_powershell,
+)
 
 
 @dataclass
 class TestRecord:
     category: str
     name: str
-    budget_ms: Optional[int]
+    budget_ms: int | None
     actual_ms: int
     passed: bool
     detail: str
@@ -35,7 +39,7 @@ class DoctorRunner:
     def __init__(self, full: bool = False, json_mode: bool = False):
         self.full = full
         self.json_mode = json_mode
-        self.records: List[TestRecord] = []
+        self.records: list[TestRecord] = []
         self.ccs = get_computer_controller()
         self.initial_cursor = (0, 0)
         self.initial_clipboard = ""
@@ -47,8 +51,8 @@ class DoctorRunner:
             cur_json = json.loads(ct.cursor_position())
             self.initial_cursor = (cur_json.get("x", 0), cur_json.get("y", 0))
             self.initial_clipboard = ct.clipboard_get()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         try:
             self._test_backend()
@@ -64,8 +68,8 @@ class DoctorRunner:
                 ct.mouse_move(self.initial_cursor[0], self.initial_cursor[1], style="instant")
                 ct.clipboard_set(self.initial_clipboard)
                 ct.input_release_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if self.json_mode:
             print(json.dumps([asdict(r) for r in self.records], indent=2))
@@ -75,7 +79,7 @@ class DoctorRunner:
         failed = [r for r in self.records if not r.passed]
         return 1 if failed else 0
 
-    def _record(self, category: str, name: str, budget_ms: Optional[int], start_ms: float, passed: bool, detail: str = ""):
+    def _record(self, category: str, name: str, budget_ms: int | None, start_ms: float, passed: bool, detail: str = ""):
         elapsed_ms = int((time.time() - start_ms) * 1000)
         self.records.append(TestRecord(category, name, budget_ms, elapsed_ms, passed, detail))
 
@@ -95,7 +99,6 @@ class DoctorRunner:
         self._record("DPI AWARENESS", "PerMonitorV2 Awareness", None, t0, dpi_ok, "SetProcessDpiAwarenessContext(-4)")
 
         t0 = time.time()
-        from kratos_agent.ccs.input.interlock import interlock
         self._record("INTERLOCK", "Global State Arbiter", 100, t0, True, "FREE, poller alive @ 20 Hz")
 
     def _test_perception(self):
@@ -122,6 +125,7 @@ class DoctorRunner:
         # screen_diff
         t0 = time.time()
         from pathlib import Path
+
         from kratos_agent.ccs.perception.screen_diff import compute_screen_diff
         ref_a = shot_res.get("frame_ref", "")
         ref_b = shot_reg.get("frame_ref", "")

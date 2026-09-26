@@ -4,10 +4,11 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from kratos_agent.core.event_bus import event_bus
-from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
+from kratos_agent.core.runtime_contracts import RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class NarrationManager:
 
     def __init__(
         self,
-        send_speech_fn: Optional[Callable[[str], Any]] = None,
+        send_speech_fn: Callable[[str], Any] | None = None,
         min_interval_seconds: float = 4.0,
     ) -> None:
         self.send_speech_fn = send_speech_fn
@@ -60,8 +61,8 @@ class NarrationManager:
         self.is_active = False
         try:
             event_bus.unsubscribe(self.on_event)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def on_event(self, event: RuntimeEvent) -> None:
         """Processes a runtime event and decides whether to narrate."""
@@ -72,7 +73,7 @@ class NarrationManager:
         payload = event.payload or {}
         now = time.time()
 
-        narrative: Optional[str] = None
+        narrative: str | None = None
         is_priority = False
 
         if kind == "task.started":

@@ -6,20 +6,20 @@ import logging
 import re
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from google import genai
 from google.genai import types
 
+from kratos_agent.diagnostics.errors import error_from_exception
+from kratos_agent.master.supervisor import get_master_supervisor
+
 from .audio import AudioManager
 from .config import LiveConfig
 from .events import LiveState, LiveStatusHub
-from .router import LiveRouter
 from .lifecycle import LiveTurn, LiveTurnState
-from kratos_agent.diagnostics.errors import error_from_exception
-
-from kratos_agent.master.prompts import KRATOS_MASTER_SYSTEM_PROMPT
-from kratos_agent.master.supervisor import get_master_supervisor
+from .router import LiveRouter
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,12 @@ class LiveSession:
     def __init__(
         self,
         config: LiveConfig,
-        out_queue: asyncio.Queue[Dict[str, Any]],
+        out_queue: asyncio.Queue[dict[str, Any]],
         audio_manager: AudioManager,
         router: LiveRouter,
-        status_hub: Optional[LiveStatusHub] = None,
-        on_user_transcript: Optional[Callable[[str], None]] = None,
-        on_model_transcript: Optional[Callable[[str], None]] = None,
+        status_hub: LiveStatusHub | None = None,
+        on_user_transcript: Callable[[str], None] | None = None,
+        on_model_transcript: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config
         self.out_queue = out_queue
@@ -86,12 +86,12 @@ class LiveSession:
         self.is_running = False
         self._tasks: list[asyncio.Task[Any]] = []
         self._send_lock = asyncio.Lock()
-        self._turn_complete_event: Optional[asyncio.Event] = None
+        self._turn_complete_event: asyncio.Event | None = None
         self._turn_transcript_chunks: list[str] = []
         self._last_heartbeat: float = 0.0
         self._last_logged_error: str = ""
         self._last_logged_error_time: float = 0.0
-        self._active_live_turn: Optional[LiveTurn] = None
+        self._active_live_turn: LiveTurn | None = None
         self._pending_tool_tasks: set[asyncio.Task[Any]] = set()
         self._pending_mission_tool_ids: set[str] = set()
 
@@ -106,7 +106,7 @@ class LiveSession:
         if self.is_running and self.session is not None and text.strip():
             asyncio.create_task(self.send_narration(text.strip()))
 
-    def get_diagnostics(self) -> Dict[str, Any]:
+    def get_diagnostics(self) -> dict[str, Any]:
         """Return the latest sanitized Live/Slave diagnostic state."""
         now = time.time()
         heartbeat_age = None if self._last_heartbeat <= 0 else round(max(0.0, now - self._last_heartbeat), 3)
@@ -138,7 +138,7 @@ class LiveSession:
         name: str,
         call_id: str,
         turn_id: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
     ) -> None:
         """Execute a Gemini Live tool outside the receive loop and return its result asynchronously."""
         try:
@@ -204,7 +204,7 @@ class LiveSession:
                 self.status_hub.update(current_state=LiveState.EXECUTING)
 
     @staticmethod
-    def _normalize_interaction_status(value: Any) -> Optional[str]:
+    def _normalize_interaction_status(value: Any) -> str | None:
         """Normalize SDK enum/string values for Gemini 3.8 Live interaction lifecycle handling."""
         if value is None:
             return None
@@ -213,7 +213,7 @@ class LiveSession:
         return text or None
 
     @staticmethod
-    def _extract_interaction_status(response: Any) -> Optional[str]:
+    def _extract_interaction_status(response: Any) -> str | None:
         """Read interaction_status across SDK response layouts for forward compatibility."""
         value = getattr(response, "interaction_status", None)
         if value is None:
@@ -228,7 +228,7 @@ class LiveSession:
         return "extended-thinking" in self.config.model.lower()
 
     def _build_connect_config(self) -> types.LiveConnectConfig:
-        config: Dict[str, Any] = dict(
+        config: dict[str, Any] = dict(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -381,8 +381,8 @@ class LiveSession:
                             if self.on_model_transcript:
                                 try:
                                     self.on_model_transcript(text)
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.debug("Operation error suppressed: %s", exc)
 
                     in_tx = getattr(server_content, "input_transcription", None)
                     if in_tx and in_tx.text:
@@ -403,9 +403,12 @@ class LiveSession:
                             if self.on_user_transcript:
                                 try:
                                     self.on_user_transcript(text)
-                                except Exception:
-                                    pass
-                            from kratos_agent.output.voice import get_voice_buffer, get_tts_queue
+                                except Exception as exc:
+                                    logger.debug("Operation error suppressed: %s", exc)
+                            from kratos_agent.output.voice import (
+                                get_tts_queue,
+                                get_voice_buffer,
+                            )
                             get_voice_buffer().clear()
                             get_tts_queue().cancel_current()
 
@@ -421,8 +424,8 @@ class LiveSession:
                         if remaining_sentence and self.on_model_transcript:
                             try:
                                 self.on_model_transcript(remaining_sentence)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug("Operation error suppressed: %s", exc)
 
                     interaction_status = self._extract_interaction_status(response)
                     if interaction_status == "IDLE":
@@ -484,7 +487,7 @@ class LiveSession:
             # Wait for turn completion with timeout
             try:
                 await asyncio.wait_for(event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(f"[LiveSession] send_text_turn timed out after {timeout}s")
             return " ".join(self._turn_transcript_chunks).strip()
         finally:

@@ -1,7 +1,7 @@
 """Element selector query matching engine."""
 from __future__ import annotations
+
 import re
-from typing import Any, Dict, Optional, Tuple
 
 from kratos_agent.computer.gui.models import GUIElement
 
@@ -11,12 +11,12 @@ class ElementSelector:
 
     def __init__(
         self,
-        name: Optional[str] = None,
-        role: Optional[str] = None,
-        control_type: Optional[str] = None,
-        text: Optional[str] = None,
-        element_id: Optional[str] = None,
-        backend: Optional[str] = None,
+        name: str | None = None,
+        role: str | None = None,
+        control_type: str | None = None,
+        text: str | None = None,
+        element_id: str | None = None,
+        backend: str | None = None,
         regex: bool = False,
     ) -> None:
         self.name = name
@@ -27,7 +27,7 @@ class ElementSelector:
         self.backend = backend
         self.regex = regex
 
-    def matches(self, element: GUIElement) -> Tuple[bool, float]:
+    def matches(self, element: GUIElement) -> tuple[bool, float]:
         """Returns (matched: bool, score: float). Score is between 0.0 and 1.0."""
         score = 0.0
         weight_total = 0.0

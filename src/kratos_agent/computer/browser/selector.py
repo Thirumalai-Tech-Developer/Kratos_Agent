@@ -1,8 +1,8 @@
 """Browser backend selection based on priority hierarchy without unnecessary dependency checks."""
 from __future__ import annotations
+
 import logging
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger("kratos.browser.selector")
 
@@ -46,8 +46,8 @@ class BrowserBackendSelector:
             pb = PlaywrightBackend()
             if pb.is_available():
                 return BrowserBackendType.PLAYWRIGHT
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # 3. Fallback to native / GUI accessibility
         return BrowserBackendType.GUI_ACCESSIBILITY

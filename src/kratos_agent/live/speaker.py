@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from .events import LiveStatusHub
 
@@ -18,7 +18,7 @@ class SpeakerPlayer:
         audio_in_queue: asyncio.Queue[bytes],
         sample_rate: int = 24000,
         channels: int = 1,
-        status_hub: Optional[LiveStatusHub] = None,
+        status_hub: LiveStatusHub | None = None,
     ) -> None:
         self.audio_in_queue = audio_in_queue
         self.sample_rate = sample_rate
@@ -115,8 +115,8 @@ class SpeakerPlayer:
                 try:
                     self._stream.stop()
                     self._stream.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 self._stream = None
 
     async def _run_pyaudio(self) -> None:
@@ -147,8 +147,8 @@ class SpeakerPlayer:
             if pya:
                 try:
                     pya.terminate()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
             return
 
         try:
@@ -168,14 +168,14 @@ class SpeakerPlayer:
                 try:
                     self._stream.stop_stream()
                     self._stream.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 self._stream = None
             if pya:
                 try:
                     pya.terminate()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
     def stop(self) -> None:
         self.is_running = False
@@ -187,6 +187,6 @@ class SpeakerPlayer:
                 elif hasattr(self._stream, "stop_stream"):
                     self._stream.stop_stream()
                 self._stream.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self._stream = None

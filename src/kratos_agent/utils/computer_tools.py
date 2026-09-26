@@ -3,29 +3,33 @@ Provides real perception, input injection, window/app management, browser automa
 and autonomous task execution without stubs.
 """
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import hashlib
 import json
 import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.parse
 import urllib.request
 import uuid
-import shutil
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from kratos_agent.ccs.base import CapabilityUnavailable, Point, Rect, ActionResult
-from kratos_agent.ccs.discovery import get_computer_controller, get_capability_map
-from kratos_agent.core.evidence import Evidence, OutcomeAssertion
+from kratos_agent.ccs.base import CapabilityUnavailable, Point, Rect
+from kratos_agent.ccs.discovery import get_computer_controller
+from kratos_agent.core.evidence import OutcomeAssertion
 
 # ── 1. Perception Tools ───────────────────────────────────────────────────────
 
-def screenshot_capture(monitor: int = 1, region: Optional[Dict[str, int]] = None,
+def screenshot_capture(monitor: int = 1, region: dict[str, int] | None = None,
                        include_cursor: bool = False, downscale: int = 0) -> str:
     """Captures a screenshot of the specified monitor or region."""
     from kratos_agent.ccs.perception.screenshot import take_screenshot
@@ -35,7 +39,7 @@ def screenshot_capture(monitor: int = 1, region: Optional[Dict[str, int]] = None
 
 def computer_visual_diagnose(include_ocr: bool = True) -> str:
     """Captures a fresh visual diagnostic bundle for semantic visual problem solving."""
-    result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
+    result: dict[str, Any] = {"ok": True, "timestamp": time.time()}
     try:
         result["active_window"] = json.loads(active_window_info())
     except Exception as exc:
@@ -60,11 +64,11 @@ def computer_visual_diagnose(include_ocr: bool = True) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def screen_read_text(region: Optional[Dict[str, int]] = None, monitor: int = 1,
+def screen_read_text(region: dict[str, int] | None = None, monitor: int = 1,
                      lang: str = "en", dedupe: bool = False) -> str:
     """Runs OCR on the current screen or specified region."""
-    from kratos_agent.ccs.perception.screenshot import take_screenshot
     from kratos_agent.ccs.perception.ocr import OcrEngine
+    from kratos_agent.ccs.perception.screenshot import take_screenshot
     r = Rect(x=region["x"], y=region["y"], w=region["w"], h=region["h"]) if region else None
     data, ref = take_screenshot(monitor=monitor, region=r, persist=False)
     try:
@@ -75,7 +79,7 @@ def screen_read_text(region: Optional[Dict[str, int]] = None, monitor: int = 1,
     except CapabilityUnavailable as e:
         return f"OCR unavailable: {e.hint}"
 
-def ui_tree_dump(app: Optional[str] = None, window: Optional[str] = None,
+def ui_tree_dump(app: str | None = None, window: str | None = None,
                  max_depth: int = 12, max_nodes: int = 800, visible_only: bool = True) -> str:
     """Dumps the Accessibility/UI Automation tree for active windows."""
     if sys.platform == "win32":
@@ -84,7 +88,7 @@ def ui_tree_dump(app: Optional[str] = None, window: Optional[str] = None,
         return json.dumps([{"ref": n.ref, "role": n.role, "name": n.name, "rect": {"x": n.rect.x, "y": n.rect.y, "w": n.rect.w, "h": n.rect.h}} for n in nodes], indent=2)
     return json.dumps([], indent=2)
 
-def ui_find(query: str, app: Optional[str] = None, role: Optional[str] = None, index: int = 0) -> str:
+def ui_find(query: str, app: str | None = None, role: str | None = None, index: int = 0) -> str:
     """Finds a single UI element by name, query, or role."""
     if sys.platform == "win32":
         from kratos_agent.ccs.perception.a11y_windows import dump_ui_tree
@@ -96,7 +100,7 @@ def ui_find(query: str, app: Optional[str] = None, role: Optional[str] = None, i
             return json.dumps({"ref": target.ref, "role": target.role, "name": target.name, "center": {"x": target.rect.center.x, "y": target.rect.center.y}}, indent=2)
     return json.dumps({"error": f"Element '{query}' not found"}, indent=2)
 
-def ui_find_all(query: str, app: Optional[str] = None, role: Optional[str] = None, limit: int = 25) -> str:
+def ui_find_all(query: str, app: str | None = None, role: str | None = None, limit: int = 25) -> str:
     """Finds all matching UI elements."""
     if sys.platform == "win32":
         from kratos_agent.ccs.perception.a11y_windows import dump_ui_tree
@@ -112,7 +116,7 @@ def ui_read_element(ref: str) -> str:
     el = perception_cache.get_element(ref)
     return json.dumps(el or {"ref": ref, "status": "unknown"}, indent=2)
 
-def ui_invoke(ref: str, pattern: str = "Invoke", value: Optional[str] = None) -> str:
+def ui_invoke(ref: str, pattern: str = "Invoke", value: str | None = None) -> str:
     """Directly invokes a UI automation pattern without moving the mouse."""
     return json.dumps({"ok": True, "ref": ref, "pattern": pattern, "value": value}, indent=2)
 
@@ -127,10 +131,10 @@ def screen_wait_for(expectation: str, mode: str = "text", timeout: float = 20.0,
         time.sleep(poll)
     return json.dumps({"found": False, "matched": None}, indent=2)
 
-def screen_diff(ref_a: Optional[str] = None, ref_b: Optional[str] = None, threshold: float = 25.0) -> str:
+def screen_diff(ref_a: str | None = None, ref_b: str | None = None, threshold: float = 25.0) -> str:
     """Compares two screenshots to identify changed regions."""
-    from kratos_agent.ccs.perception.screenshot import take_screenshot
     from kratos_agent.ccs.perception.screen_diff import compute_screen_diff
+    from kratos_agent.ccs.perception.screenshot import take_screenshot
     f1, _ = take_screenshot(persist=False)
     time.sleep(0.1)
     f2, _ = take_screenshot()
@@ -156,13 +160,13 @@ def cursor_position() -> str:
     """Returns the current mouse cursor coordinates."""
     if sys.platform == "win32":
         import ctypes
-        import ctypes.wintypes as wintypes
+        from ctypes import wintypes
         pt = wintypes.POINT()
         ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
         return json.dumps({"x": pt.x, "y": pt.y}, indent=2)
     return json.dumps({"x": 0, "y": 0}, indent=2)
 
-def read_notifications(app: Optional[str] = None, limit: int = 20) -> str:
+def read_notifications(app: str | None = None, limit: int = 20) -> str:
     """Reads recent OS notifications."""
     return json.dumps([], indent=2)
 
@@ -184,8 +188,8 @@ def mouse_move(x: int, y: int, duration_ms: int = 0, style: str = "instant") -> 
     ctrl.mouse_move(x, y)
     return json.dumps({"ok": True, "action": "mouse_move", "x": x, "y": y}, indent=2)
 
-def mouse_click(x: Optional[int] = None, y: Optional[int] = None, ref: Optional[str] = None,
-                button: str = "left", clicks: int = 1, modifiers: Optional[List[str]] = None,
+def mouse_click(x: int | None = None, y: int | None = None, ref: str | None = None,
+                button: str = "left", clicks: int = 1, modifiers: list[str] | None = None,
                 style: str = "instant") -> str:
     """Clicks the mouse button at current position or specified coordinates."""
     if sys.platform == "win32":
@@ -200,11 +204,11 @@ def mouse_click(x: Optional[int] = None, y: Optional[int] = None, ref: Optional[
     ctrl.mouse_click(button=button, double=(clicks > 1))
     return json.dumps({"ok": True, "action": "mouse_click", "button": button}, indent=2)
 
-def mouse_double_click(x: Optional[int] = None, y: Optional[int] = None, ref: Optional[str] = None) -> str:
+def mouse_double_click(x: int | None = None, y: int | None = None, ref: str | None = None) -> str:
     """Double-clicks the left mouse button."""
     return mouse_click(x=x, y=y, ref=ref, button="left", clicks=2)
 
-def mouse_right_click(x: Optional[int] = None, y: Optional[int] = None, ref: Optional[str] = None) -> str:
+def mouse_right_click(x: int | None = None, y: int | None = None, ref: str | None = None) -> str:
     """Right-clicks the mouse button."""
     return mouse_click(x=x, y=y, ref=ref, button="right", clicks=1)
 
@@ -220,7 +224,7 @@ def mouse_drag(from_x: int, from_y: int, to_x: int, to_y: int, button: str = "le
     ctrl.mouse_drag(to_x, to_y)
     return json.dumps({"ok": True, "action": "mouse_drag"}, indent=2)
 
-def mouse_scroll(dy: int, dx: int = 0, x: Optional[int] = None, y: Optional[int] = None) -> str:
+def mouse_scroll(dy: int, dx: int = 0, x: int | None = None, y: int | None = None) -> str:
     """Scrolls the mouse wheel vertically or horizontally."""
     if sys.platform == "win32":
         from kratos_agent.ccs.input.windows import WindowsInputEngine
@@ -260,7 +264,7 @@ def key_hold(key: str, ms: int = 100) -> str:
     key_tap(key)
     return json.dumps({"ok": True, "action": "key_hold", "key": key, "ms": ms}, indent=2)
 
-def input_sequence(actions: List[Dict[str, Any]]) -> str:
+def input_sequence(actions: list[dict[str, Any]]) -> str:
     """Executes an ordered batch of input actions in a single atomic sequence."""
     results = []
     for a in actions:
@@ -293,13 +297,13 @@ def play_macro(name: str, speed: float = 1.0, loop: int = 1) -> str:
 
 # ── 3. Window & Desktop Tools ─────────────────────────────────────────────────
 
-def window_list(include_minimized: bool = True, app: Optional[str] = None) -> str:
+def window_list(include_minimized: bool = True, app: str | None = None) -> str:
     """Lists open application windows on the desktop."""
     ctrl = get_computer_controller()
     windows = ctrl.list_windows()
     return json.dumps([{"id": w.id, "title": w.title, "active": w.is_active} for w in windows], indent=2)
 
-def window_focus(handle: Optional[str] = None, title_regex: Optional[str] = None, app: Optional[str] = None) -> str:
+def window_focus(handle: str | None = None, title_regex: str | None = None, app: str | None = None) -> str:
     """Brings a window into focus by title regex or window handle."""
     ctrl = get_computer_controller()
     windows = ctrl.list_windows()
@@ -335,7 +339,7 @@ def window_arrange(layout: str = "tile_h") -> str:
     """Arranges windows according to a layout."""
     return json.dumps({"ok": True, "layout": layout}, indent=2)
 
-def virtual_desktop(action: str = "list", index: Optional[int] = None) -> str:
+def virtual_desktop(action: str = "list", index: int | None = None) -> str:
     """Manages virtual desktops."""
     return json.dumps({"ok": True, "action": action, "desktops": 1}, indent=2)
 
@@ -345,14 +349,14 @@ def wallpaper_set(path: str) -> str:
 
 # ── 4. Applications & Processes ───────────────────────────────────────────────
 
-def app_launch(target: str, args: Optional[List[str]] = None, cwd: Optional[str] = None,
+def app_launch(target: str, args: list[str] | None = None, cwd: str | None = None,
                elevated: bool = False, wait: bool = False) -> str:
     """Launches an application without shell interpolation, returning the needed assertion."""
     ctrl = get_computer_controller()
     success = ctrl.launch_application(target)
     return json.dumps({"ok": success, "target": target, "needs_assertion": {"kind": "process_running", "params": {"name": Path(target).name}}}, indent=2)
 
-def app_list_running(filter: Optional[str] = None) -> str:
+def app_list_running(filter: str | None = None) -> str:
     """Lists running desktop applications."""
     ctrl = get_computer_controller()
     apps = ctrl.list_applications()
@@ -360,13 +364,13 @@ def app_list_running(filter: Optional[str] = None) -> str:
         apps = [a for a in apps if filter.lower() in str(a).lower()]
     return json.dumps(apps, indent=2)
 
-def app_terminate(pid: Optional[int] = None, name: Optional[str] = None, force: bool = False) -> str:
+def app_terminate(pid: int | None = None, name: str | None = None, force: bool = False) -> str:
     """Terminates a process or application."""
     if pid:
         return process_kill(pid)
     return json.dumps({"ok": True, "name": name, "terminated": True}, indent=2)
 
-def app_wait(pid: Optional[int] = None, name: Optional[str] = None, timeout: float = 30.0) -> str:
+def app_wait(pid: int | None = None, name: str | None = None, timeout: float = 30.0) -> str:
     """Waits for an application to start or exit."""
     return json.dumps({"ok": True, "waited": True}, indent=2)
 
@@ -393,12 +397,12 @@ def app_switch(direction: str = "next") -> str:
     key_tap("alt+tab")
     return json.dumps({"ok": True, "action": "app_switch"}, indent=2)
 
-def app_command_palette(app: Optional[str] = None) -> str:
+def app_command_palette(app: str | None = None) -> str:
     """Opens the application command palette (Ctrl+Shift+P)."""
     key_tap("ctrl+shift+p")
     return json.dumps({"ok": True, "palette": "opened"}, indent=2)
 
-def process_list(filter: Optional[str] = None, limit: int = 50) -> str:
+def process_list(filter: str | None = None, limit: int = 50) -> str:
     """Lists running OS processes."""
     import psutil
     procs = []
@@ -422,7 +426,7 @@ def process_kill(pid: int) -> str:
     except Exception as e:
         return json.dumps({"ok": False, "error": str(e)}, indent=2)
 
-def process_resources(pid: Optional[int] = None) -> str:
+def process_resources(pid: int | None = None) -> str:
     """Samples CPU and memory usage of a process."""
     import psutil
     try:
@@ -433,7 +437,7 @@ def process_resources(pid: Optional[int] = None) -> str:
 
 # ── 5. Real Terminal Tools ───────────────────────────────────────────────────
 
-def terminal_open(shell: str = "auto", cwd: Optional[str] = None, elevated: bool = False) -> str:
+def terminal_open(shell: str = "auto", cwd: str | None = None, elevated: bool = False) -> str:
     """Opens a visible terminal session."""
     session_id = f"term_{int(time.time())}"
     return json.dumps({"ok": True, "session_id": session_id, "shell": shell}, indent=2)
@@ -465,8 +469,9 @@ def system_info() -> str:
 
 def system_elevate(command: str, wait: bool = True) -> str:
     """Executes a command with elevated administrator privileges."""
-    from kratos_agent.utils.shell_quote import argv_for
     import subprocess
+
+    from kratos_agent.utils.shell_quote import argv_for
     argv = argv_for("powershell", f"Start-Process powershell -Verb RunAs -ArgumentList '-Command {command}'")
     subprocess.Popen(argv, shell=False)
     return json.dumps({"ok": True, "elevated": True, "command": command}, indent=2)
@@ -483,7 +488,7 @@ def service_control(name: str, action: str = "status") -> str:
     """Queries or controls OS background services."""
     return json.dumps({"service": name, "action": action, "status": "running"}, indent=2)
 
-def registry_read(hive: str, key: str, value: Optional[str] = None) -> str:
+def registry_read(hive: str, key: str, value: str | None = None) -> str:
     """Reads a Windows registry value."""
     if sys.platform == "win32":
         import winreg
@@ -500,11 +505,11 @@ def registry_write(hive: str, key: str, value: str, data: str, type: str = "REG_
     """Writes a value to the Windows registry."""
     return json.dumps({"ok": True, "hive": hive, "key": key, "written": True}, indent=2)
 
-def registry_delete(hive: str, key: str, value: Optional[str] = None) -> str:
+def registry_delete(hive: str, key: str, value: str | None = None) -> str:
     """Deletes a Windows registry key or value."""
     return json.dumps({"ok": True, "deleted": key}, indent=2)
 
-def env_var(action: str = "get", name: Optional[str] = None, value: Optional[str] = None, scope: str = "user") -> str:
+def env_var(action: str = "get", name: str | None = None, value: str | None = None, scope: str = "user") -> str:
     """Gets or sets environment variables."""
     if action == "get" and name:
         return json.dumps({name: os.environ.get(name, "")}, indent=2)
@@ -513,15 +518,15 @@ def env_var(action: str = "get", name: Optional[str] = None, value: Optional[str
         return json.dumps({"ok": True, name: value}, indent=2)
     return json.dumps(dict(os.environ), indent=2)
 
-def schedule_task(action: str = "list", name: Optional[str] = None, command: Optional[str] = None) -> str:
+def schedule_task(action: str = "list", name: str | None = None, command: str | None = None) -> str:
     """Manages scheduled tasks."""
     return json.dumps({"ok": True, "action": action, "tasks": []}, indent=2)
 
-def startup_entry(action: str = "list", name: Optional[str] = None, command: Optional[str] = None) -> str:
+def startup_entry(action: str = "list", name: str | None = None, command: str | None = None) -> str:
     """Manages startup entries."""
     return json.dumps({"ok": True, "action": action, "entries": []}, indent=2)
 
-def file_open(path: str, app: Optional[str] = None) -> str:
+def file_open(path: str, app: str | None = None) -> str:
     """Opens a file with its default application."""
     if sys.platform == "win32":
         os.startfile(path)
@@ -560,7 +565,7 @@ def shortcut_create(path: str, target: str) -> str:
     """Creates a desktop or start menu shortcut."""
     return json.dumps({"ok": True, "shortcut": path, "target": target}, indent=2)
 
-def volume_control(action: str = "get", value: Optional[int] = None) -> str:
+def volume_control(action: str = "get", value: int | None = None) -> str:
     """Controls or queries system audio volume."""
     return json.dumps({"ok": True, "volume": value or 50, "muted": False}, indent=2)
 
@@ -577,7 +582,7 @@ def network_info() -> str:
     ip = socket.gethostbyname(hostname)
     return json.dumps({"hostname": hostname, "ip": ip}, indent=2)
 
-def wifi_control(action: str = "scan", ssid: Optional[str] = None) -> str:
+def wifi_control(action: str = "scan", ssid: str | None = None) -> str:
     """Scans or manages Wi-Fi connections."""
     return json.dumps({"ok": True, "action": action, "networks": []}, indent=2)
 
@@ -585,7 +590,7 @@ def bluetooth_control(action: str = "scan") -> str:
     """Scans or manages Bluetooth devices."""
     return json.dumps({"ok": True, "action": action, "devices": []}, indent=2)
 
-def hosts_file_edit(action: str = "list", hostname: Optional[str] = None, ip: Optional[str] = None) -> str:
+def hosts_file_edit(action: str = "list", hostname: str | None = None, ip: str | None = None) -> str:
     """Reads or edits the OS hosts file."""
     return json.dumps({"ok": True, "action": action}, indent=2)
 
@@ -603,13 +608,13 @@ def clipboard_restore(content: str) -> str:
     """Restores prior clipboard text."""
     return clipboard_set(content)
 
-def disk_info(path: Optional[str] = None) -> str:
+def disk_info(path: str | None = None) -> str:
     """Returns disk usage and partition information."""
     import shutil
     usage = shutil.disk_usage(path or ".")
     return json.dumps({"total_gb": round(usage.total / 1073741824, 1), "used_gb": round(usage.used / 1073741824, 1), "free_gb": round(usage.free / 1073741824, 1)}, indent=2)
 
-def disk_cleanup(targets: Optional[List[str]] = None) -> str:
+def disk_cleanup(targets: list[str] | None = None) -> str:
     """Cleans Kratos screenshot evidence and temporary partial downloads."""
     from kratos_agent.ccs.perception.screenshot import cleanup_frame_store
     result = {"frames": cleanup_frame_store()}
@@ -635,19 +640,19 @@ def browser_open(url: str, browser: str = "chrome", profile: str = "Default") ->
     res = b_open(url, browser=browser, profile=profile)
     return json.dumps({"ok": res.ok, "data": res.data, "needs_assertion": {"kind": res.needs_assertion.kind, "params": res.needs_assertion.params} if res.needs_assertion else None}, indent=2)
 
-def browser_navigate(action: str = "reload", url: Optional[str] = None) -> str:
+def browser_navigate(action: str = "reload", url: str | None = None) -> str:
     """Navigates the browser: back, forward, reload, or goto."""
     from kratos_agent.ccs.browser.cdp import cdp_client
     if url:
         cdp_client.navigate(url)
     return json.dumps({"ok": True, "action": action, "url": url}, indent=2)
 
-def browser_tab(action: str = "list", index: Optional[int] = None, url: Optional[str] = None) -> str:
+def browser_tab(action: str = "list", index: int | None = None, url: str | None = None) -> str:
     """Manages browser tabs."""
     return json.dumps({"ok": True, "action": action, "tabs": 1}, indent=2)
 
-def browser_click(selector: Optional[str] = None, ref: Optional[str] = None,
-                  x: Optional[int] = None, y: Optional[int] = None) -> str:
+def browser_click(selector: str | None = None, ref: str | None = None,
+                  x: int | None = None, y: int | None = None) -> str:
     """Clicks a browser element by DOM selector; coordinates are not supported."""
     if x is not None or y is not None:
         return json.dumps({"ok": False, "action": "browser_click", "detail": "Coordinate input is disabled; provide a DOM selector."}, indent=2)
@@ -657,14 +662,14 @@ def browser_click(selector: Optional[str] = None, ref: Optional[str] = None,
         return json.dumps({"ok": res.ok, "selector": selector}, indent=2)
     return json.dumps({"ok": False, "action": "browser_click", "detail": "A DOM selector is required; pointer fallback is disabled."}, indent=2)
 
-def browser_type(text: str, selector: Optional[str] = None, ref: Optional[str] = None, clear: bool = True) -> str:
+def browser_type(text: str, selector: str | None = None, ref: str | None = None, clear: bool = True) -> str:
     """Types text into an input field in the browser."""
     from kratos_agent.ccs.browser.cdp import cdp_client
     if selector and cdp_client.is_available():
         cdp_client.click(selector)
     return type_text(text)
 
-def browser_read(mode: str = "markdown", selector: Optional[str] = None) -> str:
+def browser_read(mode: str = "markdown", selector: str | None = None) -> str:
     """Reads text, markdown, or DOM snapshot from the browser."""
     from kratos_agent.ccs.browser.cdp import cdp_client
     if cdp_client.is_available():
@@ -682,7 +687,7 @@ def browser_snapshot_dom() -> str:
     """Captures a snapshot of the browser DOM structure."""
     return browser_read(mode="markdown")
 
-def browser_fill_form(fields: List[Dict[str, Any]]) -> str:
+def browser_fill_form(fields: list[dict[str, Any]]) -> str:
     """Fill browser form fields through the semantic browser driver."""
     from kratos_agent.computer.browser.playwright import PlaywrightDriver
     driver = PlaywrightDriver()
@@ -713,7 +718,7 @@ def _unique_destination(path: Path, overwrite: bool) -> Path:
     raise RuntimeError("Could not allocate a unique download filename.")
 
 
-def download_file(url: str, destination_dir: Optional[str] = None, filename: Optional[str] = None,
+def download_file(url: str, destination_dir: str | None = None, filename: str | None = None,
                   overwrite: bool = False, timeout: float = 60.0,
                   max_bytes: int = 512 * 1024 * 1024) -> str:
     """Download an HTTP(S) resource safely with atomic writes and SHA-256 evidence."""
@@ -761,12 +766,12 @@ def download_file(url: str, destination_dir: Optional[str] = None, filename: Opt
         if temp_path:
             try:
                 temp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2)
 
 
-def download_many(urls: List[str], destination_dir: Optional[str] = None, overwrite: bool = False,
+def download_many(urls: list[str], destination_dir: str | None = None, overwrite: bool = False,
                   concurrency: int = 3, max_bytes: int = 512 * 1024 * 1024) -> str:
     """Download several HTTP(S) resources concurrently with the same safety limits."""
     if not urls:
@@ -789,7 +794,7 @@ def download_many(urls: List[str], destination_dir: Optional[str] = None, overwr
     }, indent=2, ensure_ascii=False)
 
 
-def browser_download(url: Optional[str] = None, dest: Optional[str] = None) -> str:
+def browser_download(url: str | None = None, dest: str | None = None) -> str:
     """Download a browser URL through the same safe downloader."""
     if not url:
         return json.dumps({"ok": False, "error": "url is required."}, indent=2)
@@ -800,8 +805,8 @@ def browser_download(url: Optional[str] = None, dest: Optional[str] = None) -> s
     return download_file(url, dest)
 
 
-def cleanup_screenshot_frames(max_count: Optional[int] = None, max_bytes: Optional[int] = None,
-                              max_age_s: Optional[int] = None) -> str:
+def cleanup_screenshot_frames(max_count: int | None = None, max_bytes: int | None = None,
+                              max_age_s: int | None = None) -> str:
     """Prune persisted screenshot evidence using the bounded retention policy."""
     from kratos_agent.ccs.perception.screenshot import cleanup_frame_store
     return json.dumps(cleanup_frame_store(max_count=max_count, max_bytes=max_bytes, max_age_s=max_age_s), indent=2)
@@ -822,7 +827,10 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
         if sys.platform != "win32":
             return None
         try:
-            import ctypes, psutil
+            import ctypes
+
+            import psutil
+
             from kratos_agent.computer.apps.windows import get_window_manager
             user32 = ctypes.windll.user32
             for w in get_window_manager().list_windows(include_minimized=False):
@@ -834,8 +842,8 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
                 except Exception: proc = ""
                 if not any(x in proc for x in ("chrome", "msedge", "brave", "chromium")):
                     return {"hwnd": hwnd, "pid": pid.value, "title": w.title, "bounds": getattr(w, "bounds", {})}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         return None
 
     # Prefer a real Windows WhatsApp desktop window when one already exists.
@@ -891,12 +899,15 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
     else:
         native_error=None
 
-    def windows_uia_whatsapp_fallback() -> Optional[Dict[str, Any]]:
+    def windows_uia_whatsapp_fallback() -> dict[str, Any] | None:
         """Use an already-open WhatsApp tab through Windows UI Automation when CDP is unavailable."""
         if sys.platform != "win32":
             return None
         try:
-            from kratos_agent.computer.apps.windows import get_window_manager, enumerate_chrome_windows
+            from kratos_agent.computer.apps.windows import (
+                enumerate_chrome_windows,
+                get_window_manager,
+            )
             from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
             from kratos_agent.computer.gui.input.keyboard import KeyboardEngine
 
@@ -1154,7 +1165,7 @@ def external_agent_discover() -> str:
     return json.dumps({"ok":True,"agents":found},indent=2,ensure_ascii=False)
 
 
-def external_agent_run(agent: str, prompt: str, cwd: Optional[str] = None, timeout: int = 900) -> str:
+def external_agent_run(agent: str, prompt: str, cwd: str | None = None, timeout: int = 900) -> str:
     """Run an installed external coding agent through a non-interactive CLI interface."""
     agent=str(agent).strip().lower(); prompt=str(prompt)
     if not agent or not prompt: return json.dumps({"ok":False,"error":"agent and prompt are required."},indent=2)
@@ -1199,8 +1210,8 @@ def browser_wait_for(condition: str, mode: str = "load", timeout: float = 20.0) 
                 return json.dumps({"ok": False, "met": False, "error": f"Unsupported mode: {mode}"}, indent=2)
             if value:
                 return json.dumps({"ok": True, "met": True, "condition": condition, "mode": mode}, indent=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         time.sleep(0.25)
     return json.dumps({"ok": True, "met": False, "condition": condition, "mode": mode, "timeout": timeout}, indent=2)
 
@@ -1231,11 +1242,11 @@ def browser_state() -> str:
         return json.dumps({"url": url, "title": title, "connected": True}, indent=2)
     return json.dumps({"connected": False}, indent=2)
 
-def browser_dialog(action: str = "accept", text: Optional[str] = None) -> str:
+def browser_dialog(action: str = "accept", text: str | None = None) -> str:
     """Handles browser dialogs (alerts, prompts, confirms)."""
     return json.dumps({"ok": True, "action": action}, indent=2)
 
-def browser_screenshot(full_page: bool = False, selector: Optional[str] = None) -> str:
+def browser_screenshot(full_page: bool = False, selector: str | None = None) -> str:
     """Captures a screenshot of the browser view."""
     return screenshot_capture()
 
@@ -1268,7 +1279,7 @@ def verify_gui_state(expectation: str, evidence: str = "text") -> str:
     return json.dumps({"met": False, "expectation": expectation, "evidence": evidence}, indent=2)
 
 
-def gui_explore(app: Optional[str] = None, depth: int = 3) -> str:
+def gui_explore(app: str | None = None, depth: int = 3) -> str:
     """Walks menus and windows to map the UI structure of an application."""
     return ui_tree_dump(app=app, max_depth=depth)
 
@@ -1281,10 +1292,9 @@ def undo_last_operation() -> str:
     key_tap("ctrl+z")
     return json.dumps({"ok": True, "undone": True}, indent=2)
 
-def verify_outcome(assertion: Dict[str, Any], fresh: bool = True) -> str:
+def verify_outcome(assertion: dict[str, Any], fresh: bool = True) -> str:
     """Directly verifies an outcome assertion against live system state."""
     from kratos_agent.ccs.assertions import assertion_runner
-    from kratos_agent.core.evidence import OutcomeAssertion
     oa = OutcomeAssertion(
         kind=assertion.get("kind", "outcome"),
         params=assertion.get("params", {}),
@@ -1296,7 +1306,7 @@ def verify_outcome(assertion: Dict[str, Any], fresh: bool = True) -> str:
     ev = assertion_runner.run(ctrl, oa)
     return json.dumps(ev.to_model_dict(), indent=2)
 
-def detect_blockers(frame_ref: Optional[str] = None, scope: str = "screen") -> str:
+def detect_blockers(frame_ref: str | None = None, scope: str = "screen") -> str:
     """Detects modal dialogs, cookie consent banners, or YouTube bot walls."""
     from kratos_agent.ccs.perception.blockers import detect_blockers as d_blockers
     ctrl = get_computer_controller()
@@ -1316,7 +1326,7 @@ def media_probe(selector: str = "video", samples: int = 2, gap_ms: int = 1500) -
     res = m_probe(selector=selector, samples=samples, gap_ms=gap_ms)
     return json.dumps(res, indent=2)
 
-def media_control_verify(action: str, value: Optional[Any] = None, selector: str = "video") -> str:
+def media_control_verify(action: str, value: Any | None = None, selector: str = "video") -> str:
     """Controls media playback and immediately verifies state via media_probe."""
     from kratos_agent.ccs.browser import media_control_verify as m_ctrl
     res = m_ctrl(action=action, value=value, selector=selector)
@@ -1350,7 +1360,7 @@ def gui_mouse(action: str, x: int = 0, y: int = 0, button: str = "left", clicks:
     """Deprecated: raw host pointer input is disabled; use semantic controls or keyboard tools."""
     return json.dumps({"ok": False, "action": action, "detail": "Raw pointer control is disabled; use accessible controls or keyboard input."}, indent=2)
 
-def gui_keyboard(action: str, text: str = "", keys: Optional[List[str]] = None) -> str:
+def gui_keyboard(action: str, text: str = "", keys: list[str] | None = None) -> str:
     """Controls the host keyboard. Actions: type, press."""
     ctrl = get_computer_controller()
     if action == "type":
@@ -1395,35 +1405,3 @@ def application_manager(action: str, app_name: str = "") -> str:
 
 
 # ── 10. Universal Computer-Use Engine Tools ──────────────────────────────────
-from kratos_agent.computer.tools import (
-    computer_observe,
-    computer_inspect,
-    computer_find,
-    computer_click,
-    computer_type,
-    computer_press,
-    computer_hotkey,
-    computer_scroll,
-    computer_focus,
-    computer_launch,
-    computer_close,
-    computer_window_list,
-    computer_window_focus,
-    computer_screenshot,
-    computer_clipboard_read,
-    computer_clipboard_write,
-    gui_find,
-    gui_click,
-    gui_type,
-    computer_browser_navigate,
-    computer_browser_read,
-    computer_browser_click,
-    computer_browser_type,
-    computer_file_list,
-    computer_file_read,
-    computer_file_write,
-    computer_file_move,
-    computer_file_copy,
-    computer_file_delete,
-    computer_process_list,
-)

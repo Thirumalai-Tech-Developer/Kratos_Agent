@@ -1,22 +1,24 @@
 """Focus management and active window arbiter."""
 from __future__ import annotations
-import sys
-from typing import Optional
 
-from kratos_agent.computer.gui.models import WindowInfo
-from kratos_agent.computer.apps.windows import get_window_manager
+import logging
+logger = logging.getLogger(__name__)
+
+import sys
 
 from kratos_agent.computer.apps.focus_policy import FocusPolicy
+from kratos_agent.computer.apps.windows import get_window_manager
+from kratos_agent.computer.gui.models import WindowInfo
 
 try:
     import pygetwindow as gw
 except ImportError:
     gw = None
 
-_previous_foreground_handle: Optional[str] = None
+_previous_foreground_handle: str | None = None
 
 
-def get_active_window() -> Optional[WindowInfo]:
+def get_active_window() -> WindowInfo | None:
     """Returns the current foreground active window."""
     if sys.platform == "win32" and gw:
         try:
@@ -29,8 +31,8 @@ def get_active_window() -> Optional[WindowInfo]:
                     is_active=True,
                     bounds={"x": win.left, "y": win.top, "w": win.width, "h": win.height},
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     windows = get_window_manager().list_windows()
     for w in windows:
@@ -45,15 +47,15 @@ def set_focus(target: str) -> bool:
     return res.ok
 
 
-def get_current_foreground_hwnd() -> Optional[int]:
+def get_current_foreground_hwnd() -> int | None:
     """Returns the actual physical foreground window HWND (§7)."""
     if sys.platform == "win32":
         try:
             import ctypes
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             return int(hwnd) if hwnd else None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
     active = get_active_window()
     if active and str(active.id).isdigit():
         return int(active.id)
@@ -80,8 +82,8 @@ def recover_foreground(expected_hwnd: int | str) -> bool:
             actual_hwnd = get_current_foreground_hwnd()
             if actual_hwnd == target_int:
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     return False
 

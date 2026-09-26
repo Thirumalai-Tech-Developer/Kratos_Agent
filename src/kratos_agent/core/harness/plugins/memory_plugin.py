@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
 if TYPE_CHECKING:
-    from ..kernel import HarnessKernel
     from kratos_agent.core.cognitive_memory import CognitiveMemoryStore
+
+    from ..kernel import HarnessKernel
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class MemoryPlugin(HarnessPlugin):
     """Provides cognitive memory capabilities across working, episodic, semantic, and procedural stores."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(
             metadata=PluginMetadata(
                 name="memory",
@@ -27,9 +28,9 @@ class MemoryPlugin(HarnessPlugin):
             ),
             config=config,
         )
-        self._local_cognitive_store: Optional["CognitiveMemoryStore"] = None
+        self._local_cognitive_store: CognitiveMemoryStore | None = None
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
         kernel.register_service("memory", self)
 
@@ -38,7 +39,7 @@ class MemoryPlugin(HarnessPlugin):
             self.kernel.unregister_service("memory")
         super().on_unload()
 
-    def _get_store(self) -> Optional["CognitiveMemoryStore"]:
+    def _get_store(self) -> CognitiveMemoryStore | None:
         """Obtain CognitiveMemoryStore from runtime or local fallback."""
         if self.kernel and self.kernel.runtime:
             runtime_mem = getattr(self.kernel.runtime, "memory", None)
@@ -62,9 +63,9 @@ class MemoryPlugin(HarnessPlugin):
         tier: str,
         content: str,
         importance: float = 0.5,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
-    ) -> Optional[str]:
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+    ) -> str | None:
         """Save a memory record into the designated cognitive tier."""
         store = self._get_store()
         if not store:
@@ -82,10 +83,10 @@ class MemoryPlugin(HarnessPlugin):
 
     def read(
         self,
-        tier: Optional[str] = None,
+        tier: str | None = None,
         limit: int = 10,
-        query: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve memories filtered by tier and optional keyword search."""
         store = self._get_store()
         if not store:
@@ -93,7 +94,7 @@ class MemoryPlugin(HarnessPlugin):
         records = store.search(tier=tier, query=query, limit=limit)
         return [r.to_dict() for r in records]
 
-    def clear(self, tier: Optional[str] = None) -> int:
+    def clear(self, tier: str | None = None) -> int:
         """Clear memories in a tier or all tiers."""
         store = self._get_store()
         if not store:

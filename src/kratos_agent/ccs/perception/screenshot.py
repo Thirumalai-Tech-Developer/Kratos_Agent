@@ -1,13 +1,15 @@
 """Bounded screen capture persistence."""
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import io
 import os
 import threading
 import time
-from pathlib import Path
-from typing import Optional, Tuple
 import uuid
+from pathlib import Path
 
 try:
     from mss import mss
@@ -16,6 +18,7 @@ except ImportError:
     _HAS_MSS = False
 
 from PIL import Image, ImageDraw
+
 from kratos_agent.ccs.base import Rect
 
 _FRAME_LOCK = threading.Lock()
@@ -31,12 +34,12 @@ def _env_int(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
-def get_frame_store_dir(save_dir: Optional[Path] = None) -> Path:
+def get_frame_store_dir(save_dir: Path | None = None) -> Path:
     return Path(save_dir or os.getenv("KRATOS_FRAME_DIR") or _DEFAULT_FRAME_DIR).expanduser()
 
-def cleanup_frame_store(save_dir: Optional[Path] = None, keep_refs: Optional[set[str]] = None,
-                       max_count: Optional[int] = None, max_bytes: Optional[int] = None,
-                       max_age_s: Optional[int] = None) -> dict:
+def cleanup_frame_store(save_dir: Path | None = None, keep_refs: set[str] | None = None,
+                       max_count: int | None = None, max_bytes: int | None = None,
+                       max_age_s: int | None = None) -> dict:
     """Delete old screenshot evidence so frame storage remains bounded."""
     root = get_frame_store_dir(save_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -82,10 +85,10 @@ def cleanup_frame_store(save_dir: Optional[Path] = None, keep_refs: Optional[set
         "max_age_s": max_age_s,
     }
 
-def take_screenshot(monitor: Optional[int] = None, region: Optional[Rect] = None,
-                    max_long_edge: int = 1568, save_dir: Optional[Path] = None,
+def take_screenshot(monitor: int | None = None, region: Rect | None = None,
+                    max_long_edge: int = 1568, save_dir: Path | None = None,
                     include_cursor: bool = False, downscale: int = 0,
-                    persist: bool = True) -> Tuple[bytes, str]:
+                    persist: bool = True) -> tuple[bytes, str]:
     """Capture a screenshot and optionally persist it as bounded evidence."""
     img = None
     if _HAS_MSS:
@@ -123,8 +126,8 @@ def take_screenshot(monitor: Optional[int] = None, region: Optional[Rect] = None
             import pyautogui
             x, y = pyautogui.position()
             ImageDraw.Draw(img).ellipse((max(0, x-5), max(0, y-5), min(img.width, x+5), min(img.height, y+5)), outline="red", width=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

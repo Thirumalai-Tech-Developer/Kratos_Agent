@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
 
 from kratos_agent.core.errors import KratosError
 
@@ -104,7 +103,7 @@ class ErrorPipeline:
     """Central registry and dispatcher for errors occurring across Kratos."""
 
     def __init__(self) -> None:
-        self._recent_errors: List[KratosError] = []
+        self._recent_errors: list[KratosError] = []
         self._max_history = 50
 
     def record_error(self, error: KratosError) -> ErrorCategory:
@@ -127,7 +126,7 @@ class ErrorPipeline:
         return error
 
 
-    def get_recent_errors(self, subsystem: Optional[str] = None) -> List[KratosError]:
+    def get_recent_errors(self, subsystem: str | None = None) -> list[KratosError]:
         if subsystem:
             return [e for e in self._recent_errors if e.subsystem.lower() == subsystem.lower()]
         return list(self._recent_errors)
@@ -136,7 +135,7 @@ class ErrorPipeline:
         self._recent_errors.clear()
 
 
-_global_error_pipeline: Optional[ErrorPipeline] = None
+_global_error_pipeline: ErrorPipeline | None = None
 
 
 def get_error_pipeline() -> ErrorPipeline:

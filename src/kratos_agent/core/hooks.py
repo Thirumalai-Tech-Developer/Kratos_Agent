@@ -18,10 +18,14 @@ Placeholders: {tool}, {input}, {output}, {session_id}
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 from rich.console import Console
 
@@ -36,8 +40,8 @@ class HookRegistry:
     """Loads and fires pre/post tool hooks from .kratos/hooks.json."""
 
     def __init__(self):
-        self._hooks: Dict[str, List[Dict]] = {e: [] for e in HOOK_EVENTS}
-        self._python_hooks: Dict[str, List[Callable]] = {e: [] for e in HOOK_EVENTS}
+        self._hooks: dict[str, list[dict]] = {e: [] for e in HOOK_EVENTS}
+        self._python_hooks: dict[str, list[Callable]] = {e: [] for e in HOOK_EVENTS}
         self._load()
 
     def _load(self):
@@ -49,15 +53,15 @@ class HookRegistry:
                     raw = data.get(event, [])
                     if isinstance(raw, list):
                         self._hooks[event] = raw
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     def register(self, event: str, fn: Callable):
         """Register a Python callable hook for an event."""
         if event in self._python_hooks:
             self._python_hooks[event].append(fn)
 
-    def _render_template(self, template: str, ctx: Dict[str, Any]) -> str:
+    def _render_template(self, template: str, ctx: dict[str, Any]) -> str:
         """Replace {placeholders} in hook command template."""
         for key, val in ctx.items():
             template = template.replace(f"{{{key}}}", str(val)[:200])
@@ -92,6 +96,7 @@ class HookRegistry:
                 try:
                     cmd = self._render_template(cmd_template, ctx)
                     import sys
+
                     from kratos_agent.utils.shell_quote import argv_for
                     shell_type = "powershell" if sys.platform == "win32" else "bash"
                     argv = argv_for(shell_type, cmd)
@@ -134,8 +139,8 @@ class HookRegistry:
             HOOKS_FILE.parent.mkdir(parents=True, exist_ok=True)
             HOOKS_FILE.write_text(json.dumps(example, indent=2), encoding="utf-8")
             console.print(f"[dim]Created example hooks file: {HOOKS_FILE}[/dim]")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
 
 # Global singleton

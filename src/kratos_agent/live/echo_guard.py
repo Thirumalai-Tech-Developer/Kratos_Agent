@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Optional
 
 
 class VoiceSource(str, Enum):
@@ -42,7 +41,7 @@ class VoiceEchoGuard:
         return source == VoiceSource.USER_MIC
 
 
-_echo_guard: Optional[VoiceEchoGuard] = None
+_echo_guard: VoiceEchoGuard | None = None
 
 
 def get_echo_guard() -> VoiceEchoGuard:

@@ -2,6 +2,7 @@
 There is no universal quoting rule; anyone who tells you otherwise has not met PowerShell.
 """
 from __future__ import annotations
+
 import base64
 import re
 import shlex

@@ -1,8 +1,8 @@
 """Operating-system shell detection and capability discovery."""
 from __future__ import annotations
+
 import shutil
 import sys
-from typing import Optional
 
 from kratos_agent.system.shell.base import ShellInfo
 
@@ -56,7 +56,7 @@ def detect_shell() -> ShellInfo:
     )
 
 
-_current_shell: Optional[ShellInfo] = None
+_current_shell: ShellInfo | None = None
 
 
 def get_current_shell() -> ShellInfo:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
 def build_semantic_context(
@@ -10,11 +10,11 @@ def build_semantic_context(
     active_application: str | None = None,
     active_browser: str | None = None,
     active_tab: str | None = None,
-    task_state: Dict[str, Any] | None = None,
-    recent_events: list[Dict[str, Any]] | None = None,
-    memory: Dict[str, Any] | None = None,
-    capabilities: list[Dict[str, Any]] | None = None,
-) -> Dict[str, Any]:
+    task_state: dict[str, Any] | None = None,
+    recent_events: list[dict[str, Any]] | None = None,
+    memory: dict[str, Any] | None = None,
+    capabilities: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "current_request": current_request,
         "current_screen_summary": screen_summary,

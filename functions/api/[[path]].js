@@ -5,6 +5,8 @@
 
 import { handleApi, corsHeaders, getSchemaSql } from "../../worker.js";
 
+let schemaInitialized = false;
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -18,14 +20,28 @@ export async function onRequest(context) {
   }
 
   // Auto-initialize D1 schema on first run if DB is bound
-  if (env.DB && !env._schema_initialized) {
+  if (env.DB && !schemaInitialized) {
     try {
-      const statements = getSchemaSql().split(";").map(s => s.trim()).filter(Boolean);
+      const rawSql = getSchemaSql();
+      const statements = rawSql
+        .replace(/--.*$/gm, "")
+        .split(/;\s*$/m)
+        .map(s => s.trim())
+        .filter(Boolean);
       for (const st of statements) {
-        await env.DB.prepare(st).run().catch(() => {});
+        await env.DB.prepare(st).run();
       }
-      env._schema_initialized = true;
-    } catch (_) {}
+      schemaInitialized = true;
+    } catch (err) {
+      console.error("D1 schema initialization failed:", err);
+      return new Response(JSON.stringify({ error: `D1 schema initialization failed: ${err.message || err}` }), {
+        status: 500,
+        headers: {
+          ...corsHeaders(),
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
   }
 
   try {

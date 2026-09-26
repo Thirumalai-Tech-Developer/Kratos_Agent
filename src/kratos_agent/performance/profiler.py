@@ -1,14 +1,15 @@
 """Performance telemetry, latency budgeting, and profiling for Kratos Agent."""
 from __future__ import annotations
+
 import logging
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional
+from dataclasses import dataclass
 
 logger = logging.getLogger("kratos.perf")
 
-LATENCY_BUDGET: Dict[str, float] = {
+LATENCY_BUDGET: dict[str, float] = {
     "routing_ms": 50.0,
     "memory_ms": 100.0,
     "observation_ms": 150.0,
@@ -107,7 +108,7 @@ class Profiler:
         return self.metrics
 
 
-_current_profiler: Optional[Profiler] = None
+_current_profiler: Profiler | None = None
 
 
 def get_active_profiler() -> Profiler:

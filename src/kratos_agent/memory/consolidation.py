@@ -1,9 +1,9 @@
 """Memory deduplication, consolidation, and importance gating."""
 from __future__ import annotations
-import re
-from typing import Dict, List, Set, Tuple
 
-from kratos_agent.memory.models import MemoryRecord, MemoryLayer
+import re
+
+from kratos_agent.memory.models import MemoryLayer, MemoryRecord
 
 
 def normalize_text(text: str) -> str:
@@ -27,9 +27,9 @@ def should_store(record: MemoryRecord) -> bool:
     return True
 
 
-def deduplicate_records(records: List[MemoryRecord]) -> List[MemoryRecord]:
+def deduplicate_records(records: list[MemoryRecord]) -> list[MemoryRecord]:
     """Merges semantically identical memories into canonical records (§31)."""
-    seen: Dict[str, MemoryRecord] = {}
+    seen: dict[str, MemoryRecord] = {}
 
     for rec in records:
         norm = normalize_text(rec.content)
@@ -48,7 +48,7 @@ def deduplicate_records(records: List[MemoryRecord]) -> List[MemoryRecord]:
     return list(seen.values())
 
 
-def consolidate_memories(records: List[MemoryRecord], min_confidence: float = 0.15) -> List[MemoryRecord]:
+def consolidate_memories(records: list[MemoryRecord], min_confidence: float = 0.15) -> list[MemoryRecord]:
     """Consolidates memory store: deduplicates, removes stale/unreliable records (§32)."""
     valid = [r for r in records if r.confidence >= min_confidence]
     deduped = deduplicate_records(valid)

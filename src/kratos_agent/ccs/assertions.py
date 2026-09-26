@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 import glob
 import os
 import re
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlparse
+from collections.abc import Callable
+from typing import Any
 
-from kratos_agent.ccs.base import CapabilityUnavailable, Rect, Point
+from kratos_agent.ccs.base import CapabilityUnavailable
 from kratos_agent.core.evidence import Evidence, OutcomeAssertion
 
 
@@ -15,7 +16,7 @@ class AssertionRunner:
     """Registry and execution engine for all 34 OutcomeAssertion kinds."""
 
     def __init__(self):
-        self._registry: Dict[str, Callable[[Any, OutcomeAssertion], Evidence]] = {}
+        self._registry: dict[str, Callable[[Any, OutcomeAssertion], Evidence]] = {}
         self._register_all()
 
     def register(self, kind: str, func: Callable[[Any, OutcomeAssertion], Evidence]) -> None:
@@ -369,9 +370,7 @@ class AssertionRunner:
             matches = []
             for p in psutil.process_iter(["pid", "name"]):
                 try:
-                    if pid and p.info["pid"] == pid:
-                        matches.append(p.info)
-                    elif name and name.lower() in (p.info["name"] or "").lower():
+                    if pid and p.info["pid"] == pid or name and name.lower() in (p.info["name"] or "").lower():
                         matches.append(p.info)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
@@ -388,10 +387,7 @@ class AssertionRunner:
             alive = False
             for p in psutil.process_iter(["pid", "name"]):
                 try:
-                    if pid and p.info["pid"] == pid:
-                        alive = True
-                        break
-                    elif name and name.lower() in (p.info["name"] or "").lower():
+                    if pid and p.info["pid"] == pid or name and name.lower() in (p.info["name"] or "").lower():
                         alive = True
                         break
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -675,7 +671,7 @@ class AssertionRunner:
         def check():
             actual = pyperclip.paste()
             met = (actual == expected)
-            return met, {"actual": actual}, f"Clipboard content matches expected", "a11y", 1.0 if met else 0.0
+            return met, {"actual": actual}, "Clipboard content matches expected", "a11y", 1.0 if met else 0.0
         return self._poll(assertion, check)
 
     def _assert_volume_level(self, ccs: Any, assertion: OutcomeAssertion) -> Evidence:
@@ -765,7 +761,7 @@ class AssertionRunner:
         except Exception:
             return ""
 
-    def _list_windows(self, ccs: Any) -> List[Dict[str, Any]]:
+    def _list_windows(self, ccs: Any) -> list[dict[str, Any]]:
         if hasattr(ccs, "list_windows"):
             raw = ccs.list_windows()
             return [{"title": getattr(w, "title", str(w)), "is_active": getattr(w, "is_active", False), "app": getattr(w, "app_name", "")} for w in raw]

@@ -1,7 +1,7 @@
 """Command renderer and translator for multi-shell compatibility."""
 from __future__ import annotations
+
 import re
-from typing import List, Optional
 
 from kratos_agent.system.shell.base import ShellInfo
 from kratos_agent.system.shell.detect import get_current_shell
@@ -50,7 +50,7 @@ def render_powershell_script(command: str, supports_and: bool = False) -> str:
     return clean
 
 
-def render_command_argv(command: str, shell: Optional[ShellInfo] = None) -> List[str]:
+def render_command_argv(command: str, shell: ShellInfo | None = None) -> list[str]:
     """Renders command into a safe execution argv for the active shell."""
     sh = shell or get_current_shell()
 

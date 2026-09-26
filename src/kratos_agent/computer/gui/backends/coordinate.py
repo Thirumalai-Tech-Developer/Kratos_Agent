@@ -1,6 +1,5 @@
 """Coordinate-based fallback GUI backend (LOWEST PRIORITY)."""
 from __future__ import annotations
-from typing import List, Optional
 
 from kratos_agent.computer.gui.backends.base import GUIBackend
 from kratos_agent.computer.gui.models import GUIElement
@@ -26,37 +25,37 @@ class CoordinateBackend(GUIBackend):
 
     def dump_tree(
         self,
-        app: Optional[str] = None,
-        root_window: Optional[str] = None,
+        app: str | None = None,
+        root_window: str | None = None,
         max_depth: int = 8,
         max_nodes: int = 400,
         visible_only: bool = True,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         # Coordinate backend does not expose an object tree
         return []
 
     def find_elements(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
         limit: int = 25,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         return []
 
     def find_element(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
-    ) -> Optional[GUIElement]:
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
+    ) -> GUIElement | None:
         return None
 
     def invoke_element(
         self,
         element: GUIElement,
         pattern: str = "Invoke",
-        value: Optional[str] = None,
+        value: str | None = None,
     ) -> ActionResult:
         return self.click_element(element)
 

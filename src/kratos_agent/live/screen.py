@@ -8,11 +8,12 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
+
 from PIL import Image
 
-from kratos_agent.core.errors import create_kratos_error
 from kratos_agent.core.error_pipeline import get_error_pipeline
+from kratos_agent.core.errors import create_kratos_error
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,12 @@ class ComponentHealth(str, Enum):
 @dataclass
 class CaptureHealth:
     available: bool
-    backend: Optional[str]
+    backend: str | None
     width: int
     height: int
     frame_count: int
-    last_frame_time: Optional[float]
-    error: Optional[str]
+    last_frame_time: float | None
+    error: str | None
 
 
 @dataclass
@@ -55,9 +56,9 @@ class VisionFrameCache:
 
     def __init__(self, threshold_seconds: float = 1.5) -> None:
         self.threshold = threshold_seconds
-        self._latest_frame: Optional[ScreenFrame] = None
+        self._latest_frame: ScreenFrame | None = None
 
-    def get(self) -> Optional[ScreenFrame]:
+    def get(self) -> ScreenFrame | None:
         if self._latest_frame is None:
             return None
         age = time.time() - self._latest_frame.timestamp
@@ -84,7 +85,7 @@ class ScreenCapture:
 
     def __init__(
         self,
-        out_queue: asyncio.Queue[Dict[str, Any]],
+        out_queue: asyncio.Queue[dict[str, Any]],
         max_size: tuple[int, int] = (1920, 1080),
         jpeg_quality: int = 80,
         fps: float = 1.0,
@@ -99,11 +100,11 @@ class ScreenCapture:
 
         self.health_status = ComponentHealth.OFFLINE
         self.frame_count = 0
-        self.last_frame_time: Optional[float] = None
-        self.last_error: Optional[str] = None
+        self.last_frame_time: float | None = None
+        self.last_error: str | None = None
         self.frame_cache = get_vision_frame_cache()
 
-    def _select_monitor(self, sct: Any) -> tuple[int, Dict[str, int]]:
+    def _select_monitor(self, sct: Any) -> tuple[int, dict[str, int]]:
         """Safely selects monitor dictionary from mss, handling multi-monitor and single-monitor setups (§10)."""
         monitors = sct.monitors
         if not monitors:
@@ -150,7 +151,7 @@ class ScreenCapture:
             self.health_status = ComponentHealth.ONLINE
             return frame
 
-    def capture_now(self) -> Optional[ScreenFrame]:
+    def capture_now(self) -> ScreenFrame | None:
         """Captures a single screenshot on demand immediately, returning ScreenFrame."""
         # 1. Check cache first (§15)
         cached = self.frame_cache.get()
@@ -227,7 +228,7 @@ class ScreenCapture:
                 error=str(e),
             )
 
-    async def capture_now_and_queue(self) -> Optional[ScreenFrame]:
+    async def capture_now_and_queue(self) -> ScreenFrame | None:
         """Captures a screenshot on demand, enqueues JPEG for Gemini Live, and returns ScreenFrame."""
         frame = await asyncio.to_thread(self.capture_now)
         if frame is not None:
@@ -300,10 +301,10 @@ class ScreenCapture:
 
 
 ScreenCaptureStream = ScreenCapture
-_global_screen_stream: Optional[ScreenCapture] = None
+_global_screen_stream: ScreenCapture | None = None
 
 
-def get_screen_stream(out_queue: Optional[asyncio.Queue[Dict[str, Any]]] = None) -> ScreenCapture:
+def get_screen_stream(out_queue: asyncio.Queue[dict[str, Any]] | None = None) -> ScreenCapture:
     """Returns singleton ScreenCapture / ScreenCaptureStream instance (§6, §7)."""
     global _global_screen_stream
     if _global_screen_stream is None:

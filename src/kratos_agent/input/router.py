@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .envelope import InputEnvelope
 
@@ -16,7 +16,7 @@ class UnifiedInputRouter:
         text: str = "",
         *,
         source: str = "unknown",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         **context: Any,
     ) -> InputEnvelope:
         return InputEnvelope(
@@ -27,7 +27,7 @@ class UnifiedInputRouter:
         )
 
 
-_global_router: Optional[UnifiedInputRouter] = None
+_global_router: UnifiedInputRouter | None = None
 
 
 def get_input_router() -> UnifiedInputRouter:

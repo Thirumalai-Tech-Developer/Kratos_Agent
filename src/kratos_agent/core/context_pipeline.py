@@ -8,8 +8,8 @@ existing head/tail truncation logic applies unchanged.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 from .runtime_contracts import ChatMessage
 
@@ -41,7 +41,7 @@ def _get_headroom():
     return _headroom_plugin if _headroom_plugin and _headroom_plugin is not False else None
 
 
-def headroom_compress_text(text: str, content_type: str = "text") -> Tuple[str, Dict[str, Any]]:
+def headroom_compress_text(text: str, content_type: str = "text") -> tuple[str, dict[str, Any]]:
     """Compress text through Headroom if available, otherwise pass through."""
     plugin = _get_headroom()
     if plugin and plugin.available:
@@ -61,7 +61,7 @@ def detect_content_type(text: str) -> str:
     return "text"
 
 
-CONTEXT_BUDGET: Dict[str, int] = {
+CONTEXT_BUDGET: dict[str, int] = {
     "system": 2500,
     "memory": 1200,
     "state": 2000,
@@ -85,13 +85,13 @@ class ContextBudget:
 class ContextBuilder:
     def __init__(self, budget: ContextBudget | None = None) -> None:
         self.budget = budget or ContextBudget()
-        self._headroom_stats: List[Dict[str, Any]] = []
+        self._headroom_stats: list[dict[str, Any]] = []
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
         return max(1, len(text) // 4)
 
-    def prune_tool_result(self, text: str) -> Tuple[str, bool]:
+    def prune_tool_result(self, text: str) -> tuple[str, bool]:
         # Step 1: Try Headroom compression first (if available)
         content_type = detect_content_type(text)
         compressed, hr_stats = headroom_compress_text(text, content_type=content_type)
@@ -125,21 +125,21 @@ class ContextBuilder:
             
         return truncated_text, True
 
-    def compact_history(self, messages: List[ChatMessage]) -> Tuple[List[ChatMessage], Dict[str, Any] | None]:
+    def compact_history(self, messages: list[ChatMessage]) -> tuple[list[ChatMessage], dict[str, Any] | None]:
         limit = self.budget.max_input_tokens - self.budget.reserve_output_tokens
         total = sum(self.estimate_tokens(message.content) for message in messages)
         if total <= limit or len(messages) <= 1:
             return messages, None
 
         # Always preserve the root user request (messages[0]) so the agent never loses its original task.
-        root_user: Optional[ChatMessage] = None
+        root_user: ChatMessage | None = None
         remaining_messages = list(messages)
         if messages and messages[0].role == "user":
             root_user = messages[0]
             remaining_messages = messages[1:]
 
         # Preserve the newest turns from remaining_messages up to budget
-        kept: List[ChatMessage] = []
+        kept: list[ChatMessage] = []
         used = self.estimate_tokens(root_user.content) if root_user else 0
         target_limit = limit // 2
 
@@ -157,7 +157,7 @@ class ContextBuilder:
             if prefix:
                 facts.append(f"- {message.role}: {prefix}")
 
-        checkpoint_messages: List[ChatMessage] = []
+        checkpoint_messages: list[ChatMessage] = []
         if facts:
             # Use role="user" so web proxies and OpenAI adapters do not discard system messages inside the message array
             checkpoint_messages.append(ChatMessage(
@@ -171,12 +171,12 @@ class ContextBuilder:
 
     def assemble(
         self,
-        instruction_sections: List[Dict[str, str]],
-        history: List[ChatMessage],
-        tools: List[Dict[str, Any]],
-        workspace: Dict[str, Any],
-        run_state: Optional[Any] = None,
-    ) -> Dict[str, Any]:
+        instruction_sections: list[dict[str, str]],
+        history: list[ChatMessage],
+        tools: list[dict[str, Any]],
+        workspace: dict[str, Any],
+        run_state: Any | None = None,
+    ) -> dict[str, Any]:
         self._headroom_stats.clear()
         history, compaction = self.compact_history(history)
         if isinstance(instruction_sections, str):

@@ -1,7 +1,8 @@
 """PromptBuilder V2: Modular 5-layer system prompt construction with strict token budgets."""
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 CORE_PROMPT_V2 = """You are Kratos, an autonomous computer-use and software agent.
 
@@ -80,13 +81,13 @@ Only state facts confirmed by actual tool execution."""
 class PromptBuilder:
     """Constructs prompt layers adhering to strict token budgets without bloat."""
     core: str = CORE_PROMPT_V2
-    task: Optional[str] = None
-    memory: Optional[List[str]] = None
-    tools: Optional[List[str]] = None
-    state: Optional[Dict[str, Any]] = None
+    task: str | None = None
+    memory: list[str] | None = None
+    tools: list[str] | None = None
+    state: dict[str, Any] | None = None
 
     def build(self) -> str:
-        layers: List[str] = [self.core]
+        layers: list[str] = [self.core]
         if self.task and self.task.strip():
             layers.append(f"## TASK CONTEXT\n{self.task.strip()}")
         if self.memory:

@@ -1,17 +1,18 @@
 """
 Event Contract Normalization for Omni/SSE streaming.
 """
-from dataclasses import dataclass
-from typing import Any, Dict
 import json
+from dataclasses import dataclass
+from typing import Any
 
 from .runtime_contracts import RuntimeEvent
+
 
 @dataclass
 class AgentEvent:
     event_id: str
     event_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
 
     @classmethod
     def from_runtime(cls, rev: RuntimeEvent) -> 'AgentEvent':

@@ -3,12 +3,10 @@ Privilege Elevation System.
 Spawns a persistent elevated helper process to execute high-IL inputs,
 registry writes, and file operations without repeatedly popping UAC prompts.
 """
-import os
 import ctypes
-import uuid
-import subprocess
 import logging
-from typing import Optional
+import os
+import uuid
 
 logger = logging.getLogger(__name__)
 

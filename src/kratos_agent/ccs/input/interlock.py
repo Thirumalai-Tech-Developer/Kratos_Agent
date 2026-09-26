@@ -5,6 +5,7 @@ the agent must yield (pause its own input) to avoid fighting the user.
 """
 import time
 
+
 class InputInterlock:
     def __init__(self):
         self._last_human_input = 0.0

@@ -1,14 +1,17 @@
 """Semantic element resolver with confidence scoring and ambiguity detection."""
 from __future__ import annotations
-import time
-from typing import Any, Dict, List, Optional, Tuple
 
+from typing import Any
+
+from kratos_agent.computer.gui.backends.base import GUIBackend
+from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
+from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
+from kratos_agent.computer.gui.errors import (
+    AmbiguousTargetError,
+    TargetNotFoundError,
+)
 from kratos_agent.computer.gui.models import GUIElement, StaleElementTracker
 from kratos_agent.computer.gui.selectors import ElementSelector
-from kratos_agent.computer.gui.errors import AmbiguousTargetError, TargetNotFoundError, StaleElementError
-from kratos_agent.computer.gui.backends.base import GUIBackend
-from kratos_agent.computer.gui.backends.windows_uia import WindowsUIABackend
-from kratos_agent.computer.gui.backends.playwright import PlaywrightBackend
 
 
 class SemanticResolver:
@@ -26,12 +29,12 @@ class SemanticResolver:
 
     def __init__(self) -> None:
         self.stale_tracker = StaleElementTracker()
-        self._backends: List[GUIBackend] = []
+        self._backends: list[GUIBackend] = []
         self._init_backends()
 
     def _init_backends(self) -> None:
         # Register available backends sorted by priority
-        backends: List[GUIBackend] = [
+        backends: list[GUIBackend] = [
             PlaywrightBackend(),
             WindowsUIABackend(),
         ]
@@ -39,8 +42,8 @@ class SemanticResolver:
 
     def resolve(
         self,
-        target: Dict[str, Any],
-        elements: Optional[List[GUIElement]] = None,
+        target: dict[str, Any],
+        elements: list[GUIElement] | None = None,
         allow_ambiguous: bool = False,
     ) -> GUIElement:
         """Resolves target dictionary (name, role, id, selector) to a single high-confidence GUIElement."""
@@ -50,7 +53,7 @@ class SemanticResolver:
         selector = ElementSelector(name=name, role=role, element_id=elem_id)
 
         # 1. If candidate list not provided, gather from available backends in priority order
-        candidates: List[Tuple[GUIElement, float]] = []
+        candidates: list[tuple[GUIElement, float]] = []
 
         if elements is not None:
             for el in elements:
@@ -100,7 +103,7 @@ class SemanticResolver:
         return best_elem
 
 
-_resolver: Optional[SemanticResolver] = None
+_resolver: SemanticResolver | None = None
 
 
 def get_resolver() -> SemanticResolver:

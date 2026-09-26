@@ -1,31 +1,35 @@
 """Browser automation manager coordinating persistent sessions, window reuse, and CDP/Playwright (§1, §2, §3, §4, §5, §6, §7)."""
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import re
+import subprocess
 import sys
 import time
-import subprocess
-from typing import Any, Dict, List, Optional
-
 from dataclasses import dataclass
+from typing import Any
+
 from kratos_agent.ccs.browser.cdp import cdp_client
-from kratos_agent.computer.state import ActionResult
-from kratos_agent.computer.apps.windows import get_window_manager, enumerate_chrome_windows
 from kratos_agent.computer.apps.focus import focus_window, get_active_window
 from kratos_agent.computer.apps.focus_policy import FocusPolicy
+from kratos_agent.computer.apps.windows import (
+    enumerate_chrome_windows,
+    get_window_manager,
+)
 from kratos_agent.computer.browser.target import (
     BrowserTarget,
-    BrowserTaskTarget,
     BrowserTaskNotInitialized,
     BrowserTaskPageMissing,
     BrowserTaskPageUnlocked,
     BrowserTaskTabLost,
+    BrowserTaskTarget,
     FocusError,
-    TabContinuityViolation,
     get_target_manager,
-    log_browser_task,
 )
+from kratos_agent.computer.state import ActionResult
 
 
 @dataclass
@@ -58,8 +62,8 @@ class BrowserManager:
     def __init__(self) -> None:
         self._cdp = cdp_client
         self._target_mgr = get_target_manager()
-        self._browser_pid: Optional[int] = None
-        self._window_handle: Optional[int] = None
+        self._browser_pid: int | None = None
+        self._window_handle: int | None = None
         self._task_tab_counter: int = 41
 
     def _next_tab_id(self) -> str:
@@ -69,7 +73,7 @@ class BrowserManager:
     def is_connected(self) -> bool:
         return self._cdp.is_available()
 
-    def diagnostics(self) -> Dict[str, Any]:
+    def diagnostics(self) -> dict[str, Any]:
         """Returns comprehensive browser lifecycle diagnostics (§20)."""
         st = self.get_state()
         active_target = self._target_mgr.get_active_target()
@@ -88,7 +92,7 @@ class BrowserManager:
             "window_handle": st.get("window_handle"),
         }
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """Returns current browser URL, title, and connection status."""
         active_target = self._target_mgr.get_active_target()
         if self._cdp.is_available():
@@ -104,8 +108,8 @@ class BrowserManager:
                     "backend": "cdp",
                     "window_handle": active_target.window_handle if active_target else None,
                 }
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if active_target:
             return {
@@ -118,7 +122,7 @@ class BrowserManager:
 
         return {"connected": False, "url": None, "title": None, "backend": None}
 
-    def get_active_page(self) -> Optional[Any]:
+    def get_active_page(self) -> Any | None:
         """Returns the active browser page or target following strict priority (§10):
         1. Existing active_browser_target
         2. Existing foreground Chrome window
@@ -160,8 +164,8 @@ class BrowserManager:
                 )
                 self._target_mgr.set_active_target(t)
                 return t
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         # 4. Any existing visible Chrome window
         if chrome_wins:
@@ -179,7 +183,7 @@ class BrowserManager:
 
         return None
 
-    def find_existing_browser(self, browser: str = "chrome") -> Optional[Dict[str, Any]]:
+    def find_existing_browser(self, browser: str = "chrome") -> dict[str, Any] | None:
         """Finds existing browser window, ranking foreground Chrome > target handle > title match (§2, §5, §24, §30)."""
         chrome_wins = enumerate_chrome_windows()
 
@@ -213,9 +217,9 @@ class BrowserManager:
 
     def initialize_browser_task(
         self,
-        task_id: Optional[str] = None,
-        initial_url: Optional[str] = None,
-        policy: Optional[BrowserTaskPolicy] = None,
+        task_id: str | None = None,
+        initial_url: str | None = None,
+        policy: BrowserTaskPolicy | None = None,
     ) -> BrowserTaskTarget:
         """Initializes a new browser task (§5):
         1. Find existing Chrome window.
@@ -320,7 +324,7 @@ class BrowserManager:
         browser: str = "chrome",
         new_tab: bool = False,
         new_window: bool = False,
-        policy: Optional[BrowserTaskPolicy] = None,
+        policy: BrowserTaskPolicy | None = None,
     ) -> ActionResult:
         """Opens URL by reusing existing Chrome window and active tab by default (§1, §2, §4, §5, §6, §7, §11, §12)."""
         if policy is None:
@@ -482,7 +486,7 @@ class BrowserManager:
             return ActionResult(ok=False, action="browser_open", detail=f"Failed to open browser: {exc}")
 
 
-    def navigate(self, action: str = "reload", url: Optional[str] = None) -> ActionResult:
+    def navigate(self, action: str = "reload", url: str | None = None) -> ActionResult:
         """Performs navigation: 'goto', 'reload', 'back', 'forward' on the active target (§4)."""
         target = self._target_mgr.get_active_target()
         if target and target.window_handle:
@@ -510,7 +514,7 @@ class BrowserManager:
 
         return ActionResult(ok=False, action="browser_navigate", detail=f"Unknown action {action}")
 
-    def read_content(self, mode: str = "markdown", selector: Optional[str] = None) -> str:
+    def read_content(self, mode: str = "markdown", selector: str | None = None) -> str:
         """Extracts page text, HTML, or markdown."""
         if not self._cdp.is_available():
             return "(Browser not connected via CDP)"
@@ -528,7 +532,7 @@ class BrowserManager:
         return self._cdp.evaluate(script)
 
 
-_browser_manager: Optional[BrowserManager] = None
+_browser_manager: BrowserManager | None = None
 
 
 def get_browser_manager() -> BrowserManager:

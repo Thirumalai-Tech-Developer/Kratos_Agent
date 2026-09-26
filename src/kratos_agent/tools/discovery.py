@@ -6,7 +6,7 @@ for any given task, eliminating model confusion and context bloat.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from .index import ToolIndex, ToolMetadata, get_tool_index
 
@@ -14,16 +14,16 @@ from .index import ToolIndex, ToolMetadata, get_tool_index
 class ToolSearch:
     """Hybrid tool discovery engine combining keyword matching, token similarity, and context affinity."""
 
-    def __init__(self, index: Optional[ToolIndex] = None) -> None:
+    def __init__(self, index: ToolIndex | None = None) -> None:
         self.index = index or get_tool_index()
 
     def search(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         max_results: int = 15,
         min_results: int = 5,
-    ) -> List[ToolMetadata]:
+    ) -> list[ToolMetadata]:
         """Discovers and ranks candidate tools for a user query and application context."""
         ctx = context or {}
         q_clean = query.lower().strip()
@@ -33,7 +33,7 @@ class ToolSearch:
         active_app = str(ctx.get("app") or ctx.get("active_window", "")).lower()
         active_browser = "chrome" in active_app or "edge" in active_app or "browser" in active_app
 
-        scored_tools: List[tuple[float, ToolMetadata]] = []
+        scored_tools: list[tuple[float, ToolMetadata]] = []
 
         for meta in self.index.list_all():
             score = 0.0
@@ -105,9 +105,9 @@ class ToolSearch:
     def get_tool_schemas(
         self,
         query: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         max_results: int = 15,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Returns JSON schema definitions for the top discovered tools."""
         tools = self.search(query, context=context, max_results=max_results)
         schemas = []
@@ -125,7 +125,7 @@ class ToolSearch:
 
 
 # Global ToolSearch singleton
-_global_tool_search: Optional[ToolSearch] = None
+_global_tool_search: ToolSearch | None = None
 
 
 def get_tool_search() -> ToolSearch:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from .events import LiveState, LiveStatusHub
 from .microphone import MicrophoneListener, get_input_devices
@@ -17,12 +17,12 @@ class AudioManager:
 
     def __init__(
         self,
-        out_queue: asyncio.Queue[Dict[str, Any]],
-        status_hub: Optional[LiveStatusHub] = None,
+        out_queue: asyncio.Queue[dict[str, Any]],
+        status_hub: LiveStatusHub | None = None,
         send_sample_rate: int = 16000,
         receive_sample_rate: int = 24000,
         chunk_size: int = 1024,
-        device: Optional[int | str] = None,
+        device: int | str | None = None,
         vad_threshold: int = 80,
         vad_silence_seconds: float = 1.2,
     ) -> None:
@@ -96,7 +96,7 @@ class AudioManager:
         if self.status_hub and self.status_hub.status.current_state == LiveState.SPEAKING:
             self.status_hub.update(current_state=LiveState.LISTENING)
 
-    def get_input_devices(self) -> List[Dict[str, Any]]:
+    def get_input_devices(self) -> list[dict[str, Any]]:
         """Returns list of available microphone input devices."""
         return get_input_devices()
 
@@ -104,7 +104,7 @@ class AudioManager:
         """Returns the name of the currently active microphone."""
         return self.mic.device_name
 
-    async def set_device(self, device: Optional[int | str]) -> str:
+    async def set_device(self, device: int | str | None) -> str:
         """Dynamically switches active microphone device at runtime."""
         self.mic.stop()
         self.mic.device = device

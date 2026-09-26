@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 class AgentState(str, Enum):
@@ -119,9 +119,9 @@ class SubStep:
     style: str = "dim white"
     is_active: bool = False
     started_at: float = field(default_factory=time.monotonic)
-    finished_at: Optional[float] = None
+    finished_at: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "glyph": self.glyph,
@@ -133,7 +133,7 @@ class SubStep:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SubStep:
+    def from_dict(cls, data: dict[str, Any]) -> SubStep:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:6]),
             glyph=data.get("glyph", "✓"),
@@ -150,24 +150,24 @@ class TaskItem:
     id: str
     title: str
     state: TaskState = TaskState.PENDING
-    detail: Optional[str] = None
+    detail: str | None = None
     verification: str = "none"  # "none", "build", "tests", "browser", "browser+build"
-    substeps: List[SubStep] = field(default_factory=list)
-    files_affected: List[str] = field(default_factory=list)
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
+    substeps: list[SubStep] = field(default_factory=list)
+    files_affected: list[str] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
     tool_count: int = 0
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
+    started_at: float | None = None
+    finished_at: float | None = None
     requires_observable_evidence: bool = False
-    assertion: Optional[Any] = None
-    observed_evidence: Optional[Any] = None
+    assertion: Any | None = None
+    observed_evidence: Any | None = None
     claim: str = ""
 
     def start(self) -> None:
         self.state = TaskState.RUNNING
         self.started_at = time.monotonic()
 
-    def add_evidence(self, kind: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def add_evidence(self, kind: str, data: dict[str, Any] | None = None) -> None:
         """Records concrete tool execution or verification evidence for this task."""
         entry = {"kind": kind, "timestamp": time.monotonic(), "data": data or {}}
         self.evidence.append(entry)
@@ -181,7 +181,7 @@ class TaskItem:
             or any(s.glyph == "✓" for s in self.substeps)
         )
 
-    def complete(self, detail: Optional[str] = None, force: bool = True) -> bool:
+    def complete(self, detail: str | None = None, force: bool = True) -> bool:
         self.state = TaskState.COMPLETED
         self.finished_at = time.monotonic()
         # Mark all active substeps completed
@@ -195,7 +195,7 @@ class TaskItem:
             self.detail = detail
         return True
 
-    def fail(self, error: Optional[str] = None) -> None:
+    def fail(self, error: str | None = None) -> None:
         self.state = TaskState.FAILED
         self.finished_at = time.monotonic()
         for sub in self.substeps:
@@ -207,7 +207,7 @@ class TaskItem:
         if error:
             self.detail = error
 
-    def skip(self, reason: Optional[str] = None) -> None:
+    def skip(self, reason: str | None = None) -> None:
         self.state = TaskState.SKIPPED
         self.finished_at = time.monotonic()
         if reason:
@@ -240,7 +240,7 @@ class TaskItem:
         if file_path and file_path not in self.files_affected:
             self.files_affected.append(file_path)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
@@ -256,7 +256,7 @@ class TaskItem:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> TaskItem:
+    def from_dict(cls, data: dict[str, Any]) -> TaskItem:
         state_val = data.get("state", "pending")
         try:
             state = TaskState(state_val)
@@ -284,17 +284,17 @@ class ExecutionPlan:
     def __init__(
         self,
         goal: str = "",
-        tasks: Optional[List[TaskItem]] = None,
+        tasks: list[TaskItem] | None = None,
         title: str = "PLAN",
     ) -> None:
         self.goal = goal
         self.title = title
-        self.tasks: List[TaskItem] = tasks or []
+        self.tasks: list[TaskItem] = tasks or []
         self.state: AgentState = AgentState.IDLE
         self.created_at: float = time.time()
         self.updated_at: float = self.created_at
 
-    def set_tasks_from_titles(self, titles: List[str], goal: str = "") -> None:
+    def set_tasks_from_titles(self, titles: list[str], goal: str = "") -> None:
         if goal:
             self.goal = goal
         self.tasks = [
@@ -304,7 +304,7 @@ class ExecutionPlan:
         ]
         self.updated_at = time.time()
 
-    def add_task(self, title: str, state: TaskState = TaskState.PENDING, task_id: Optional[str] = None) -> TaskItem:
+    def add_task(self, title: str, state: TaskState = TaskState.PENDING, task_id: str | None = None) -> TaskItem:
         tid = task_id or str(len(self.tasks) + 1)
         item = TaskItem(id=tid, title=title.strip(), state=state)
         self.tasks.append(item)
@@ -319,7 +319,7 @@ class ExecutionPlan:
         self.updated_at = time.time()
         return item
 
-    def _find_task(self, key: Union[int, str]) -> Optional[TaskItem]:
+    def _find_task(self, key: int | str) -> TaskItem | None:
         if isinstance(key, int):
             if 0 <= key < len(self.tasks):
                 return self.tasks[key]
@@ -337,35 +337,35 @@ class ExecutionPlan:
                 return t
         return None
 
-    def start_task(self, key: Union[int, str]) -> Optional[TaskItem]:
+    def start_task(self, key: int | str) -> TaskItem | None:
         task = self._find_task(key)
         if task:
             task.start()
             self.updated_at = time.time()
         return task
 
-    def complete_task(self, key: Union[int, str], detail: Optional[str] = None, force: bool = False) -> Optional[TaskItem]:
+    def complete_task(self, key: int | str, detail: str | None = None, force: bool = False) -> TaskItem | None:
         task = self._find_task(key)
         if task:
             task.complete(detail, force=force)
             self.updated_at = time.time()
         return task
 
-    def fail_task(self, key: Union[int, str], error: Optional[str] = None) -> Optional[TaskItem]:
+    def fail_task(self, key: int | str, error: str | None = None) -> TaskItem | None:
         task = self._find_task(key)
         if task:
             task.fail(error)
             self.updated_at = time.time()
         return task
 
-    def skip_task(self, key: Union[int, str], reason: Optional[str] = None) -> Optional[TaskItem]:
+    def skip_task(self, key: int | str, reason: str | None = None) -> TaskItem | None:
         task = self._find_task(key)
         if task:
             task.skip(reason)
             self.updated_at = time.time()
         return task
 
-    def add_substep(self, key: Union[int, str], glyph: str, text: str, style: str = "dim white", is_active: bool = False) -> Optional[SubStep]:
+    def add_substep(self, key: int | str, glyph: str, text: str, style: str = "dim white", is_active: bool = False) -> SubStep | None:
         task = self._find_task(key)
         if not task:
             task = self.get_active_task()
@@ -375,7 +375,7 @@ class ExecutionPlan:
             return sub
         return None
 
-    def resolve_substep(self, key: Union[int, str], glyph: str, text: str, style: str = "dim green") -> None:
+    def resolve_substep(self, key: int | str, glyph: str, text: str, style: str = "dim green") -> None:
         task = self._find_task(key)
         if not task:
             task = self.get_active_task()
@@ -383,7 +383,7 @@ class ExecutionPlan:
             task.resolve_substep(glyph, text, style=style)
             self.updated_at = time.time()
 
-    def update_task_activity(self, key: Union[int, str], file_path: Optional[str] = None, increment_tool: bool = True) -> None:
+    def update_task_activity(self, key: int | str, file_path: str | None = None, increment_tool: bool = True) -> None:
         task = self._find_task(key)
         if task:
             if file_path:
@@ -392,7 +392,7 @@ class ExecutionPlan:
                 task.tool_count += 1
             self.updated_at = time.time()
 
-    def get_active_task(self) -> Optional[TaskItem]:
+    def get_active_task(self) -> TaskItem | None:
         for t in self.tasks:
             if t.state == TaskState.RUNNING:
                 return t
@@ -404,16 +404,16 @@ class ExecutionPlan:
                 return i
         return max(0, len(self.tasks) - 1)
 
-    def get_pending_tasks(self) -> List[TaskItem]:
+    def get_pending_tasks(self) -> list[TaskItem]:
         return [t for t in self.tasks if t.state == TaskState.PENDING]
 
-    def get_completed_tasks(self) -> List[TaskItem]:
+    def get_completed_tasks(self) -> list[TaskItem]:
         return [t for t in self.tasks if t.state == TaskState.COMPLETED]
 
-    def get_failed_tasks(self) -> List[TaskItem]:
+    def get_failed_tasks(self) -> list[TaskItem]:
         return [t for t in self.tasks if t.state in (TaskState.FAILED, TaskState.NEEDS_ATTENTION)]
 
-    def get_unfinished_tasks(self) -> List[TaskItem]:
+    def get_unfinished_tasks(self) -> list[TaskItem]:
         return [t for t in self.tasks if t.state not in (TaskState.COMPLETED, TaskState.SKIPPED)]
 
     @property
@@ -448,7 +448,7 @@ class ExecutionPlan:
         self.state = AgentState.INTERRUPTED
         self.updated_at = time.time()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "goal": self.goal,
             "title": self.title,
@@ -463,7 +463,7 @@ class ExecutionPlan:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ExecutionPlan:
+    def from_dict(cls, data: dict[str, Any]) -> ExecutionPlan:
         tasks = [TaskItem.from_dict(t) for t in data.get("tasks", [])]
         plan = cls(goal=data.get("goal", ""), tasks=tasks, title=data.get("title", "PLAN"))
         state_val = data.get("state", "idle")

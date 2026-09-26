@@ -1,9 +1,10 @@
 """Structured output models, action protocol, state machine, and plan caching."""
 from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class OutputMode(str, Enum):
@@ -24,13 +25,13 @@ class ActionType(str, Enum):
 class AgentAction:
     """Standardized action contract emitted by agent reasoning."""
     type: ActionType
-    tool: Optional[str] = None
-    arguments: Dict[str, Any] = field(default_factory=dict)
+    tool: str | None = None
+    arguments: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
     expected_result: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "type": self.type.value if isinstance(self.type, ActionType) else str(self.type),
             "reason": self.reason,
             "expected_result": self.expected_result,
@@ -44,7 +45,7 @@ class AgentAction:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> AgentAction:
+    def from_dict(cls, data: dict[str, Any]) -> AgentAction:
         raw_type = data.get("type", "tool_call")
         try:
             act_type = ActionType(raw_type)
@@ -75,15 +76,15 @@ class TaskResult:
     """Structured terminal response for completed, partial, or failed tasks."""
     status: TaskStatus
     summary: str
-    result: Optional[str] = None
+    result: str | None = None
     verified: bool = False
-    completed: List[str] = field(default_factory=list)
-    remaining: List[str] = field(default_factory=list)
-    error: Optional[Dict[str, Any]] = None
+    completed: list[str] = field(default_factory=list)
+    remaining: list[str] = field(default_factory=list)
+    error: dict[str, Any] | None = None
     recovery_attempts: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "status": self.status.value,
             "summary": self.summary,
             "verified": self.verified,
@@ -158,23 +159,23 @@ class ActionStateMachine:
 class CachedPlan:
     """Maintains plan execution progress and prevents wasteful regeneration."""
     goal: str
-    steps: List[str]
+    steps: list[str]
     current_step_idx: int = 0
-    completed_steps: List[str] = field(default_factory=list)
-    failed_step: Optional[str] = None
-    remaining_steps: List[str] = field(default_factory=list)
+    completed_steps: list[str] = field(default_factory=list)
+    failed_step: str | None = None
+    remaining_steps: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.remaining_steps and self.steps:
             self.remaining_steps = list(self.steps)
 
     @property
-    def current_step(self) -> Optional[str]:
+    def current_step(self) -> str | None:
         if 0 <= self.current_step_idx < len(self.steps):
             return self.steps[self.current_step_idx]
         return None
 
-    def advance(self, success: bool, error_msg: Optional[str] = None) -> None:
+    def advance(self, success: bool, error_msg: str | None = None) -> None:
         if self.current_step:
             step_desc = self.current_step
             if success:

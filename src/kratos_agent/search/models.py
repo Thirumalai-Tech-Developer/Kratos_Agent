@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -11,19 +11,19 @@ class SearchResult:
     """Normalized search result across all providers (SearXNG, Agent Search, GitHub, Native)."""
     title: str
     url: str
-    snippet: Optional[str] = None
+    snippet: str | None = None
     source: str = "web"
-    engine: Optional[str] = None
-    published_at: Optional[str] = None
-    domain: Optional[str] = None
-    score: Optional[float] = None
+    engine: str | None = None
+    published_at: str | None = None
+    domain: str | None = None
+    score: float | None = None
     rank: int = 1
-    content: Optional[str] = None
-    citation_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    content: str | None = None
+    citation_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     retrieved_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "url": self.url,
@@ -45,16 +45,16 @@ class SearchResult:
 class SearchResponse:
     """Standardized response from the Search Router or provider."""
     query: str
-    results: List[SearchResult] = field(default_factory=list)
+    results: list[SearchResult] = field(default_factory=list)
     total_results: int = 0
     provider: str = "search_router"
     cached: bool = False
     latency_ms: float = 0.0
-    answer: Optional[str] = None
-    citations: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    answer: str | None = None
+    citations: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
             "results": [r.to_dict() for r in self.results],
@@ -76,13 +76,13 @@ class ExtractedPage:
     text: str
     is_safe: bool = True
     status_code: int = 200
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class SiteMap:
     """Discovered URLs and endpoints for a site/domain."""
     url: str
-    links: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    links: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

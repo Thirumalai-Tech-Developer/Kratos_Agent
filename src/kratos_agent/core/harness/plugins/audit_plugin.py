@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
@@ -20,7 +19,7 @@ logger = logging.getLogger(__name__)
 class AuditPlugin(HarnessPlugin):
     """Provides append-only session event tracing and replay for the DeepSeek Harness."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(
             metadata=PluginMetadata(
                 name="audit",
@@ -30,11 +29,11 @@ class AuditPlugin(HarnessPlugin):
             ),
             config=config,
         )
-        self._trace_events: List[Dict[str, Any]] = []
+        self._trace_events: list[dict[str, Any]] = []
         self._seq: int = 0
-        self.log_file_path: Optional[Path] = None
+        self.log_file_path: Path | None = None
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
         kernel.register_service("audit", self)
 
@@ -84,14 +83,14 @@ class AuditPlugin(HarnessPlugin):
     def record_event(
         self,
         event_type: str,
-        payload: Dict[str, Any],
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        payload: dict[str, Any],
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """Record an append-only event into the harness trace."""
         self._seq += 1
         entry = {
             "seq": self._seq,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "event_type": event_type,
             "session_id": session_id or "default",
             "payload": payload,
@@ -110,10 +109,10 @@ class AuditPlugin(HarnessPlugin):
 
     def get_trace(
         self,
-        session_id: Optional[str] = None,
-        event_type: Optional[str] = None,
+        session_id: str | None = None,
+        event_type: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Retrieve recent events from the append-only trace."""
         events = self._trace_events
         if session_id:
@@ -122,7 +121,7 @@ class AuditPlugin(HarnessPlugin):
             events = [e for e in events if e.get("event_type") == event_type]
         return events[-limit:]
 
-    def export_trace(self, target_path: str, session_id: Optional[str] = None) -> int:
+    def export_trace(self, target_path: str, session_id: str | None = None) -> int:
         """Export current session trace to a designated JSON file."""
         events = self._trace_events
         if session_id:
@@ -135,7 +134,7 @@ class AuditPlugin(HarnessPlugin):
 
         return len(events)
 
-    def replay_session(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def replay_session(self, session_id: str | None = None) -> list[dict[str, Any]]:
         """Replay events in chronological order for session reconstruction."""
         events = self._trace_events
         if session_id:

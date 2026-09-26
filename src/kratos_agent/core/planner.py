@@ -6,11 +6,14 @@ No static universal 4-step templates.
 """
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.core.task_manager import ExecutionPlan, TaskItem, TaskState
 
@@ -28,7 +31,7 @@ class IntentKind(str, Enum):
         return self in (IntentKind.CODING_TASK, IntentKind.FILE_TASK, IntentKind.COMPLEX_AGENT_TASK)
 
 
-def classify_intent(query: str, history: Optional[List[Any]] = None) -> IntentKind:
+def classify_intent(query: str, history: list[Any] | None = None) -> IntentKind:
     """Accurately classifies user intent to keep simple conversation clean while planning coding tasks."""
     q = query.strip().lower()
     q_norm = re.sub(r"[?!.,;:]", " ", q).strip()
@@ -180,7 +183,7 @@ RULES:
 """
 
 
-def extract_json_plan(text: str) -> Optional[Dict[str, Any]]:
+def extract_json_plan(text: str) -> dict[str, Any] | None:
     """Extracts and parses a JSON plan from raw model output or markdown code blocks."""
     if not text or not text.strip():
         return None
@@ -207,8 +210,8 @@ def extract_json_plan(text: str) -> Optional[Dict[str, Any]]:
                     data = json.loads(fixed)
                     if isinstance(data, dict) and "tasks" in data:
                         return data
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
         # 2. Try targeting {"goal" or {"tasks" directly
         plan_start = re.search(r'\{\s*"(?:goal|tasks)"', src)
@@ -227,8 +230,8 @@ def extract_json_plan(text: str) -> Optional[Dict[str, Any]]:
                         data = json.loads(fixed)
                         if isinstance(data, dict) and "tasks" in data:
                             return data
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
         # 3. Try raw first and last brace search
         first_brace = src.find("{")
@@ -245,13 +248,13 @@ def extract_json_plan(text: str) -> Optional[Dict[str, Any]]:
                     data = json.loads(fixed)
                     if isinstance(data, dict) and "tasks" in data:
                         return data
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
     return None
 
 
-def extract_numbered_steps(text: str) -> Optional[List[Dict[str, Any]]]:
+def extract_numbered_steps(text: str) -> list[dict[str, Any]] | None:
     """Extracts numbered or bulleted plan steps from conversational or markdown model output."""
     if not text or not text.strip():
         return None
@@ -300,18 +303,18 @@ def formulate_agent_plan(
     user_query: str,
     model: Any,
     workspace: Path,
-    instructions: Optional[List[Dict[str, str]]] = None,
+    instructions: list[dict[str, str]] | None = None,
 ) -> ExecutionPlan:
     """Invokes the Agent/LLM to understand the request, inspect the context, and produce a real dynamic plan."""
     # List top-level files in workspace to provide real context
-    ws_files: List[str] = []
+    ws_files: list[str] = []
     try:
         if workspace.exists() and workspace.is_dir():
             for p in list(workspace.iterdir())[:20]:
                 if not p.name.startswith("."):
                     ws_files.append(f"{p.name}/" if p.is_dir() else p.name)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
 
     ws_ctx = f"Workspace directory: {workspace.name}\nExisting files: {', '.join(ws_files) if ws_files else 'empty workspace'}"
 
@@ -337,7 +340,7 @@ def formulate_agent_plan(
         if parsed and isinstance(parsed, dict) and "tasks" in parsed and parsed["tasks"]:
             goal = str(parsed.get("goal", user_query)).strip()
             tasks_data = parsed["tasks"]
-            task_items: List[TaskItem] = []
+            task_items: list[TaskItem] = []
 
             for idx, item in enumerate(tasks_data, 1):
                 if isinstance(item, dict):
@@ -371,14 +374,14 @@ def formulate_agent_plan(
                 for step in numbered_steps
             ]
             return ExecutionPlan(goal=goal, tasks=task_items)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
 
     # Dynamic query analysis fallback if model call is unreachable
     return dynamic_query_fallback_plan(user_query, workspace)
 
 
-def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) -> ExecutionPlan:
+def dynamic_query_fallback_plan(query: str, workspace: Path | None = None) -> ExecutionPlan:
     """Generates an intelligent dynamic plan derived directly from the user's specific request tokens."""
     q = query.strip()
     q_clean = re.sub(r'^(please\s+|can\s+you\s+|i\s+want\s+to\s+|help\s+me\s+)', '', q, flags=re.IGNORECASE).strip()
@@ -398,14 +401,14 @@ def dynamic_query_fallback_plan(query: str, workspace: Optional[Path] = None) ->
         goal = goal_text[:60]
     goal = goal[0].upper() + goal[1:] if goal else "Execute requested tasks"
 
-    tasks: List[TaskItem] = []
+    tasks: list[TaskItem] = []
 
     if is_operational:
         # Operational task milestones: Acquire -> Setup -> Execute/Play -> Verify
         tasks.append(TaskItem(id="1", title=f"Locate and acquire target resources for {goal_text[:40]}", state=TaskState.PENDING))
         tasks.append(TaskItem(id="2", title=f"Configure runtime environment and prerequisites for {goal_text[:40]}", state=TaskState.PENDING))
         tasks.append(TaskItem(id="3", title=f"Execute, run, or automate {goal_text[:40]}", state=TaskState.PENDING))
-        tasks.append(TaskItem(id="4", title=f"Verify execution outcome and confirm completion", state=TaskState.PENDING, verification="tests"))
+        tasks.append(TaskItem(id="4", title="Verify execution outcome and confirm completion", state=TaskState.PENDING, verification="tests"))
     else:
         # 1. Project & File Inspection
         if target_files:

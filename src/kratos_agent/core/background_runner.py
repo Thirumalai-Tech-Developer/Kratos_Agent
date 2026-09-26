@@ -13,9 +13,9 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -39,8 +39,8 @@ class BackgroundTask:
     result: str = ""
     error: str = ""
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    finished_at: Optional[float] = None
+    started_at: float | None = None
+    finished_at: float | None = None
     _cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     @property
@@ -63,7 +63,7 @@ class BackgroundRunner:
     """
 
     def __init__(self):
-        self._tasks: Dict[str, BackgroundTask] = {}
+        self._tasks: dict[str, BackgroundTask] = {}
         self._lock = threading.Lock()
 
     def run(self, prompt: str, agent_fn: Callable[[str], str]) -> BackgroundTask:
@@ -105,12 +105,12 @@ class BackgroundRunner:
         )
         return task
 
-    def list_tasks(self) -> List[BackgroundTask]:
+    def list_tasks(self) -> list[BackgroundTask]:
         """Return all tasks sorted by creation time (newest first)."""
         with self._lock:
             return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
 
-    def get_task(self, short_id: str) -> Optional[BackgroundTask]:
+    def get_task(self, short_id: str) -> BackgroundTask | None:
         """Lookup a task by its 8-char short ID or full UUID."""
         with self._lock:
             for task in self._tasks.values():

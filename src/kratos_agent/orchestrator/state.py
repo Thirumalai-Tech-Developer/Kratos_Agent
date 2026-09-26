@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.events.bus import get_agent_event_bus
 from kratos_agent.events.models import AgentEvent, EventType
@@ -31,7 +30,7 @@ class MissionStateMachine:
     task_id: str
     request_id: str
     state: MissionState = MissionState.CREATED
-    history: List[Dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
 
     def transition(self, state: MissionState, *, message: str = "", **payload: Any) -> None:
         self.state = state

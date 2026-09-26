@@ -1,7 +1,7 @@
 """Milestone aggregator and progress phrase deduplication engine."""
 from __future__ import annotations
+
 import re
-from typing import List, Optional
 
 from kratos_agent.events.models import AgentEvent, EventType
 
@@ -25,7 +25,7 @@ class OutputAggregator:
     """Aggregates low-level internal events into concise milestones and sanitizes progress phrases (§15, §16, §46, §47)."""
 
     def __init__(self) -> None:
-        self._seen_messages: List[str] = []
+        self._seen_messages: list[str] = []
 
     def sanitize_phrase(self, text: str) -> str:
         """Removes repetitive conversational fluff ('I am currently...', etc.)."""
@@ -49,7 +49,7 @@ class OutputAggregator:
             self._seen_messages.pop(0)
         return False
 
-    def aggregate_milestone(self, event: AgentEvent) -> Optional[str]:
+    def aggregate_milestone(self, event: AgentEvent) -> str | None:
         """Maps internal events into user-facing milestone messages."""
         if event.type == EventType.MILESTONE:
             msg = self.sanitize_phrase(event.message)

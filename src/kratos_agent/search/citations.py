@@ -1,13 +1,14 @@
 """Citation engine for Kratos Search Fabric."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from .models import SearchResult
 
 
-def attach_citations(results: List[SearchResult]) -> List[Dict[str, Any]]:
+def attach_citations(results: list[SearchResult]) -> list[dict[str, Any]]:
     """Assigns sequential [S1], [S2] citation identifiers to search results and returns citation metadata."""
-    citations: List[Dict[str, Any]] = []
+    citations: list[dict[str, Any]] = []
     for idx, r in enumerate(results, start=1):
         cid = f"S{idx}"
         r.citation_id = cid
@@ -23,7 +24,7 @@ def attach_citations(results: List[SearchResult]) -> List[Dict[str, Any]]:
     return citations
 
 
-def format_search_results_with_citations(results: List[SearchResult]) -> str:
+def format_search_results_with_citations(results: list[SearchResult]) -> str:
     """Formats search results concisely with citation tags for LLM consumption."""
     if not results:
         return "No search results found."

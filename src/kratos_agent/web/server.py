@@ -11,21 +11,19 @@ import logging
 import mimetypes
 import os
 import queue
-import sys
 import threading
-import time
 import urllib.parse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..core.d1_client import get_d1_client, D1DatabaseClient
-from ..core.memory import AgenticMemory
-from ..core.event_bus import event_bus
 from ..core.agent_loop import format_tool_action_label
-from ..core.runtime_contracts import EventKind, RuntimeEvent
+from ..core.d1_client import D1DatabaseClient, get_d1_client
+from ..core.event_bus import event_bus
+from ..core.memory import AgenticMemory
+from ..core.runtime_contracts import RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -217,9 +215,10 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_live_control(self, payload: Dict[str, Any]) -> None:
+    def _handle_live_control(self, payload: dict[str, Any]) -> None:
         try:
             import asyncio
+
             from kratos_agent.live import get_live_runtime
             live_rt = get_live_runtime()
             action = str(payload.get("action", "")).lower().strip()
@@ -253,9 +252,10 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_voice_dispute(self, task_id: str, payload: Dict[str, Any]) -> None:
+    def _handle_voice_dispute(self, task_id: str, payload: dict[str, Any]) -> None:
         try:
             import asyncio
+
             from kratos_agent.core.dispute import handle_dispute
             from kratos_agent.main import runtime
             obs = payload.get("user_observation", "") or payload.get("observation", "")
@@ -265,7 +265,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_voice_command(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_command(self, payload: dict[str, Any]) -> None:
         try:
             cmd = payload.get("command", "")
             from kratos_agent.main import run_agent
@@ -274,7 +274,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_voice_panic(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_panic(self, payload: dict[str, Any]) -> None:
         try:
             from kratos_agent.ccs.safety_ops import panic_halt
             panic_halt(reason=payload.get("reason", "voice_panic"))
@@ -282,7 +282,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_voice_stream(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_stream(self, payload: dict[str, Any]) -> None:
         self._send_json({"ok": True, "stream": "active"})
 
     # ── Static File Helper ─────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
 
     # ── Live Agent Streaming (Server-Sent Events) ──────────────────────────────
 
-    def _handle_chat_sse(self, payload: Dict[str, Any]) -> None:
+    def _handle_chat_sse(self, payload: dict[str, Any]) -> None:
         """Streams real-time agent execution tokens, steps, and tool calls using SSE."""
         prompt = str(
             payload.get("prompt")
@@ -339,13 +339,13 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
 
-        def send_event(data: Dict[str, Any]) -> None:
+        def send_event(data: dict[str, Any]) -> None:
             try:
                 line = f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
                 self.wfile.write(line.encode("utf-8"))
                 self.wfile.flush()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         from ..brain.config import get_normal_mode_model
         normal_model = get_normal_mode_model()
@@ -369,7 +369,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         })
 
         # Event queue to bridge runtime event bus to HTTP client
-        ev_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
+        ev_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 
         def on_runtime_event(ev: RuntimeEvent) -> None:
             kind = getattr(ev.kind, "value", str(ev.kind))
@@ -512,7 +512,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
             })
 
-    def _handle_voice_stream(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_stream(self, payload: dict[str, Any]) -> None:
         """Omni Voice SSE Streaming Endpoint."""
         # Stub for Voice stream to be implemented according to Omni Spec
         self.send_response(HTTPStatus.OK)
@@ -526,12 +526,12 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"event: ready\ndata: {}\n\n")
         self.wfile.flush()
 
-    def _handle_voice_command(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_command(self, payload: dict[str, Any]) -> None:
         """Omni Voice Command Execution."""
         # Stub for Voice command
         self._send_json({"status": "ok", "message": "Command received"})
 
-    def _handle_voice_panic(self, payload: Dict[str, Any]) -> None:
+    def _handle_voice_panic(self, payload: dict[str, Any]) -> None:
         """Omni Voice Panic trigger."""
         try:
             from kratos_agent.ccs.safety_ops import safety
@@ -541,7 +541,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_chat_sync(self, payload: Dict[str, Any]) -> None:
+    def _handle_chat_sync(self, payload: dict[str, Any]) -> None:
         """Synchronous chat execution endpoint."""
         prompt = str(
             payload.get("prompt")
@@ -579,7 +579,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_auth_agent_mode(self, payload: Dict[str, Any]) -> None:
+    def _handle_auth_agent_mode(self, payload: dict[str, Any]) -> None:
         """Verifies commander security clearance passcode to unlock Autonomous Agent Mode."""
         import os
         password = str(payload.get("password", "")).strip()
@@ -661,7 +661,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             "executed_commands": getattr(session, "executed_commands", []),
         })
 
-    def _handle_create_session(self, payload: Dict[str, Any]) -> None:
+    def _handle_create_session(self, payload: dict[str, Any]) -> None:
         memory: AgenticMemory = self.server.memory
         title = payload.get("title", "Web Console Session")
         model = payload.get("model", "auto")
@@ -684,7 +684,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"error": f"Failed to delete session {session_id}"}, status=HTTPStatus.NOT_FOUND)
 
-    def _handle_get_events(self, session_id: Optional[str] = None) -> None:
+    def _handle_get_events(self, session_id: str | None = None) -> None:
         d1: D1DatabaseClient = self.server.d1_db
         if session_id:
             query = "SELECT * FROM agentic_events WHERE session_id = ? ORDER BY timestamp ASC"
@@ -711,7 +711,7 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_sql_query(self, payload: Dict[str, Any]) -> None:
+    def _handle_sql_query(self, payload: dict[str, Any]) -> None:
         sql = payload.get("sql", "").strip()
         if not sql:
             self._send_json({"error": "Empty SQL query"}, status=HTTPStatus.BAD_REQUEST)
@@ -727,8 +727,8 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                     if isinstance(v, str) and (v.startswith("{") or v.startswith("[")):
                         try:
                             row_dict[k] = json.loads(v)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Operation error suppressed: %s", exc)
                 rows.append(row_dict)
 
             source = "cloudflare_d1" if d1.is_remote else "sqlite_mirror"
@@ -755,7 +755,7 @@ class KratosServer(ThreadingHTTPServer):
         RequestHandlerClass,
         d1_db: D1DatabaseClient,
         memory: AgenticMemory,
-        runtime: Optional[Any] = None,
+        runtime: Any | None = None,
     ):
         self.d1_db = d1_db
         self.memory = memory
@@ -770,9 +770,9 @@ class KratosServer(ThreadingHTTPServer):
 def start_server(
     port: int = 7860,
     open_browser: bool = True,
-    d1_db: Optional[D1DatabaseClient] = None,
-    memory: Optional[AgenticMemory] = None,
-    runtime: Optional[Any] = None,
+    d1_db: D1DatabaseClient | None = None,
+    memory: AgenticMemory | None = None,
+    runtime: Any | None = None,
     daemon: bool = False,
 ) -> KratosServer:
     """Start the Kratos Vice Cyberpunk Web Server."""
@@ -819,8 +819,8 @@ def start_server(
     if open_browser:
         try:
             webbrowser.open(url)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     if daemon:
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -834,8 +834,8 @@ def start_server(
             try:
                 from kratos_agent.live import get_live_runtime
                 get_live_runtime().stop_background()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             server.shutdown()
         return server
 

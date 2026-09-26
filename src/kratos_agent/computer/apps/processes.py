@@ -1,7 +1,7 @@
 """Process management and resource sampling using psutil."""
 from __future__ import annotations
-import os
-from typing import Any, Dict, List, Optional
+
+from typing import Any
 
 from kratos_agent.computer.state import ActionResult
 
@@ -14,12 +14,12 @@ except ImportError:
 class ProcessManager:
     """Monitors, queries, and manages OS processes."""
 
-    def list_processes(self, filter_query: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_processes(self, filter_query: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Lists running processes with PID, name, memory, and CPU metrics."""
         if not psutil:
             return []
 
-        procs: List[Dict[str, Any]] = []
+        procs: list[dict[str, Any]] = []
         q_lower = filter_query.lower() if filter_query else None
 
         for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
@@ -42,7 +42,7 @@ class ProcessManager:
 
         return procs
 
-    def terminate(self, pid: Optional[int] = None, name: Optional[str] = None, force: bool = False) -> ActionResult:
+    def terminate(self, pid: int | None = None, name: str | None = None, force: bool = False) -> ActionResult:
         """Terminates or kills a process by PID or name."""
         if not psutil:
             return ActionResult(ok=False, action="process_terminate", detail="psutil not available")
@@ -77,7 +77,7 @@ class ProcessManager:
 
         return ActionResult(ok=False, action="process_terminate", detail="Specify either pid or name")
 
-    def get_resources(self, pid: Optional[int] = None) -> Dict[str, Any]:
+    def get_resources(self, pid: int | None = None) -> dict[str, Any]:
         """Gets CPU and memory resources for a process or the system."""
         if not psutil:
             return {}
@@ -93,7 +93,7 @@ class ProcessManager:
             return {"error": str(e)}
 
 
-_process_manager: Optional[ProcessManager] = None
+_process_manager: ProcessManager | None = None
 
 
 def get_process_manager() -> ProcessManager:

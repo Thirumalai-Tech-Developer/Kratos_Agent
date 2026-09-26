@@ -1,6 +1,5 @@
 """GUI element tree inspector and pruning engine."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
 from kratos_agent.computer.gui.models import GUIElement
 
@@ -26,9 +25,9 @@ class GUIInspector:
         "pane",
     }
 
-    def filter_interactive(self, elements: List[GUIElement], max_elements: int = 150) -> List[GUIElement]:
+    def filter_interactive(self, elements: list[GUIElement], max_elements: int = 150) -> list[GUIElement]:
         """Prunes structural or invisible nodes, retaining only interactive controls."""
-        filtered: List[GUIElement] = []
+        filtered: list[GUIElement] = []
 
         for el in elements:
             if not el.visible or not el.enabled:
@@ -43,7 +42,7 @@ class GUIInspector:
 
         return filtered
 
-    def summarize_tree(self, elements: List[GUIElement]) -> str:
+    def summarize_tree(self, elements: list[GUIElement]) -> str:
         """Serializes pruned elements into a compact, human/LLM-readable text format."""
         lines = []
         for el in elements:
@@ -55,7 +54,7 @@ class GUIInspector:
         return "\n".join(lines) if lines else "(No interactive elements found)"
 
 
-_inspector: Optional[GUIInspector] = None
+_inspector: GUIInspector | None = None
 
 
 def get_inspector() -> GUIInspector:

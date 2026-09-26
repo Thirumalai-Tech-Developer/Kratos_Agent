@@ -11,14 +11,15 @@ It can contain: tech stack, coding conventions, key commands, architecture notes
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
+import logging
+logger = logging.getLogger(__name__)
 
+from pathlib import Path
 
 _KRATOS_MD_NAMES = ["KRATOS.md", "CLAUDE.md", "AGENTS.md", ".kratos/PROJECT.md"]
 
 
-def _discover_memory_file(start: Optional[Path] = None) -> Optional[Path]:
+def _discover_memory_file(start: Path | None = None) -> Path | None:
     """Walk from start dir upwards looking for a project memory file."""
     cwd = start or Path.cwd()
     search_root = Path(cwd.anchor)  # Don't go above filesystem root
@@ -76,8 +77,8 @@ def _auto_generate_kratos_md(target: Path) -> str:
             m = re.search(r'^name\s*=\s*["\'](.+?)["\']', content, re.MULTILINE)
             if m:
                 project_name = m.group(1)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
 
     lines += [
         f"**Project Name:** {project_name}",
@@ -107,17 +108,17 @@ def _auto_generate_kratos_md(target: Path) -> str:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
     return content
 
 
 class ProjectMemory:
     """Loads and provides project-level memory context for Kratos."""
 
-    def __init__(self, workspace: Optional[str] = None):
+    def __init__(self, workspace: str | None = None):
         self._workspace = Path(workspace) if workspace else Path.cwd()
-        self._file: Optional[Path] = None
+        self._file: Path | None = None
         self._content: str = ""
         self._loaded = False
 
@@ -150,7 +151,7 @@ class ProjectMemory:
         )
 
     @property
-    def file_path(self) -> Optional[Path]:
+    def file_path(self) -> Path | None:
         self._ensure_loaded()
         return self._file
 

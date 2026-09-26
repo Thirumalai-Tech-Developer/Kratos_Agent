@@ -8,14 +8,15 @@ startup.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Mapping
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from .runtime_contracts import ToolPermission, ToolSpec
 
@@ -24,17 +25,17 @@ from .runtime_contracts import ToolPermission, ToolSpec
 class McpServerConfig:
     name: str
     command: str | None = None
-    args: List[str] = field(default_factory=list)
+    args: list[str] = field(default_factory=list)
     url: str | None = None
-    env: Dict[str, str] = field(default_factory=dict)
-    headers: Dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
     transport: str | None = None
     cwd: str | None = None
     enabled: bool = True
     timeout_seconds: int = 30
 
     @classmethod
-    def from_mapping(cls, name: str, raw: Mapping[str, Any]) -> "McpServerConfig":
+    def from_mapping(cls, name: str, raw: Mapping[str, Any]) -> McpServerConfig:
         if not isinstance(raw, Mapping):
             raise ValueError("server entry must be a JSON object")
         command = raw.get("command")
@@ -108,10 +109,10 @@ class McpManager:
     def __init__(self, config_path: Path, workspace: Path | None = None) -> None:
         self.config_path = config_path.resolve()
         self.workspace = (workspace or self.config_path.parent.parent).resolve()
-        self.servers: Dict[str, McpServerConfig] = {}
-        self.import_paths: List[Path] = []
+        self.servers: dict[str, McpServerConfig] = {}
+        self.import_paths: list[Path] = []
         self._local_names: set[str] = set()
-        self.status: Dict[str, Dict[str, Any]] = {}
+        self.status: dict[str, dict[str, Any]] = {}
         self.load()
 
     def load(self) -> None:
@@ -256,7 +257,7 @@ class McpManager:
             raise FileNotFoundError(f"No {framework} MCP config was found in its standard location")
         return self.add_import(existing)
 
-    def discover(self, server_name: str, discoverer: Callable[[McpServerConfig], List[tuple[ToolSpec, Callable[..., str]]]], registry: Any) -> int:
+    def discover(self, server_name: str, discoverer: Callable[[McpServerConfig], list[tuple[ToolSpec, Callable[..., str]]]], registry: Any) -> int:
         """Register discovered tools under stable MCP namespaced tool ids."""
         server = self.servers.get(server_name)
         if not server or not server.enabled:
@@ -269,9 +270,9 @@ class McpManager:
             registry.register(registered, handler)
         return len(discovered)
 
-    def discover_enabled(self, registry: Any) -> Dict[str, Dict[str, Any]]:
+    def discover_enabled(self, registry: Any) -> dict[str, dict[str, Any]]:
         """Connect to each enabled server independently; failures do not abort startup."""
-        summary: Dict[str, Dict[str, Any]] = {}
+        summary: dict[str, dict[str, Any]] = {}
         for name, server in list(self.servers.items()):
             if not server.enabled:
                 self.status[name] = {"state": "disabled", "tools": 0}
@@ -284,7 +285,7 @@ class McpManager:
             summary[name] = dict(self.status[name])
         return summary
 
-    def _sync_sdk(self, server: McpServerConfig, operation: str, tool_name: str | None = None, arguments: Dict[str, Any] | None = None) -> Any:
+    def _sync_sdk(self, server: McpServerConfig, operation: str, tool_name: str | None = None, arguments: dict[str, Any] | None = None) -> Any:
         async def run() -> Any:
             async with self._client(server) as client:
                 if operation == "list_tools":
@@ -356,7 +357,7 @@ class McpManager:
 
     @staticmethod
     def _format_result(result: Any) -> str:
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         structured = getattr(result, "structured_content", None)
         if structured is not None:
             payload["structuredContent"] = structured
@@ -382,7 +383,7 @@ class McpManager:
             payload["content"] = []
         return json.dumps(payload, ensure_ascii=False, default=str)
 
-    def _discover_sdk(self, server: McpServerConfig) -> List[tuple[ToolSpec, Callable[..., str]]]:
+    def _discover_sdk(self, server: McpServerConfig) -> list[tuple[ToolSpec, Callable[..., str]]]:
         discovered = []
         for tool in self._sync_sdk(server, "list_tools"):
             annotations = getattr(tool, "annotations", None)

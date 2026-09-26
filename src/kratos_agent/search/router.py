@@ -5,7 +5,6 @@ import asyncio
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, List, Optional
 
 from .agent_search import AgentSearchProvider
 from .cache import SearchCache
@@ -13,7 +12,7 @@ from .citations import attach_citations
 from .extraction import fetch_and_extract_url
 from .github import GitHubSearchProvider
 from .hybrid import HybridSearchProvider
-from .models import SearchResponse, SearchResult
+from .models import SearchResponse
 from .native import NativeWebSearchProvider
 from .provider import SearchProvider
 from .searxng import SearXNGProvider
@@ -74,8 +73,8 @@ class SearchRouter:
         query: str,
         *,
         mode: str = "standard",
-        category: Optional[str] = None,
-        domains: Optional[List[str]] = None,
+        category: str | None = None,
+        domains: list[str] | None = None,
         max_results: int = 10,
     ) -> SearchResponse:
         """Routes search query through cache, provider, extraction, and citation pipeline."""
@@ -122,7 +121,7 @@ class SearchRouter:
 
 
 # Global SearchRouter singleton
-_global_search_router: Optional[SearchRouter] = None
+_global_search_router: SearchRouter | None = None
 
 
 def get_search_router() -> SearchRouter:

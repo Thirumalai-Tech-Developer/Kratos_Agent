@@ -1,11 +1,10 @@
 """Playwright / Browser DOM backend for GUI automation."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.computer.gui.backends.base import GUIBackend
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
-from kratos_agent.computer.state import ActionResult
 from kratos_agent.computer.browser.playwright import PlaywrightDriver
+from kratos_agent.computer.gui.backends.base import GUIBackend
+from kratos_agent.computer.gui.models import GUIElement
+from kratos_agent.computer.state import ActionResult
 
 
 class PlaywrightBackend(GUIBackend):
@@ -27,17 +26,17 @@ class PlaywrightBackend(GUIBackend):
 
     def dump_tree(
         self,
-        app: Optional[str] = None,
-        root_window: Optional[str] = None,
+        app: str | None = None,
+        root_window: str | None = None,
         max_depth: int = 8,
         max_nodes: int = 400,
         visible_only: bool = True,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         if not self.is_available():
             return []
 
         raw_elements = self._driver.dump_interactive_dom()
-        elements: List[GUIElement] = []
+        elements: list[GUIElement] = []
         for item in raw_elements[:max_nodes]:
             elem = GUIElement(
                 id=item["id"],
@@ -57,16 +56,16 @@ class PlaywrightBackend(GUIBackend):
 
     def find_elements(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
         limit: int = 25,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         tree = self.dump_tree(max_nodes=300)
         q_lower = query.lower() if query else None
         role_lower = role.lower() if role else None
 
-        matches: List[GUIElement] = []
+        matches: list[GUIElement] = []
         for el in tree:
             match = True
             if q_lower:
@@ -81,10 +80,10 @@ class PlaywrightBackend(GUIBackend):
 
     def find_element(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
-    ) -> Optional[GUIElement]:
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
+    ) -> GUIElement | None:
         matches = self.find_elements(query=query, role=role, limit=1)
         return matches[0] if matches else None
 
@@ -92,7 +91,7 @@ class PlaywrightBackend(GUIBackend):
         self,
         element: GUIElement,
         pattern: str = "Invoke",
-        value: Optional[str] = None,
+        value: str | None = None,
     ) -> ActionResult:
         if pattern.lower() in ("value", "set_value", "type") and value is not None:
             return self.type_element(element, value)

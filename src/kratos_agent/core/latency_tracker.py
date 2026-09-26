@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -29,10 +29,10 @@ class RequestMetrics:
     total_ms: float = 0.0
     retry_count: int = 0
     status: str = "completed"
-    error: Optional[str] = None
+    error: str | None = None
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "task_id": self.task_id,
@@ -85,8 +85,8 @@ class LatencyTracker:
 
     def __init__(self, max_records: int = 100) -> None:
         self.max_records = max_records
-        self.records: List[RequestMetrics] = []
-        self._active: Optional[RequestMetrics] = None
+        self.records: list[RequestMetrics] = []
+        self._active: RequestMetrics | None = None
 
     def start_request(
         self,
@@ -118,15 +118,15 @@ class LatencyTracker:
             self.records.pop(0)
         self._active = None
 
-    def get_last_metrics(self) -> Optional[RequestMetrics]:
+    def get_last_metrics(self) -> RequestMetrics | None:
         if self.records:
             return self.records[-1]
         return self._active
 
-    def get_all_metrics(self) -> List[RequestMetrics]:
+    def get_all_metrics(self) -> list[RequestMetrics]:
         return list(self.records)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         if not self.records:
             return {"total_requests": 0, "avg_total_s": 0.0, "avg_generation_s": 0.0}
         total_time = sum(r.total_ms for r in self.records) / len(self.records) / 1000

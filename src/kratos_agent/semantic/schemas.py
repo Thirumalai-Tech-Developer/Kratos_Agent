@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class IntentType(str, Enum):
@@ -28,14 +28,14 @@ class MissionIntent:
     intent_id: str = field(default_factory=lambda: f"INT-{uuid.uuid4().hex[:10].upper()}")
     goal: str = ""
     intent_type: IntentType = IntentType.COMPUTER_ACTION
-    capability: Optional[str] = None
-    arguments: Dict[str, Any] = field(default_factory=dict)
-    constraints: Dict[str, Any] = field(default_factory=dict)
-    expected_result: Dict[str, Any] = field(default_factory=dict)
-    visual_context: Optional[str] = None
+    capability: str | None = None
+    arguments: dict[str, Any] = field(default_factory=dict)
+    constraints: dict[str, Any] = field(default_factory=dict)
+    expected_result: dict[str, Any] = field(default_factory=dict)
+    visual_context: str | None = None
     priority: str = "normal"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "intent_id": self.intent_id,
             "goal": self.goal,

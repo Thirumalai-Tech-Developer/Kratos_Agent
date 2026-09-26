@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from google.genai import types
 
 from kratos_agent.semantic.intent import mission_from_tool_call
 from kratos_agent.semantic.schemas import MissionIntent
+
 from .bridge import KratosBridge
 
 logger = logging.getLogger(__name__)
@@ -32,11 +34,11 @@ class IntentKind(str, Enum):
 class StructuredTask:
     intent: IntentKind
     task: str
-    workspace: Optional[str] = None
+    workspace: str | None = None
     vision_required: bool = False
     confirmation_required: bool = False
     priority: str = "normal"
-    clarification_question: Optional[str] = None
+    clarification_question: str | None = None
 
 
 class LiveRouter:
@@ -45,19 +47,19 @@ class LiveRouter:
     def __init__(
         self,
         bridge: KratosBridge,
-        capture_screen_handler: Optional[Callable[[], Any]] = None,
-        diagnostics_handler: Optional[Callable[[], Dict[str, Any]]] = None,
+        capture_screen_handler: Callable[[], Any] | None = None,
+        diagnostics_handler: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.bridge = bridge
         self.capture_screen_handler = capture_screen_handler
         self.diagnostics_handler = diagnostics_handler
 
-    def set_diagnostics_handler(self, handler: Optional[Callable[[], Dict[str, Any]]]) -> None:
+    def set_diagnostics_handler(self, handler: Callable[[], dict[str, Any]] | None) -> None:
         """Attach Live runtime diagnostics to the structured status tool."""
         self.diagnostics_handler = handler
 
-    def get_tool_declarations(self) -> List[types.Tool]:
-        def obj_schema(properties: Dict[str, types.Schema], required: Optional[List[str]] = None) -> types.Schema:
+    def get_tool_declarations(self) -> list[types.Tool]:
+        def obj_schema(properties: dict[str, types.Schema], required: list[str] | None = None) -> types.Schema:
             return types.Schema(type="OBJECT", properties=properties, required=required or [])
 
         execute_mission = types.FunctionDeclaration(
@@ -141,7 +143,7 @@ class LiveRouter:
 
         return [types.Tool(function_declarations=[execute_mission, observe, search, status, cancel, cont, ask_user])]
 
-    async def handle_tool_call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_tool_call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         logger.info("[LiveRouter] structured tool=%s args=%s", name, args)
 
         if name in {"execute_mission", "delegate_task", "start_agent_task"}:
@@ -249,9 +251,9 @@ class LiveRouter:
     def evaluate_request(
         self,
         user_text: str,
-        active_task: Optional[str] = None,
-        workspace: Optional[str] = None,
-        recent_context: Optional[str] = None,
+        active_task: str | None = None,
+        workspace: str | None = None,
+        recent_context: str | None = None,
         has_visual_context: bool = False,
     ) -> StructuredTask:
         """Compatibility API only. It deliberately performs no semantic classification."""

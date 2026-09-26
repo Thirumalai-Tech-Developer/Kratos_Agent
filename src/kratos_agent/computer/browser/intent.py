@@ -4,8 +4,9 @@ Fast paths are intentionally narrow: a shortcut may handle a pure single-purpose
 request, but compound requests must remain visible to the general agent/Slave.
 """
 from __future__ import annotations
+
 import re
-from typing import Any, Dict
+from typing import Any
 
 _POLITE_PREFIX = re.compile(r"^(?:can you|could you|please|would you mind|i want to|i want you to)\s+", re.IGNORECASE)
 
@@ -79,7 +80,7 @@ def _extract_whatsapp_message(text: str) -> tuple[str, str] | None:
             return target, message
     return None
 
-def parse_media_intent(text: str) -> Dict[str, Any]:
+def parse_media_intent(text: str) -> dict[str, Any]:
     """Parses narrow browser/media intents without swallowing compound computer tasks."""
     raw = text.strip()
     clean = raw.lower()
@@ -185,7 +186,7 @@ def is_pure_browser_media_request(text: str) -> bool:
         "play_video", "pause_video", "resume_video", "standby",
     }
 
-def should_reuse_browser_context(prev_task_target: Any, current_intent: Dict[str, Any]) -> bool:
+def should_reuse_browser_context(prev_task_target: Any, current_intent: dict[str, Any]) -> bool:
     if not prev_task_target:
         return False
     if getattr(prev_task_target, "is_closed", None) and prev_task_target.is_closed():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from ..plugin import HarnessPlugin, PluginMetadata
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class DeepSeekModelPlugin(HarnessPlugin):
     """Handles DeepSeek-specific reasoning patterns (<think>...</think>), DSML tool call parsing, and hyperparameters."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(
             metadata=PluginMetadata(
                 name="deepseek_model",
@@ -32,7 +32,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
         self.max_tokens: int = 8192
         self.thinking_enabled: bool = True
 
-    def on_load(self, kernel: "HarnessKernel") -> None:
+    def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
         kernel.register_service("deepseek_model", self)
 
@@ -41,7 +41,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
             self.kernel.unregister_service("deepseek_model")
         super().on_unload()
 
-    def apply_preset(self, preset_name: str, config: Dict[str, Any]) -> None:
+    def apply_preset(self, preset_name: str, config: dict[str, Any]) -> None:
         """Update model hyperparameters based on preset."""
         super().apply_preset(preset_name, config)
         if "temperature" in config:
@@ -52,7 +52,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
             self.thinking_enabled = bool(config["thinking_enabled"])
 
     @staticmethod
-    def extract_reasoning_and_content(raw_text: str) -> Tuple[str, str]:
+    def extract_reasoning_and_content(raw_text: str) -> tuple[str, str]:
         """Extract reasoning from <think>...</think> blocks and return (reasoning, clean_content)."""
         if not raw_text:
             return "", ""
@@ -66,7 +66,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
         return reasoning, cleaned_content
 
     @staticmethod
-    def extract_dsml_tool_calls(raw_text: str) -> List[Dict[str, Any]]:
+    def extract_dsml_tool_calls(raw_text: str) -> list[dict[str, Any]]:
         """Parse DSML formatted tool invocations:
         <tool>{"name": "...", "arguments": {...}}</｜｜DSML｜｜ parameter>
         or standard <tool>...</tool> blocks.
@@ -74,7 +74,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
         if not raw_text:
             return []
 
-        tool_calls: List[Dict[str, Any]] = []
+        tool_calls: list[dict[str, Any]] = []
 
         # 1. DSML XML-style invoke syntax:
         # <｜｜DSML｜｜ invoke name="...">...<｜｜DSML｜｜ parameter name="...">...</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke>
@@ -95,8 +95,8 @@ class DeepSeekModelPlugin(HarnessPlugin):
                 p_val = p.group(2).strip()
                 try:
                     p_val = json.loads(p_val)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 args[p_name] = p_val
             tool_calls.append({"name": tool_name, "arguments": args})
 
@@ -127,8 +127,8 @@ class DeepSeekModelPlugin(HarnessPlugin):
                                 "name": data["name"],
                                 "arguments": data.get("arguments", {}),
                             })
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
         # 2. <|tool calls|> or <｜tool calls｜> blocks
         tc_block_pattern = re.compile(
@@ -145,11 +145,11 @@ class DeepSeekModelPlugin(HarnessPlugin):
                             "name": data["name"],
                             "arguments": data.get("arguments", {}),
                         })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
         # Deduplicate while preserving order
-        unique_calls: List[Dict[str, Any]] = []
+        unique_calls: list[dict[str, Any]] = []
         seen = set()
         for call in tool_calls:
             sig = (call["name"], json.dumps(call.get("arguments", {}), sort_keys=True))
@@ -159,7 +159,7 @@ class DeepSeekModelPlugin(HarnessPlugin):
 
         return unique_calls
 
-    def parse_model_output(self, raw_text: str) -> Dict[str, Any]:
+    def parse_model_output(self, raw_text: str) -> dict[str, Any]:
         """Comprehensive parsing of model output into reasoning, clean content, and tool calls."""
         reasoning, content = self.extract_reasoning_and_content(raw_text)
         tool_calls = self.extract_dsml_tool_calls(raw_text)

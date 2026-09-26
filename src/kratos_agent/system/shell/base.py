@@ -1,14 +1,14 @@
 """Shell data models and command execution contracts."""
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Optional
+
+from dataclasses import dataclass
 
 
 @dataclass
 class ShellInfo:
     """Represents detected shell capabilities (§28)."""
     name: str
-    version: Optional[str]
+    version: str | None
     platform: str
     executable: str
     supports_and_operator: bool
@@ -22,7 +22,7 @@ class CommandResult:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
-    error_type: Optional[str] = None
+    error_type: str | None = None
 
     def to_output(self) -> str:
         """Returns clean text output for user or agent."""

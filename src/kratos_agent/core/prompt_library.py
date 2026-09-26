@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
 
 DEFAULT_PROMPTS_DIR = Path.cwd() / ".kratos" / "claude_code_prompts"
 
 class ClaudePrompt:
-    def __init__(self, filename: str, path: Path, title: str, description: str, category: str, content: str, token_count: Optional[int] = None):
+    def __init__(self, filename: str, path: Path, title: str, description: str, category: str, content: str, token_count: int | None = None):
         self.filename = filename
         self.path = path
         self.title = title
@@ -17,7 +20,7 @@ class ClaudePrompt:
         self.content = content
         self.token_count = token_count
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "filename": self.filename,
             "title": self.title,
@@ -30,10 +33,10 @@ class ClaudePrompt:
 class PromptLibrary:
     """Indexes, parses, and provides access to all 515+ Claude Code system prompts, subagents, and tools."""
     
-    def __init__(self, prompts_dir: Optional[Path] = None):
+    def __init__(self, prompts_dir: Path | None = None):
         self.prompts_dir = prompts_dir or DEFAULT_PROMPTS_DIR
-        self.prompts: Dict[str, ClaudePrompt] = {}
-        self.categories: Dict[str, List[ClaudePrompt]] = {
+        self.prompts: dict[str, ClaudePrompt] = {}
+        self.categories: dict[str, list[ClaudePrompt]] = {
             "agent": [],
             "system": [],
             "data": [],
@@ -78,10 +81,10 @@ class PromptLibrary:
                         self.categories[cat].append(prompt_obj)
                     else:
                         self.categories.setdefault(cat, []).append(prompt_obj)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
-    def _parse_prompt_file(self, filename: str, text: str) -> Tuple[str, str, str, str, Optional[int]]:
+    def _parse_prompt_file(self, filename: str, text: str) -> tuple[str, str, str, str, int | None]:
         """Parses HTML comment frontmatter and markdown body from a prompt file."""
         title = filename.replace(".md", "").replace("-", " ").title()
         description = "Claude Code prompt component"
@@ -124,7 +127,7 @@ class PromptLibrary:
 
         return title, description, category, body, token_count
 
-    def get_prompt(self, name: str) -> Optional[ClaudePrompt]:
+    def get_prompt(self, name: str) -> ClaudePrompt | None:
         """Retrieves a prompt by key, filename, or partial match."""
         cleaned = name.lower().replace(".md", "").strip()
         if cleaned in self.prompts:
@@ -136,7 +139,7 @@ class PromptLibrary:
                 return p
         return None
 
-    def search_prompts(self, query: str, limit: int = 15) -> List[ClaudePrompt]:
+    def search_prompts(self, query: str, limit: int = 15) -> list[ClaudePrompt]:
         """Performs full-text and metadata search across all indexed prompts."""
         q = query.lower().strip()
         if not q:
@@ -177,7 +180,7 @@ class PromptLibrary:
             "debug": "skill-debugging"
         }
 
-    def detect_subagent_intent(self, query: str) -> Optional[Dict[str, Any]]:
+    def detect_subagent_intent(self, query: str) -> dict[str, Any] | None:
         """Automatically detects user intent and matches it with the best specialized subagent prompt from the 698 prompt library.
         Enables seamless automatic subagent invocation without requiring manual slash commands.
         """
@@ -503,8 +506,8 @@ Act when the goal is clear. Adapt when reality differs from the plan. Verify bef
             st = _git.get_git_status()
             if st and "Working tree clean" not in st and "git status error" not in st:
                 git_status_lines = [l.strip() for l in st.splitlines()[:8] if l.strip()]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         # Top level directory structure
         dir_entries = []
@@ -514,8 +517,8 @@ Act when the goal is clear. Adapt when reality differs from the plan. Verify bef
                 if item.name.startswith(".") or item.name in ("__pycache__", "node_modules", "dist", "build", "venv", ".venv"):
                     continue
                 dir_entries.append(f"{item.name}/" if item.is_dir() else item.name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         dir_summary = ", ".join(dir_entries[:20]) if dir_entries else "Empty workspace"
         git_summary = "\n".join(f"  {l}" for l in git_status_lines) if git_status_lines else "  Working tree clean"

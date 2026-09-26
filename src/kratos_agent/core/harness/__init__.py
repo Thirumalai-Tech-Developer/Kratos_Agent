@@ -1,27 +1,27 @@
 """DeepSeek Harness Framework - Everything is a Plugin architecture."""
 
-from .plugin import HarnessPlugin, PluginMetadata, PluginState
 from .kernel import HarnessKernel
+from .plugin import HarnessPlugin, PluginMetadata, PluginState
 from .presets import (
-    HarnessPreset,
-    StandardPreset,
-    CodePreset,
-    MinimalPreset,
-    CreatorPreset,
     PRESET_REGISTRY,
+    CodePreset,
+    CreatorPreset,
+    HarnessPreset,
+    MinimalPreset,
+    StandardPreset,
     get_preset,
 )
 
 __all__ = [
+    "PRESET_REGISTRY",
+    "CodePreset",
+    "CreatorPreset",
+    "HarnessKernel",
     "HarnessPlugin",
+    "HarnessPreset",
+    "MinimalPreset",
     "PluginMetadata",
     "PluginState",
-    "HarnessKernel",
-    "HarnessPreset",
     "StandardPreset",
-    "CodePreset",
-    "MinimalPreset",
-    "CreatorPreset",
-    "PRESET_REGISTRY",
     "get_preset",
 ]

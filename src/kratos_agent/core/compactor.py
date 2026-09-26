@@ -1,4 +1,8 @@
-from typing import List, Dict, Any, Optional, Tuple
+
+import logging
+logger = logging.getLogger(__name__)
+from typing import Any
+
 from rich.console import Console
 
 console = Console(highlight=False)
@@ -9,7 +13,9 @@ console = Console(highlight=False)
 def _try_headroom_compress(text: str) -> str:
     """Compress text through Headroom if available, otherwise return unchanged."""
     try:
-        from kratos_agent.core.harness.plugins.headroom_plugin import is_headroom_available
+        from kratos_agent.core.harness.plugins.headroom_plugin import (
+            is_headroom_available,
+        )
         if is_headroom_available():
             from headroom import compress
             msgs = [{"role": "user", "content": text}]
@@ -17,8 +23,8 @@ def _try_headroom_compress(text: str) -> str:
             compressed_msgs = getattr(result, "messages", msgs)
             if compressed_msgs:
                 return compressed_msgs[0].get("content", text)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
     return text
 
 
@@ -56,7 +62,7 @@ class ConversationCompactor:
             return f"{head}\n... [trimmed {len(lines) - 5} lines] ...\n{tail}"
         return content_str[:max_chars] + "... [trimmed]"
 
-    def compress_heuristic(self, older_messages: List[Dict[str, str]]) -> str:
+    def compress_heuristic(self, older_messages: list[dict[str, str]]) -> str:
         """Fast offline compression — uses Headroom if available, then summarizes."""
         summary_lines = ["[COMPACTED CONVERSATION CHECKPOINT]"]
         for m in older_messages:
@@ -74,10 +80,10 @@ class ConversationCompactor:
 
     def compress_messages(
         self, 
-        messages: List[Dict[str, str]], 
-        brain: Optional[Any] = None,
+        messages: list[dict[str, str]], 
+        brain: Any | None = None,
         force: bool = False
-    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
         """
         Compresses message history if message count exceeds threshold or force is True.
         Returns: (compressed_messages, stats_dict)
@@ -91,6 +97,8 @@ class ConversationCompactor:
                 "compressed": False,
                 "initial_count": initial_count,
                 "final_count": initial_count,
+                "initial_chars": initial_chars,
+                "final_chars": initial_chars,
                 "initial_tokens": initial_tokens,
                 "final_tokens": initial_tokens,
                 "reduction_percent": 0.0
@@ -106,6 +114,8 @@ class ConversationCompactor:
                 "compressed": False,
                 "initial_count": initial_count,
                 "final_count": initial_count,
+                "initial_chars": initial_chars,
+                "final_chars": initial_chars,
                 "initial_tokens": initial_tokens,
                 "final_tokens": initial_tokens,
                 "reduction_percent": 0.0
@@ -148,6 +158,8 @@ class ConversationCompactor:
             "compressed": True,
             "initial_count": initial_count,
             "final_count": len(new_messages),
+            "initial_chars": initial_chars,
+            "final_chars": final_chars,
             "initial_tokens": initial_tokens,
             "final_tokens": final_tokens,
             "reduction_percent": round(reduction, 1)

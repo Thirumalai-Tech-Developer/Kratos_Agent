@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional
 
 from rich.text import Text
 
@@ -21,9 +20,9 @@ class StatusBar:
         self._started_at: float = time.monotonic()
         self._state: str = "idle"
         self._activity: str = ""
-        self._usage: Dict[str, int] = {}
-        self._tool_name: Optional[str] = None
-        self._task_progress: Optional[str] = None
+        self._usage: dict[str, int] = {}
+        self._tool_name: str | None = None
+        self._task_progress: str | None = None
 
     def reset(self, model_name: str = "", session_id: str = "") -> None:
         if model_name:
@@ -67,7 +66,7 @@ class StatusBar:
         self._state = "failed"
         self._activity = f"Failed: {reason[:40]}" if reason else "Failed"
 
-    def set_usage(self, usage: Dict[str, int]) -> None:
+    def set_usage(self, usage: dict[str, int]) -> None:
         self._usage = usage
 
     def set_model(self, name: str) -> None:
@@ -82,7 +81,7 @@ class StatusBar:
             return f"{secs*1000:.0f}ms"
         return f"{secs:.1f}s"
 
-    def _token_str(self) -> Optional[str]:
+    def _token_str(self) -> str | None:
         u = self._usage
         if not u:
             return None

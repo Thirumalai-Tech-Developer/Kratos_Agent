@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 RetrievalTarget = Literal["web", "tools", "memory", "docs", "github", "all"]
 
@@ -15,7 +15,7 @@ class RetrievalQuery:
     target: str = "web"  # web, tools, memory, docs, github, all
     mode: str = "fast"  # fast, standard, deep, research
     max_results: int = 10
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
 
 
@@ -24,12 +24,12 @@ class RetrievalResult:
     """Consolidated result returned by the RetrievalRouter."""
     target: str
     query: str
-    items: List[Any] = field(default_factory=list)
+    items: list[Any] = field(default_factory=list)
     total: int = 0
     latency_ms: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
             "query": self.query,

@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
+
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class CameraCapture:
 
     def __init__(
         self,
-        out_queue: asyncio.Queue[Dict[str, Any]],
+        out_queue: asyncio.Queue[dict[str, Any]],
         device_index: int = 0,
         max_size: tuple[int, int] = (1024, 1024),
         jpeg_quality: int = 85,
@@ -29,7 +30,7 @@ class CameraCapture:
         self.is_running = False
         self._cap: Any = None
 
-    def _capture_frame(self, cap: Any) -> Optional[Dict[str, Any]]:
+    def _capture_frame(self, cap: Any) -> dict[str, Any] | None:
         ret, frame = cap.read()
         if not ret or frame is None:
             return None
@@ -50,7 +51,7 @@ class CameraCapture:
             "data": buffer.read(),
         }
 
-    async def capture_now_and_queue(self) -> Optional[Dict[str, Any]]:
+    async def capture_now_and_queue(self) -> dict[str, Any] | None:
         """Captures a camera frame on demand and enqueues it for Gemini Live."""
         try:
             import cv2
@@ -136,8 +137,8 @@ class CameraCapture:
             if self._cap is not None:
                 try:
                     self._cap.release()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 self._cap = None
             logger.info("[Camera] Camera released.")
 
@@ -146,6 +147,6 @@ class CameraCapture:
         if self._cap is not None:
             try:
                 self._cap.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
             self._cap = None

@@ -1,15 +1,19 @@
+
+import logging
+logger = logging.getLogger(__name__)
 import platform
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 try:
-    import pyautogui
     import psutil
+    import pyautogui
     import pyperclip
 except ImportError:
     pass
 
-from .base import ComputerController, WindowInfo, DisplayInfo
+from .base import ComputerController, DisplayInfo, WindowInfo
+
 
 class LinuxComputerController(ComputerController):
     def __init__(self):
@@ -36,19 +40,20 @@ class LinuxComputerController(ComputerController):
     def keyboard_type(self, text: str) -> None:
         pyautogui.write(text, interval=0.01)
         
-    def keyboard_press(self, keys: List[str]) -> None:
+    def keyboard_press(self, keys: list[str]) -> None:
         pyautogui.hotkey(*keys)
 
     # ── SCREEN & VISION ────────────────────────────────────
-    def take_screenshot(self, monitor_id: Optional[str] = None) -> bytes:
+    def take_screenshot(self, monitor_id: str | None = None) -> bytes:
         import io
+
         from PIL import ImageGrab
         img = ImageGrab.grab(all_screens=True)
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format='PNG')
         return img_byte_arr.getvalue()
         
-    def get_displays(self) -> List[DisplayInfo]:
+    def get_displays(self) -> list[DisplayInfo]:
         w, h = pyautogui.size()
         return [DisplayInfo(
             id="primary",
@@ -58,7 +63,7 @@ class LinuxComputerController(ComputerController):
         )]
 
     # ── WINDOW MANAGEMENT ──────────────────────────────────
-    def list_windows(self) -> List[WindowInfo]:
+    def list_windows(self) -> list[WindowInfo]:
         # Using wmctrl on Linux
         windows = []
         try:
@@ -76,8 +81,8 @@ class LinuxComputerController(ComputerController):
                         is_active=False,
                         bounds={"x": 0, "y": 0, "width": 0, "height": 0}
                     ))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         return windows
         
     def focus_window(self, window_id: str) -> bool:
@@ -102,7 +107,7 @@ class LinuxComputerController(ComputerController):
         pyperclip.copy(text)
 
     # ── SYSTEM CAPABILITIES ────────────────────────────────
-    def get_system_info(self) -> Dict[str, Any]:
+    def get_system_info(self) -> dict[str, Any]:
         return {
             "os": "Linux",
             "release": platform.release(),
@@ -113,7 +118,7 @@ class LinuxComputerController(ComputerController):
             "disk_percent": psutil.disk_usage('/').percent
         }
         
-    def list_applications(self) -> List[Dict[str, str]]:
+    def list_applications(self) -> list[dict[str, str]]:
         apps = []
         seen = set()
         for p in psutil.process_iter(['pid', 'name']):

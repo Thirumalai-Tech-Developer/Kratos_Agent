@@ -1,22 +1,22 @@
 """Unified MemoryManager API for Memory Engine V2."""
 from __future__ import annotations
-import threading
-from typing import Any, Dict, List, Optional
 
+import threading
+from typing import Any
+
+from kratos_agent.memory.application import ApplicationMemoryStore
+from kratos_agent.memory.decay import reinforce_memory
+from kratos_agent.memory.errors import ErrorMemoryStore
 from kratos_agent.memory.models import (
-    ErrorRecoveryRecord,
     MemoryLayer,
     MemoryQuery,
     MemoryRecord,
     MemoryScope,
     WorkflowRecord,
 )
+from kratos_agent.memory.procedural import ProceduralMemoryStore
 from kratos_agent.memory.store import MemoryStore
 from kratos_agent.memory.working import WorkingMemory
-from kratos_agent.memory.procedural import ProceduralMemoryStore
-from kratos_agent.memory.application import ApplicationMemoryStore
-from kratos_agent.memory.errors import ErrorMemoryStore
-from kratos_agent.memory.decay import reinforce_memory
 
 
 class MemoryManager:
@@ -37,8 +37,8 @@ class MemoryManager:
         scope: MemoryScope = MemoryScope.GLOBAL,
         importance: float = 0.5,
         confidence: float = 0.8,
-        metadata: Optional[Dict[str, Any]] = None,
-        tags: Optional[List[str]] = None,
+        metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> MemoryRecord:
         """Stores a new memory record into the system (§37)."""
         rec = MemoryRecord(
@@ -56,14 +56,14 @@ class MemoryManager:
     def recall(
         self,
         text: str,
-        task: Optional[str] = None,
-        application: Optional[str] = None,
-        project: Optional[str] = None,
-        scope: Optional[MemoryScope] = None,
-        layer: Optional[MemoryLayer] = None,
+        task: str | None = None,
+        application: str | None = None,
+        project: str | None = None,
+        scope: MemoryScope | None = None,
+        layer: MemoryLayer | None = None,
         limit: int = 5,
         min_confidence: float = 0.20,
-    ) -> List[MemoryRecord]:
+    ) -> list[MemoryRecord]:
         """Recalls context-aware ranked memories matching query (§35, §37)."""
         q = MemoryQuery(
             text=text,
@@ -77,11 +77,11 @@ class MemoryManager:
         )
         return self.store.query(q)
 
-    def search(self, text: str, limit: int = 5) -> List[MemoryRecord]:
+    def search(self, text: str, limit: int = 5) -> list[MemoryRecord]:
         """Quick semantic search for memories."""
         return self.recall(text=text, limit=limit)
 
-    def update(self, record_id: str, content: Optional[str] = None, confidence: Optional[float] = None) -> bool:
+    def update(self, record_id: str, content: str | None = None, confidence: float | None = None) -> bool:
         """Updates an existing memory record."""
         rec = self.store.get(record_id)
         if not rec:
@@ -126,7 +126,7 @@ class MemoryManager:
                 self._consolidate_lock.release()
         threading.Thread(target=worker, name="kratos-memory-consolidate", daemon=True).start()
 
-    def get_workflow(self, trigger_or_name: str) -> Optional[WorkflowRecord]:
+    def get_workflow(self, trigger_or_name: str) -> WorkflowRecord | None:
         """Retrieves a learned procedural workflow (§24, §37)."""
         return self.procedural.get_workflow(trigger_or_name)
 
@@ -134,8 +134,8 @@ class MemoryManager:
         self,
         name: str,
         trigger: str,
-        steps: List[str],
-        application: Optional[str] = None,
+        steps: list[str],
+        application: str | None = None,
     ) -> WorkflowRecord:
         """Saves a learned procedural workflow (§24, §37)."""
         return self.procedural.save_workflow(name, trigger, steps, application)
@@ -143,11 +143,11 @@ class MemoryManager:
     def get_compact_context(
         self,
         query_text: str,
-        task: Optional[str] = None,
-        application: Optional[str] = None,
-        project: Optional[str] = None,
+        task: str | None = None,
+        application: str | None = None,
+        project: str | None = None,
         limit: int = 4,
-    ) -> List[str]:
+    ) -> list[str]:
         """Formats retrieved memory into compact context lines for LLM (§42)."""
         records = self.recall(
             text=query_text,
@@ -159,7 +159,7 @@ class MemoryManager:
         return [r.content for r in records if r.content]
 
 
-_memory_manager: Optional[MemoryManager] = None
+_memory_manager: MemoryManager | None = None
 
 
 def get_memory_manager() -> MemoryManager:

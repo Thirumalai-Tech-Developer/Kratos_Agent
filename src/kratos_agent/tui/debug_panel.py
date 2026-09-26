@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -21,7 +21,7 @@ from rich.text import Text
 console = Console()
 
 
-def _safe_json(payload: Dict[str, Any]) -> str:
+def _safe_json(payload: dict[str, Any]) -> str:
     """JSON-dump payload with secrets redacted."""
     _SECRET_KEYS = {
         "api_key", "authorization", "access_token", "refresh_token",
@@ -46,7 +46,7 @@ def _safe_json(payload: Dict[str, Any]) -> str:
 
 # ─── Event log display ────────────────────────────────────────────────────────
 
-def render_event_log(events: List[Dict[str, Any]]) -> None:
+def render_event_log(events: list[dict[str, Any]]) -> None:
     """Render full event trace as a scrollable panel with a summary table."""
     if not events:
         console.print("[dim]No events recorded for this turn.[/dim]\n")
@@ -98,12 +98,12 @@ def render_event_log(events: List[Dict[str, Any]]) -> None:
         if "error" in payload:
             err = str(payload["error"])[:60]
             summary_parts.append(f"error={err}")
-        if "usage" in payload and payload["usage"]:
+        if payload.get("usage"):
             u = payload["usage"]
             total = u.get("total_tokens") or u.get("totalTokens") or 0
             if total:
                 summary_parts.append(f"tokens={total}")
-        if "tool_calls" in payload and payload["tool_calls"]:
+        if payload.get("tool_calls"):
             summary_parts.append(f"calls={len(payload['tool_calls'])}")
         if "message_count" in payload:
             summary_parts.append(f"history={payload['message_count']}")
@@ -123,7 +123,7 @@ def render_event_log(events: List[Dict[str, Any]]) -> None:
     console.print()
 
 
-def render_full_event_detail(events: List[Dict[str, Any]], event_idx: Optional[int] = None) -> None:
+def render_full_event_detail(events: list[dict[str, Any]], event_idx: int | None = None) -> None:
     """Render full JSON detail for a single event or all events."""
     target_events = [events[event_idx]] if event_idx is not None and 0 <= event_idx < len(events) else events
     for i, ev in enumerate(target_events):
@@ -137,7 +137,7 @@ def render_full_event_detail(events: List[Dict[str, Any]], event_idx: Optional[i
         ))
 
 
-def render_step_log(steps: List[Any]) -> None:
+def render_step_log(steps: list[Any]) -> None:
     """Render full step log from EventRenderer.steps for /debug."""
     if not steps:
         console.print("[dim]No steps recorded.[/dim]\n")

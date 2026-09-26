@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from .registry import get_capability_registry
 
 
-def discover_capabilities(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+def discover_capabilities(query: str, limit: int = 8) -> list[dict[str, Any]]:
     return [
         {
             "capability_id": spec.capability_id,

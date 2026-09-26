@@ -1,8 +1,10 @@
 """Keyboard input engine with native Win32 SendInput and cross-platform fallbacks."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import sys
-import time
-from typing import List, Optional
 
 from kratos_agent.computer.state import ActionResult
 
@@ -19,15 +21,15 @@ class KeyboardEngine:
         if pyautogui:
             pyautogui.FAILSAFE = False
 
-    def key_tap(self, keys: List[str]) -> ActionResult:
+    def key_tap(self, keys: list[str]) -> ActionResult:
         """Taps a key combination or sequence (e.g. ['ctrl', 'v'] or ['enter'])."""
         if sys.platform == "win32":
             try:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.key_tap(keys)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             try:
@@ -52,8 +54,8 @@ class KeyboardEngine:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.type_text(text, interval_ms=interval_ms, strategy=strategy)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             try:

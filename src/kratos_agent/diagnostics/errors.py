@@ -4,28 +4,27 @@ import re
 import traceback as tb
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
-
-_SECRET_RE = re.compile(r"(AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]+)", re.I)
+_SECRET_RE = re.compile(r"(AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]+)", re.IGNORECASE)
 
 
 @dataclass(slots=True)
 class ErrorEnvelope:
     error_id: str = field(default_factory=lambda: f"ERR-{uuid.uuid4().hex[:10].upper()}")
-    task_id: Optional[str] = None
-    request_id: Optional[str] = None
+    task_id: str | None = None
+    request_id: str | None = None
     component: str = "unknown"
     stage: str = "unknown"
     error_type: str = "RuntimeError"
     message: str = ""
     user_message: str = ""
     retryable: bool = False
-    recovery_action: Optional[str] = None
-    traceback_reference: Optional[str] = None
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    recovery_action: str | None = None
+    traceback_reference: str | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "error_id": self.error_id,
             "task_id": self.task_id,

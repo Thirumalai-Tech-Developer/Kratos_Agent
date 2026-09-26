@@ -1,6 +1,5 @@
 """Procedural memory store for learned workflows and execution procedures."""
 from __future__ import annotations
-from typing import Dict, List, Optional
 
 from kratos_agent.memory.models import WorkflowRecord
 
@@ -9,14 +8,14 @@ class ProceduralMemoryStore:
     """Stores and retrieves reusable execution workflows (§24)."""
 
     def __init__(self) -> None:
-        self._workflows: Dict[str, WorkflowRecord] = {}
+        self._workflows: dict[str, WorkflowRecord] = {}
 
     def save_workflow(
         self,
         name: str,
         trigger: str,
-        steps: List[str],
-        application: Optional[str] = None,
+        steps: list[str],
+        application: str | None = None,
     ) -> WorkflowRecord:
         key = name.strip().lower()
         if key in self._workflows:
@@ -35,7 +34,7 @@ class ProceduralMemoryStore:
         self._workflows[key] = wf
         return wf
 
-    def get_workflow(self, trigger_or_name: str) -> Optional[WorkflowRecord]:
+    def get_workflow(self, trigger_or_name: str) -> WorkflowRecord | None:
         clean = trigger_or_name.strip().lower()
         if clean in self._workflows:
             return self._workflows[clean]
@@ -45,7 +44,7 @@ class ProceduralMemoryStore:
                 return wf
         return None
 
-    def list_workflows(self) -> List[WorkflowRecord]:
+    def list_workflows(self) -> list[WorkflowRecord]:
         return list(self._workflows.values())
 
     def record_outcome(self, name: str, success: bool) -> None:

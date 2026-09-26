@@ -1,10 +1,14 @@
 """Linux AT-SPI accessibility backend."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.computer.gui.backends.base import GUIBackend
-from kratos_agent.computer.gui.models import GUIElement, Rect, Point
+from kratos_agent.computer.gui.models import GUIElement
 from kratos_agent.computer.state import ActionResult
 
 
@@ -12,7 +16,7 @@ class LinuxATSPIBackend(GUIBackend):
     """Linux AT-SPI (Assistive Technology Service Provider Interface) backend."""
 
     def __init__(self) -> None:
-        self._available: Optional[bool] = None
+        self._available: bool | None = None
         self._atspi: Any = None
 
     @property
@@ -41,16 +45,16 @@ class LinuxATSPIBackend(GUIBackend):
 
     def dump_tree(
         self,
-        app: Optional[str] = None,
-        root_window: Optional[str] = None,
+        app: str | None = None,
+        root_window: str | None = None,
         max_depth: int = 8,
         max_nodes: int = 400,
         visible_only: bool = True,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         if not self.is_available():
             return []
 
-        elements: List[GUIElement] = []
+        elements: list[GUIElement] = []
         elem_id_counter = [1]
 
         def traverse(node: Any, depth: int) -> None:
@@ -92,8 +96,8 @@ class LinuxATSPIBackend(GUIBackend):
 
                 for i in range(node.child_count):
                     traverse(node.get_child_at_index(i), depth + 1)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         try:
             reg = self._atspi.Registry
@@ -104,23 +108,23 @@ class LinuxATSPIBackend(GUIBackend):
                     if app and app.lower() not in (app_node.name or "").lower():
                         continue
                     traverse(app_node, 0)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
         return elements
 
     def find_elements(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
         limit: int = 25,
-    ) -> List[GUIElement]:
+    ) -> list[GUIElement]:
         tree = self.dump_tree(app=app, max_nodes=500)
         q_lower = query.lower() if query else None
         role_lower = role.lower() if role else None
 
-        matches: List[GUIElement] = []
+        matches: list[GUIElement] = []
         for el in tree:
             match = True
             if q_lower:
@@ -138,10 +142,10 @@ class LinuxATSPIBackend(GUIBackend):
 
     def find_element(
         self,
-        query: Optional[str] = None,
-        role: Optional[str] = None,
-        app: Optional[str] = None,
-    ) -> Optional[GUIElement]:
+        query: str | None = None,
+        role: str | None = None,
+        app: str | None = None,
+    ) -> GUIElement | None:
         matches = self.find_elements(query=query, role=role, app=app, limit=1)
         return matches[0] if matches else None
 
@@ -149,7 +153,7 @@ class LinuxATSPIBackend(GUIBackend):
         self,
         element: GUIElement,
         pattern: str = "Invoke",
-        value: Optional[str] = None,
+        value: str | None = None,
     ) -> ActionResult:
         # AT-SPI action interface
         if not self.is_available():

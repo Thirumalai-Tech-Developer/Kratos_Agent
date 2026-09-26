@@ -7,9 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# dist (tracked for Cloudflare wrangler deploy)
-!dist/
-!dist/**
+# dist
+dist/
+dist/**
 dist-ssr
 *.local
 

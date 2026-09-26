@@ -1,24 +1,29 @@
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 import uuid
+from collections.abc import Callable, Iterator
+from typing import Any
+
 import requests
 
 from kratos_agent.brain.config import (
-    authenticate,
-    get_endpoint_url,
-    get_default_model,
-    get_request_timeout,
-    get_max_retries,
-    BrainError,
-    BrainConnectionError,
-    BrainTimeoutError,
-    BrainRateLimitError,
     BrainBadRequestError,
+    BrainConnectionError,
+    BrainError,
     BrainNotFoundError,
+    BrainRateLimitError,
     BrainServerError,
+    BrainTimeoutError,
+    authenticate,
+    get_default_model,
+    get_endpoint_url,
+    get_max_retries,
+    get_request_timeout,
 )
 from kratos_agent.core.latency_tracker import latency_tracker
 
@@ -28,9 +33,9 @@ class BrainClient:
     
     Communicates directly with the Brain gateway ignoring system proxy variables.
     """
-    def __init__(self, endpoint_url: Optional[str] = None):
+    def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or get_endpoint_url()
-        self._session: Optional[requests.Session] = None
+        self._session: requests.Session | None = None
 
     @property
     def session(self) -> requests.Session:
@@ -46,14 +51,14 @@ class BrainClient:
     def build_envelope(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
         stream: bool = True,
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Builds standard OpenAI-compatible chat payload."""
         target_model = model or get_default_model()
-        formatted_messages: List[Dict[str, Any]] = []
+        formatted_messages: list[dict[str, Any]] = []
 
         if system_instruction:
             formatted_messages.append({"role": "system", "content": system_instruction})
@@ -64,7 +69,7 @@ class BrainClient:
             if role in ("system", "developer"):
                 formatted_messages.append({"role": "system", "content": str(content)})
             elif role == "assistant":
-                msg_dict: Dict[str, Any] = {"role": "assistant"}
+                msg_dict: dict[str, Any] = {"role": "assistant"}
                 raw_tools = msg.get("tool_calls") or msg.get("metadata", {}).get("tool_calls")
                 if content is not None:
                     c_str = str(content)
@@ -112,7 +117,7 @@ class BrainClient:
                 else:
                     formatted_messages.append({"role": "user", "content": str(content)})
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": target_model,
             "messages": formatted_messages,
             "stream": stream,
@@ -148,15 +153,15 @@ class BrainClient:
     def complete(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        max_retries: Optional[int] = None,
-        timeout: Optional[float] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
         task_id: str = "",
         stream: bool = True,
-        on_chunk: Optional[Callable[[str], None]] = None,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Executes generation with streaming, latency tracking, and native OpenAI tool call parsing.
         Returns: (text, tool_calls)
         where tool_calls is a list of dicts: [{'id': ..., 'name': ..., 'args': {...}}]
@@ -174,9 +179,9 @@ class BrainClient:
             history_messages=len(messages),
         )
 
-        chunks: List[str] = []
-        raw_tool_calls: Dict[int, Dict[str, Any]] = {}
-        parsed_tool_calls: List[Dict[str, Any]] = []
+        chunks: list[str] = []
+        raw_tool_calls: dict[int, dict[str, Any]] = {}
+        parsed_tool_calls: list[dict[str, Any]] = []
         ttft_recorded = False
 
         try:
@@ -185,7 +190,7 @@ class BrainClient:
                 headers = authenticate()
 
                 attempt = 0
-                last_error: Optional[Exception] = None
+                last_error: Exception | None = None
                 while attempt <= retries:
                     attempt += 1
                     try:
@@ -221,8 +226,8 @@ class BrainClient:
                                                     if on_chunk:
                                                         try:
                                                             on_chunk(content)
-                                                        except Exception:
-                                                            pass
+                                                        except Exception as exc:
+                                                            logger.debug("Operation error suppressed: %s", exc)
                                                 tc_list = delta.get("tool_calls")
                                                 if tc_list:
                                                     has_events = True
@@ -267,8 +272,8 @@ class BrainClient:
                                                     "name": fn.get("name", "tool"),
                                                     "args": parsed_args,
                                                 })
-                                    except Exception:
-                                        pass
+                                    except Exception as exc:
+                                        logger.debug("Operation error suppressed: %s", exc)
                                 break
                             self._handle_http_error_status(resp, target_model, attempt, retries)
                     except (BrainBadRequestError, BrainNotFoundError):
@@ -304,8 +309,8 @@ class BrainClient:
                 if on_chunk and text_out:
                     try:
                         on_chunk(text_out)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
             for idx in sorted(raw_tool_calls.keys()):
                 item = raw_tool_calls[idx]
@@ -343,8 +348,8 @@ class BrainClient:
                 if on_chunk and text:
                     try:
                         on_chunk(text)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
 
             total_duration = (time.monotonic() - start_time) * 1000
             metrics.generation_ms = max(0.0, total_duration - metrics.context_build_ms)
@@ -371,14 +376,14 @@ class BrainClient:
     def generate(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        max_retries: Optional[int] = None,
-        timeout: Optional[float] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
         task_id: str = "",
         stream: bool = True,
-        on_chunk: Optional[Callable[[str], None]] = None,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> str:
         text, tool_calls = self.complete(
             model=model,
@@ -399,18 +404,18 @@ class BrainClient:
     def request_non_streaming_full(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
         max_retries: int = 2,
         timeout: float = 60.0,
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+        tools: list[dict[str, Any]] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         target_model = model or get_default_model()
         payload = self.build_envelope(target_model, messages, system_instruction, stream=False, tools=tools)
         headers = authenticate()
 
         attempt = 0
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         while attempt <= max_retries:
             attempt += 1
@@ -428,7 +433,7 @@ class BrainClient:
                     if choices:
                         msg = choices[0].get("message", {})
                         content = (msg.get("content") or "").strip()
-                        tool_calls: List[Dict[str, Any]] = []
+                        tool_calls: list[dict[str, Any]] = []
                         for tc in msg.get("tool_calls", []):
                             fn = tc.get("function", {})
                             raw_args = fn.get("arguments", "{}")
@@ -477,8 +482,8 @@ class BrainClient:
     def request_non_streaming(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
         max_retries: int = 2,
         timeout: float = 60.0,
     ) -> str:
@@ -488,8 +493,8 @@ class BrainClient:
     def stream(
         self,
         model: str,
-        messages: List[Dict[str, Any]],
-        system_instruction: Optional[str] = None,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
         max_retries: int = 2,
         timeout: float = 60.0,
     ) -> Iterator[str]:
@@ -499,7 +504,7 @@ class BrainClient:
         headers = authenticate()
 
         attempt = 0
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         while attempt <= max_retries:
             attempt += 1
@@ -543,8 +548,8 @@ class BrainClient:
                                     content = msg.get("content")
                                     if content:
                                         yield content
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug("Operation error suppressed: %s", exc)
                         return
 
                     self._handle_http_error_status(resp, target_model, attempt, max_retries)

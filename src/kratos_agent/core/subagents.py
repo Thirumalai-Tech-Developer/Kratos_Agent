@@ -1,11 +1,11 @@
 """Isolated subagent orchestration with structured, persisted results."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List
 import time
 import uuid
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 from .runtime_contracts import ChatMessage
 
@@ -22,7 +22,7 @@ class SubagentResult:
 
 class SubagentManager:
     """Creates fresh histories, so exploration does not pollute the parent context."""
-    def __init__(self, run_isolated: Callable[[str, List[ChatMessage]], str]) -> None:
+    def __init__(self, run_isolated: Callable[[str, list[ChatMessage]], str]) -> None:
         self.run_isolated = run_isolated
 
     def run(self, role: str, task: str) -> SubagentResult:
@@ -34,12 +34,12 @@ class SubagentManager:
         except Exception as exc:
             return SubagentResult(agent_id, role, task, "", error=str(exc), duration_ms=int((time.monotonic() - started) * 1000))
 
-    def run_parallel(self, role: str, tasks: Iterable[str], max_workers: int = 3) -> List[SubagentResult]:
+    def run_parallel(self, role: str, tasks: Iterable[str], max_workers: int = 3) -> list[SubagentResult]:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [pool.submit(self.run, role, task) for task in tasks]
             return [future.result() for future in as_completed(futures)]
 
-    def run_multi_parallel(self, subagent_specs: List[Dict[str, str]], max_workers: int = 4) -> List[SubagentResult]:
+    def run_multi_parallel(self, subagent_specs: list[dict[str, str]], max_workers: int = 4) -> list[SubagentResult]:
         """Runs multiple subagents with distinct roles and tasks in parallel."""
         if not subagent_specs:
             return []

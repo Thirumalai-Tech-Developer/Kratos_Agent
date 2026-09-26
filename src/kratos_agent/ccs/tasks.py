@@ -2,22 +2,28 @@
 Enforces: PRE, POST_LAUNCH, POST_NAVIGATE, POST_ACT, POST_SEARCH, PRE_CLAIM, POST_FAIL.
 """
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from kratos_agent.ccs.base import ActionResult
-from kratos_agent.ccs.perception.screenshot import take_screenshot
+from kratos_agent.ccs.perception.blockers import clear_blocker, detect_blockers
 from kratos_agent.ccs.perception.screen_diff import compute_screen_diff
-from kratos_agent.ccs.perception.blockers import detect_blockers, clear_blocker
-from kratos_agent.core.evidence import Evidence, OutcomeAssertion
+from kratos_agent.ccs.perception.screenshot import take_screenshot
+from kratos_agent.core.evidence import OutcomeAssertion
 from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
+
 
 @dataclass
 class CheckpointRecord:
     checkpoint: str
-    frame_ref: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    frame_ref: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
     timestamp_ms: float = field(default_factory=time.monotonic)
 
 @dataclass
@@ -28,10 +34,10 @@ class TimingBreakdown:
     verify_s: float = 0.0
     wait_s: float = 0.0
     overhead_s: float = 0.0
-    slowest: List[Dict[str, Any]] = field(default_factory=list)
-    budget_violations: List[Dict[str, Any]] = field(default_factory=list)
+    slowest: list[dict[str, Any]] = field(default_factory=list)
+    budget_violations: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "wall_s": round(self.wall_s, 2),
             "perceive_s": round(self.perceive_s, 2),
@@ -47,8 +53,8 @@ class TimingBreakdown:
 def computer_task(
     goal: str,
     ccs: Any,
-    emit: Optional[Callable[[RuntimeEvent], None]] = None,
-    assertion: Optional[OutcomeAssertion] = None,
+    emit: Callable[[RuntimeEvent], None] | None = None,
+    assertion: OutcomeAssertion | None = None,
     max_steps: int = 20,
     budget_seconds: float = 600.0,
 ) -> ActionResult:
@@ -56,15 +62,15 @@ def computer_task(
     Executes a multi-step task with all 7 mandatory perception checkpoints.
     """
     start_time = time.monotonic()
-    checkpoints: List[CheckpointRecord] = []
+    checkpoints: list[CheckpointRecord] = []
     timing = TimingBreakdown()
 
-    def _emit(kind: EventKind, payload: Dict[str, Any]):
+    def _emit(kind: EventKind, payload: dict[str, Any]):
         if emit:
             try:
                 emit(RuntimeEvent(kind, payload, "computer_task"))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     # 1. PRE Checkpoint
     p_start = time.monotonic()
@@ -72,8 +78,8 @@ def computer_task(
     pre_frame_ref = None
     try:
         last_frame_bytes, pre_frame_ref = take_screenshot()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Operation error suppressed: %s", exc)
     timing.perceive_s += (time.monotonic() - p_start)
     checkpoints.append(CheckpointRecord(checkpoint="PRE", frame_ref=pre_frame_ref))
 
@@ -116,8 +122,8 @@ def computer_task(
             changed, diff_px = compute_screen_diff(last_frame_bytes, curr_bytes)
             last_frame_bytes = curr_bytes
             checkpoints.append(CheckpointRecord(checkpoint="POST_ACT", frame_ref=curr_ref, data={"changed": changed, "diff_px": diff_px}))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
         timing.perceive_s += (time.monotonic() - p_start)
 
         # Allow loop to progress or break if single step

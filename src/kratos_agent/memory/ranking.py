@@ -1,8 +1,8 @@
 """Hybrid ranking engine for memory retrieval."""
 from __future__ import annotations
+
 import math
 import time
-from typing import Dict, List, Optional, Tuple
 
 from kratos_agent.memory.models import MemoryQuery, MemoryRecord, MemoryScope
 
@@ -40,13 +40,13 @@ def _compute_text_overlap(query_text: str, content: str) -> float:
 
 def rank_memories(
     query: MemoryQuery,
-    records: List[MemoryRecord],
-    weights: Optional[Dict[str, float]] = None,
-) -> List[Tuple[MemoryRecord, float]]:
+    records: list[MemoryRecord],
+    weights: dict[str, float] | None = None,
+) -> list[tuple[MemoryRecord, float]]:
     """Ranks memory records using hybrid multi-factor scoring (§33)."""
     w = weights or DEFAULT_WEIGHTS
     now = time.time()
-    results: List[Tuple[MemoryRecord, float]] = []
+    results: list[tuple[MemoryRecord, float]] = []
 
     for rec in records:
         # Confidence threshold check (§30)

@@ -1,15 +1,19 @@
 """Browser automation and CDP-based media inspection tools.
 """
 from __future__ import annotations
+
 import json
 import re
 import sys
 import time
 from typing import Any, Dict, Optional
+
 from kratos_agent.ccs.base import ActionResult
 from kratos_agent.core.evidence import OutcomeAssertion
-from kratos_agent.utils.shell_quote import youtube_search_url, build_url
+from kratos_agent.utils.shell_quote import build_url, youtube_search_url
+
 from .cdp import cdp_client
+
 
 def browser_open(url: str, browser: str = "chrome", profile: str = "Default") -> ActionResult:
     """Opens a URL in the browser without shell interpolation, returning the needed assertion."""
@@ -31,8 +35,8 @@ def browser_open(url: str, browser: str = "chrome", profile: str = "Default") ->
         )
 
     # Launch browser via OS process
-    import subprocess
     import os
+    import subprocess
     if sys.platform == "win32":
         try:
             os.startfile(url)
@@ -58,7 +62,7 @@ def browser_open(url: str, browser: str = "chrome", profile: str = "Default") ->
     )
 
 
-def browser_js(script: str) -> Dict[str, Any]:
+def browser_js(script: str) -> dict[str, Any]:
     """Evaluates JavaScript via CDP and returns structured JSON."""
     if not cdp_client.is_available():
         return {"ok": False, "error": "CDP not available"}
@@ -74,7 +78,7 @@ def browser_click(selector: str) -> ActionResult:
     return ActionResult(ok=success, action="browser_click", data={"selector": selector})
 
 
-def media_probe(selector: str = "video", samples: int = 2, gap_ms: int = 1500) -> Dict[str, Any]:
+def media_probe(selector: str = "video", samples: int = 2, gap_ms: int = 1500) -> dict[str, Any]:
     """Probes video playback state via CDP, sampling multiple times to confirm advancing time."""
     if not cdp_client.is_available():
         return {"ok": False, "error": "CDP not available"}

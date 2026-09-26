@@ -5,12 +5,12 @@ from .events import LiveState, LiveStatus, LiveStatusHub
 from .runtime import LiveRuntime, get_live_runtime
 
 __all__ = [
-    "LiveRuntime",
+    "FloatingAvatar",
+    "KratosBridge",
     "LiveConfig",
+    "LiveRuntime",
     "LiveState",
     "LiveStatus",
     "LiveStatusHub",
-    "FloatingAvatar",
-    "KratosBridge",
     "get_live_runtime",
 ]

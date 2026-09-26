@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Dict, Optional, Tuple
 
 
 class TaskDeduplicator:
@@ -14,7 +13,7 @@ class TaskDeduplicator:
     def __init__(self, window_seconds: float = DUPLICATE_WINDOW_SECONDS) -> None:
         self.window_seconds = window_seconds
         # Maps (normalized_task, source) -> timestamp
-        self._history: Dict[Tuple[str, str], float] = {}
+        self._history: dict[tuple[str, str], float] = {}
 
     @staticmethod
     def normalize_task(task_description: str) -> str:
@@ -44,7 +43,7 @@ class TaskDeduplicator:
         self._history.clear()
 
 
-_deduplicator: Optional[TaskDeduplicator] = None
+_deduplicator: TaskDeduplicator | None = None
 
 
 def get_task_deduplicator() -> TaskDeduplicator:

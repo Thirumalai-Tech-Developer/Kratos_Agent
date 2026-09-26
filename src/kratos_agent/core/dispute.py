@@ -6,17 +6,17 @@ on its own initiative, log a FALSE_COMPLETION, and retry.
 """
 from __future__ import annotations
 
-import re
 import logging
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from kratos_agent.core.evidence import Evidence, OutcomeAssertion
 from kratos_agent.ccs.assertions import assertion_runner
+from kratos_agent.core.evidence import Evidence, OutcomeAssertion
 
 logger = logging.getLogger("kratos.dispute")
 
-DISPUTE_TRIGGERS: Dict[str, List[str]] = {
+DISPUTE_TRIGGERS: dict[str, list[str]] = {
     "en": [
         r"\bno\b.{0,20}\b(didn'?t|not|never)\b",
         r"\bit'?s not\b",
@@ -86,12 +86,12 @@ class DisputeResult:
     reverified: bool
     evidence: Evidence
     wrong: bool
-    retraction: Optional[str]
+    retraction: str | None
     action: str  # "retrying" | "needs_user" | "explain" | "closed"
-    new_task_id: Optional[str] = None
-    explanation: Optional[str] = None
+    new_task_id: str | None = None
+    explanation: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reverified": self.reverified,
             "evidence": self.evidence.to_model_dict(),
@@ -115,7 +115,7 @@ def infer_assertion_from_goal(goal: str) -> OutcomeAssertion:
     return OutcomeAssertion(kind="screen_changed", params={"min_changed_px": 32})
 
 
-def build_retraction(task_claim: str, fresh: Evidence, blockers: List[Any]) -> str:
+def build_retraction(task_claim: str, fresh: Evidence, blockers: list[Any]) -> str:
     """Builds an honest, spoken retraction line."""
     blocker_names = [getattr(b, "name", str(b)) for b in blockers]
     if "youtube_bot_wall" in blocker_names:
@@ -125,10 +125,10 @@ def build_retraction(task_claim: str, fresh: Evidence, blockers: List[Any]) -> s
         )
     if fresh.detail:
         return f"You're right, my mistake — {fresh.detail}."
-    return f"You're right — I said it was completed, but verifying the live screen shows it did not happen."
+    return "You're right — I said it was completed, but verifying the live screen shows it did not happen."
 
 
-def retryable(blockers: List[Any], fresh: Evidence) -> bool:
+def retryable(blockers: list[Any], fresh: Evidence) -> bool:
     """Determines whether an autonomous retry is viable."""
     blocker_names = [getattr(b, "name", str(b)) for b in blockers]
     if "youtube_bot_wall" in blocker_names or "os_uac" in blocker_names:
@@ -138,7 +138,7 @@ def retryable(blockers: List[Any], fresh: Evidence) -> bool:
 
 async def handle_dispute(
     runtime: Any,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
     observation: str = "",
     lang: str = "auto",
 ) -> DisputeResult:
@@ -243,8 +243,8 @@ async def handle_dispute(
         try:
             ccs.window_action(primary_win, "restore")
             ccs.focus_window(primary_win)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Operation error suppressed: %s", exc)
 
     return DisputeResult(
         reverified=True,

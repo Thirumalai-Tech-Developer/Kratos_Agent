@@ -1,17 +1,22 @@
-import threading
+
+import logging
+logger = logging.getLogger(__name__)
 import queue
-from typing import List, Optional, Any, Callable
+import threading
+from collections.abc import Callable
+from typing import Any
 
 try:
-    import comtypes.client
     import comtypes
+    import comtypes.client
     # Generate wrapper for UIAutomationClient if not already generated
     UIAutomationClient = comtypes.client.GetModule("UIAutomationCore.dll")
     from comtypes.gen.UIAutomationClient import *
 except ImportError:
     UIAutomationClient = None
 
-from kratos_agent.ccs.base import Rect, ElementHandle, CapabilityUnavailable
+from kratos_agent.ccs.base import CapabilityUnavailable, ElementHandle, Rect
+
 
 class UIAWorker:
     def __init__(self):
@@ -49,7 +54,7 @@ class WindowsA11yEngine:
     def __init__(self):
         self.worker = UIAWorker()
 
-    def dump_tree(self, max_depth: int = 12, max_nodes: int = 800) -> List[ElementHandle]:
+    def dump_tree(self, max_depth: int = 12, max_nodes: int = 800) -> list[ElementHandle]:
         def _do_dump():
             elements = []
             # We skip traversing here as a full UIAutomation traversal in python can be very slow.
@@ -89,15 +94,15 @@ class WindowsA11yEngine:
                     while child:
                         traverse(child, depth + 1, current_id)
                         child = self.worker.tree_walker.GetNextSiblingElement(child)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
 
             traverse(self.worker.root, 0, [0])
             return elements
 
         return self.worker.submit(_do_dump)
 
-_engine: Optional[WindowsA11yEngine] = None
+_engine: WindowsA11yEngine | None = None
 
 def get_a11y_engine() -> WindowsA11yEngine:
     global _engine
@@ -105,7 +110,7 @@ def get_a11y_engine() -> WindowsA11yEngine:
         _engine = WindowsA11yEngine()
     return _engine
 
-def dump_ui_tree(app: Optional[str] = None, max_depth: int = 12, max_nodes: int = 800, visible_only: bool = True) -> List[ElementHandle]:
+def dump_ui_tree(app: str | None = None, max_depth: int = 12, max_nodes: int = 800, visible_only: bool = True) -> list[ElementHandle]:
     try:
         engine = get_a11y_engine()
         return engine.dump_tree(max_depth=max_depth, max_nodes=max_nodes)

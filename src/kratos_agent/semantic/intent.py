@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from .schemas import IntentType, MissionIntent
 
@@ -26,7 +26,7 @@ def _infer_intent_type(capability: str | None) -> IntentType:
     return IntentType.COMPUTER_ACTION
 
 
-def mission_from_tool_call(args: Dict[str, Any]) -> MissionIntent:
+def mission_from_tool_call(args: dict[str, Any]) -> MissionIntent:
     mission = str(args.get("mission") or args.get("objective") or args.get("task_description") or "").strip()
     capability = args.get("capability") or args.get("action")
     return MissionIntent(

@@ -6,12 +6,10 @@ directly to sys.stdout.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 
 class SingleLineStepTracker:
     def __init__(self) -> None:
-        self._active_text: Optional[str] = None
+        self._active_text: str | None = None
         self._running: bool = False
         self.enabled: bool = False  # Disabled by default so Rich Live renderer owns stdout
 

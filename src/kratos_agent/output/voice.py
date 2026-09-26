@@ -1,9 +1,11 @@
 """Batched sentence voice buffer and single-worker TTS queue."""
 from __future__ import annotations
+
 import asyncio
 import logging
 import re
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("kratos.voice")
 
@@ -49,7 +51,7 @@ class VoiceBuffer:
         else:
             self._buffer += text
 
-    def flush_sentence(self) -> Optional[str]:
+    def flush_sentence(self) -> str | None:
         """Flushes a complete sentence if one exists and passes internal reasoning filter."""
         if not self._buffer:
             return None
@@ -84,7 +86,7 @@ class VoiceBuffer:
 
         return None
 
-    def flush(self) -> Optional[str]:
+    def flush(self) -> str | None:
         """Flushes all remaining text in the buffer, filtering internal reasoning."""
         remaining = self._buffer.strip()
         self._buffer = ""
@@ -99,11 +101,11 @@ class VoiceBuffer:
 class TTSQueue:
     """Asynchronous single-worker queue for serialized text-to-speech execution (§12, §13)."""
 
-    def __init__(self, speech_func: Optional[Callable[[str], Any]] = None) -> None:
+    def __init__(self, speech_func: Callable[[str], Any] | None = None) -> None:
         self.speech_func = speech_func
-        self._queue: Optional[asyncio.Queue[str]] = None
-        self._worker_task: Optional[asyncio.Task] = None
-        self._current_speech_task: Optional[asyncio.Task] = None
+        self._queue: asyncio.Queue[str] | None = None
+        self._worker_task: asyncio.Task | None = None
+        self._current_speech_task: asyncio.Task | None = None
         self._is_cancelled: bool = False
 
     def _ensure_queue(self) -> asyncio.Queue[str]:
@@ -172,8 +174,8 @@ class TTSQueue:
                     break
 
 
-_voice_buffer: Optional[VoiceBuffer] = None
-_tts_queue: Optional[TTSQueue] = None
+_voice_buffer: VoiceBuffer | None = None
+_tts_queue: TTSQueue | None = None
 
 
 def get_voice_buffer() -> VoiceBuffer:

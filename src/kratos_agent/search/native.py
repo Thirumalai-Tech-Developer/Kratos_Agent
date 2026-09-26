@@ -7,7 +7,6 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
 
 from .citations import attach_citations
 from .models import SearchResponse, SearchResult
@@ -30,13 +29,13 @@ class NativeWebSearchProvider(SearchProvider):
         self,
         query: str,
         *,
-        category: Optional[str] = None,
-        domains: Optional[List[str]] = None,
-        language: Optional[str] = None,
+        category: str | None = None,
+        domains: list[str] | None = None,
+        language: str | None = None,
         max_results: int = 10,
     ) -> SearchResponse:
         start_time = time.monotonic()
-        results: List[SearchResult] = []
+        results: list[SearchResult] = []
 
         # 1. Try DuckDuckGo
         try:

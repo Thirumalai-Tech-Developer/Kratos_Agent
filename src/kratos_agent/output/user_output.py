@@ -1,10 +1,10 @@
 """User-facing event filter governing what reaches terminal and speech."""
 from __future__ import annotations
-from enum import Enum
-from typing import Optional
 
-from kratos_agent.events.models import AgentEvent, EventType
+from enum import Enum
+
 from kratos_agent.events.filters import is_user_visible
+from kratos_agent.events.models import AgentEvent, EventType
 
 
 class OutputMode(str, Enum):
@@ -53,7 +53,7 @@ class UserOutputFilter:
         )
 
 
-_user_output_filter: Optional[UserOutputFilter] = None
+_user_output_filter: UserOutputFilter | None = None
 
 
 def get_user_output_filter() -> UserOutputFilter:

@@ -1,17 +1,17 @@
 """Computer environment observer and state diff engine."""
 from __future__ import annotations
+
 import platform
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from kratos_agent.computer.state import ComputerState, ObservationDiff
-from kratos_agent.computer.gui.models import GUIElement, WindowInfo
-from kratos_agent.computer.apps.windows import get_window_manager
 from kratos_agent.computer.apps.focus import get_active_window
 from kratos_agent.computer.apps.processes import get_process_manager
-from kratos_agent.computer.filesystem.clipboard import get_clipboard_engine
+from kratos_agent.computer.apps.windows import get_window_manager
 from kratos_agent.computer.browser.manager import get_browser_manager
-from kratos_agent.computer.state_cache import get_state_cache, StateCache
+from kratos_agent.computer.filesystem.clipboard import get_clipboard_engine
+from kratos_agent.computer.state import ComputerState, ObservationDiff
+from kratos_agent.computer.state_cache import StateCache, get_state_cache
 
 
 class ComputerObserver:
@@ -19,7 +19,7 @@ class ComputerObserver:
 
     def __init__(self) -> None:
         self._generation: int = 1
-        self._last_state: Optional[ComputerState] = None
+        self._last_state: ComputerState | None = None
         self._state_cache: StateCache = get_state_cache()
 
     def observe(
@@ -27,7 +27,7 @@ class ComputerObserver:
         include_interactive: bool = True,
         max_elements: int = 150,
         force_refresh: bool = False,
-        targeted_query: Optional[str] = None,
+        targeted_query: str | None = None,
     ) -> ComputerState:
         """Captures a complete, compact observation of the computer environment."""
         start = time.time()
@@ -65,7 +65,7 @@ class ComputerObserver:
         clip_text = get_clipboard_engine().read()
 
         # 6. Interactive Elements (from A11y or DOM)
-        interactive_elements: List[Dict[str, Any]] = []
+        interactive_elements: list[dict[str, Any]] = []
         if include_interactive:
             interactive_elements = self._gather_interactive_elements(
                 max_elements=max_elements,
@@ -99,10 +99,10 @@ class ComputerObserver:
     def _gather_interactive_elements(
         self,
         max_elements: int = 150,
-        targeted_query: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        targeted_query: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Gathers interactive elements from available backends (A11y or DOM)."""
-        elements: List[Dict[str, Any]] = []
+        elements: list[dict[str, Any]] = []
 
         # Check browser DOM first if active window is a browser
         browser_mgr = get_browser_manager()
@@ -133,7 +133,7 @@ class ComputerObserver:
 
     def compute_diff(self, before: ComputerState, after: ComputerState) -> ObservationDiff:
         """Compares before and after states to determine if state changed."""
-        changes: List[str] = []
+        changes: list[str] = []
 
         # 1. Active window changed?
         before_active = (before.active_window or {}).get("title", "")
@@ -182,7 +182,7 @@ class ComputerObserver:
         )
 
 
-_observer: Optional[ComputerObserver] = None
+_observer: ComputerObserver | None = None
 
 
 def get_observer() -> ComputerObserver:

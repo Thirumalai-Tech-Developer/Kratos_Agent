@@ -1,5 +1,6 @@
 """Event filtering predicates for separating internal actions from user progress."""
 from __future__ import annotations
+
 from kratos_agent.events.models import AgentEvent, EventType
 
 USER_VISIBLE_EVENTS = {

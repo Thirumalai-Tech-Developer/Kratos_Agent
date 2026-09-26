@@ -1,6 +1,8 @@
 """Cross-application clipboard engine."""
 from __future__ import annotations
-from typing import Optional
+
+import logging
+logger = logging.getLogger(__name__)
 
 from kratos_agent.computer.state import ActionResult
 
@@ -18,8 +20,8 @@ class ClipboardEngine:
         if pyperclip:
             try:
                 return pyperclip.paste()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
         return ""
 
     def write(self, text: str) -> ActionResult:
@@ -37,7 +39,7 @@ class ClipboardEngine:
         return self.write("")
 
 
-_clipboard_engine: Optional[ClipboardEngine] = None
+_clipboard_engine: ClipboardEngine | None = None
 
 
 def get_clipboard_engine() -> ClipboardEngine:

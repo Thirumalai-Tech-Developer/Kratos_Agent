@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from threading import RLock
-from typing import Dict, Iterable, List, Optional
 
 from .schema import CapabilitySpec
 
@@ -83,7 +83,7 @@ def _builtin_capabilities() -> Iterable[CapabilitySpec]:
 class CapabilityRegistry:
     def __init__(self) -> None:
         self._lock = RLock()
-        self._items: Dict[str, CapabilitySpec] = {}
+        self._items: dict[str, CapabilitySpec] = {}
         for spec in _builtin_capabilities():
             self.register(spec)
 
@@ -91,18 +91,18 @@ class CapabilityRegistry:
         with self._lock:
             self._items[spec.capability_id] = spec
 
-    def get(self, capability_id: str) -> Optional[CapabilitySpec]:
+    def get(self, capability_id: str) -> CapabilitySpec | None:
         with self._lock:
             return self._items.get(capability_id)
 
-    def all(self) -> List[CapabilitySpec]:
+    def all(self) -> list[CapabilitySpec]:
         with self._lock:
             return list(self._items.values())
 
     def validate(self, capability_id: str) -> bool:
         return self.get(capability_id) is not None
 
-    def discover(self, query: str, limit: int = 8) -> List[CapabilitySpec]:
+    def discover(self, query: str, limit: int = 8) -> list[CapabilitySpec]:
         """Discover capabilities using exact token matches, not substring matches.
 
         Natural-language mission text can contain common words that happen to appear
@@ -139,7 +139,7 @@ class CapabilityRegistry:
         return [spec for _, spec in scored[:limit]]
 
 
-_global_registry: Optional[CapabilityRegistry] = None
+_global_registry: CapabilityRegistry | None = None
 
 
 def get_capability_registry() -> CapabilityRegistry:

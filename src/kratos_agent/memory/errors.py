@@ -1,6 +1,5 @@
 """Error and recovery memory store for self-healing execution."""
 from __future__ import annotations
-from typing import Dict, List, Optional
 
 from kratos_agent.memory.models import ErrorRecoveryRecord
 
@@ -9,7 +8,7 @@ class ErrorMemoryStore:
     """Stores known error patterns and proven recovery solutions (§26)."""
 
     def __init__(self) -> None:
-        self._solutions: Dict[str, ErrorRecoveryRecord] = {}
+        self._solutions: dict[str, ErrorRecoveryRecord] = {}
 
     def record_solution(self, error: str, solution: str, context: str = "") -> ErrorRecoveryRecord:
         key = error.strip().lower()
@@ -28,7 +27,7 @@ class ErrorMemoryStore:
         self._solutions[key] = rec
         return rec
 
-    def find_solution(self, error: str) -> Optional[ErrorRecoveryRecord]:
+    def find_solution(self, error: str) -> ErrorRecoveryRecord | None:
         clean = error.strip().lower()
         if clean in self._solutions:
             return self._solutions[clean]

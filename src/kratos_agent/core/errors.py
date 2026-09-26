@@ -1,10 +1,9 @@
 """Structured error representation and context preservation for Kratos Agent (§2, §3, §4)."""
 from __future__ import annotations
 
-import sys
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -16,13 +15,13 @@ class KratosError:
     message: str
     recoverable: bool = False
     retryable: bool = False
-    details: Dict[str, Any] = field(default_factory=dict)
-    cause: Optional[str] = None
-    traceback: Optional[str] = None
-    task_id: Optional[str] = None
-    operation_id: Optional[str] = None
+    details: dict[str, Any] = field(default_factory=dict)
+    cause: str | None = None
+    traceback: str | None = None
+    task_id: str | None = None
+    operation_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "subsystem": self.subsystem,
             "operation": self.operation,
@@ -56,11 +55,11 @@ def create_kratos_error(
     exc: Exception | str,
     subsystem: str,
     operation: str,
-    task_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
+    task_id: str | None = None,
+    operation_id: str | None = None,
     recoverable: bool = False,
     retryable: bool = False,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
 ) -> KratosError:
     """Creates a KratosError from an exception or error message without discarding context."""
     if isinstance(exc, Exception):
@@ -99,11 +98,11 @@ class TaskResult:
     verified: bool
     subsystem: str
     operation: str
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[KratosError] = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    error: KratosError | None = None
     recovery_attempts: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "success": self.success,

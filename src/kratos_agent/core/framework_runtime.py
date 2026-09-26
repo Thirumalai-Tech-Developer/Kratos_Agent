@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any
 
 from .runtime_contracts import ToolPermission, ToolSpec
 
@@ -16,10 +16,10 @@ class ExternalAgentFrameworks:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve()
 
-    def available(self) -> Dict[str, str | None]:
+    def available(self) -> dict[str, str | None]:
         return {"openclaw": shutil.which("openclaw"), "claude-code": shutil.which("claude")}
 
-    def import_integration(self, source: str, mcp_manager: Any, skill_manager: Any) -> Dict[str, Any]:
+    def import_integration(self, source: str, mcp_manager: Any, skill_manager: Any) -> dict[str, Any]:
         """Import skills and MCP declarations from a framework or plugin bundle.
 
         The plugin's native code/hooks are left to its own framework. Kratos only
@@ -27,7 +27,7 @@ class ExternalAgentFrameworks:
         """
         source = source.strip()
         normalized = source.lower()
-        imported_configs: List[Path] = []
+        imported_configs: list[Path] = []
         skill_count = 0
 
         if normalized in {"openclaw", "open-claw"}:

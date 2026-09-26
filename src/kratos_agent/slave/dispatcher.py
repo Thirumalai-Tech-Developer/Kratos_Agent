@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Awaitable, Callable, Dict
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from kratos_agent.master.protocol import MasterCommand, SlaveResult
 
@@ -11,7 +11,7 @@ class SlaveDispatcher:
 
     def __init__(self, owner: Any) -> None:
         self.owner = owner
-        self._handlers: Dict[str, Callable[[MasterCommand], Awaitable[SlaveResult]]] = {
+        self._handlers: dict[str, Callable[[MasterCommand], Awaitable[SlaveResult]]] = {
             "browser.youtube.play": owner._execute_youtube_play,
             "browser.youtube.pause": owner._execute_browser_pause,
             "browser.youtube.resume": owner._execute_browser_resume,

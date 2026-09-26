@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from kratos_agent.orchestrator.mission import Mission, get_mission_coordinator
 from kratos_agent.orchestrator.planner import build_execution_plan
@@ -18,11 +18,11 @@ class MasterMissionRunner:
         *,
         goal: str,
         capability: str,
-        arguments: Optional[Dict[str, Any]] = None,
-        constraints: Optional[Dict[str, Any]] = None,
-        expected_result: Optional[Dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        expected_result: dict[str, Any] | None = None,
         priority: str = "normal",
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> Mission:
         mission = get_mission_coordinator().create(
             goal=goal,

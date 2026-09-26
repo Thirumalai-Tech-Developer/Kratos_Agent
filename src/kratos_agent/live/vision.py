@@ -4,11 +4,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .camera import CameraCapture
 from .events import LiveStatusHub
-from .screen import ScreenCapture, ScreenFrame, ComponentHealth, CaptureHealth, get_vision_frame_cache
+from .screen import (
+    CaptureHealth,
+    ScreenCapture,
+    ScreenFrame,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +22,9 @@ class VisionManager:
 
     def __init__(
         self,
-        out_queue: asyncio.Queue[Dict[str, Any]],
+        out_queue: asyncio.Queue[dict[str, Any]],
         mode: str = "camera",
-        status_hub: Optional[LiveStatusHub] = None,
+        status_hub: LiveStatusHub | None = None,
         camera_max_size: tuple[int, int] = (1024, 1024),
         screen_max_size: tuple[int, int] = (1920, 1080),
         camera_quality: int = 85,
@@ -45,13 +49,13 @@ class VisionManager:
             jpeg_quality=screen_quality,
             fps=fps,
         )
-        self._tasks: List[asyncio.Task[Any]] = []
+        self._tasks: list[asyncio.Task[Any]] = []
 
     def check_screen_health(self) -> CaptureHealth:
         """Performs a synchronous local screen capture health check."""
         return self.screen.health_check()
 
-    def get_capture_status(self) -> Dict[str, Any]:
+    def get_capture_status(self) -> dict[str, Any]:
         """Returns structured capture status for CLI and UI (§13)."""
         health = self.screen.health_check()
         gemini_connected = (
@@ -120,7 +124,7 @@ class VisionManager:
         if self.status_hub:
             self.status_hub.update(camera_active=False, screen_active=False)
 
-    async def set_mode(self, mode: str) -> Dict[str, Any]:
+    async def set_mode(self, mode: str) -> dict[str, Any]:
         """Dynamically switch vision mode and return health status (§12, §13)."""
         mode = mode.lower().strip()
         if mode not in ("camera", "screen", "both", "none", "off"):
@@ -131,15 +135,15 @@ class VisionManager:
         await self.start()
         return self.get_capture_status()
 
-    async def capture_screen_now(self) -> Optional[ScreenFrame]:
+    async def capture_screen_now(self) -> ScreenFrame | None:
         """Trigger an on-demand screen capture immediately and return ScreenFrame."""
         return await self.screen.capture_now_and_queue()
 
-    async def capture_camera_now(self) -> Optional[Dict[str, Any]]:
+    async def capture_camera_now(self) -> dict[str, Any] | None:
         """Trigger an on-demand camera capture immediately and send to Gemini."""
         return await self.camera.capture_now_and_queue()
 
-    async def capture_vision_now(self, preferred_source: str = "screen") -> Optional[Any]:
+    async def capture_vision_now(self, preferred_source: str = "screen") -> Any | None:
         """Captures either screen or camera based on active mode or preference."""
         if preferred_source == "camera" or self.mode == "camera":
             return await self.capture_camera_now()

@@ -9,7 +9,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from kratos_agent.master.protocol import (
     CommandAction,
@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 class SlaveExecutor:
     """Consumes commands from Master, executes tools silently, and returns verified evidence."""
 
-    def __init__(self, runtime: Optional[Any] = None) -> None:
+    def __init__(self, runtime: Any | None = None) -> None:
         self.command_bus = get_command_bus()
         self.runtime = runtime
         self._running = False
-        self._worker_task: Optional[asyncio.Task[Any]] = None
-        self._active_command: Optional[MasterCommand] = None
+        self._worker_task: asyncio.Task[Any] | None = None
+        self._active_command: MasterCommand | None = None
         self._cancellation_event = threading.Event()
         self._lock = threading.Lock()
 
@@ -147,9 +147,11 @@ class SlaveExecutor:
     async def _execute_youtube_play(self, cmd: MasterCommand) -> SlaveResult:
         """Executes YouTube playback with strict physical verification."""
         from kratos_agent.computer.browser.intent import should_reuse_browser_context
-        from kratos_agent.computer.browser.playwright import PlaywrightDriver, can_report_success
+        from kratos_agent.computer.browser.playwright import (
+            PlaywrightDriver,
+            can_report_success,
+        )
         from kratos_agent.computer.browser.target import get_target_manager
-        from kratos_agent.computer.browser.manager import get_browser_manager
 
         query = str(cmd.parameters.get("query") or "").strip()
         if not query:
@@ -414,7 +416,7 @@ class SlaveExecutor:
 
 
 # Global SlaveExecutor singleton
-_global_slave_executor: Optional[SlaveExecutor] = None
+_global_slave_executor: SlaveExecutor | None = None
 
 
 def get_slave_executor() -> SlaveExecutor:

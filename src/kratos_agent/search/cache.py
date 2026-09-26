@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
 
 from .models import SearchResponse
 
@@ -14,7 +13,7 @@ class SearchCache:
 
     def __init__(self, default_ttl_seconds: float = 300.0) -> None:
         self.default_ttl = default_ttl_seconds
-        self._cache: Dict[str, Tuple[float, SearchResponse]] = {}
+        self._cache: dict[str, tuple[float, SearchResponse]] = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -24,12 +23,12 @@ class SearchCache:
         keywords = ("latest", "today", "current", "now", "recent", "newest", "yesterday", "breaking")
         return any(re.search(r"\b" + re.escape(kw) + r"\b", q) for kw in keywords)
 
-    def _normalize_key(self, query: str, category: Optional[str] = None, mode: str = "standard") -> str:
+    def _normalize_key(self, query: str, category: str | None = None, mode: str = "standard") -> str:
         q_norm = re.sub(r"\s+", " ", query.strip().lower())
         cat_norm = (category or "general").lower()
         return f"{cat_norm}::{mode}::{q_norm}"
 
-    def get(self, query: str, category: Optional[str] = None, mode: str = "standard") -> Optional[SearchResponse]:
+    def get(self, query: str, category: str | None = None, mode: str = "standard") -> SearchResponse | None:
         """Retrieves cached response if valid, unexpired, and not freshness-sensitive."""
         if self._is_freshness_sensitive(query):
             return None
@@ -51,9 +50,9 @@ class SearchCache:
         self,
         query: str,
         response: SearchResponse,
-        category: Optional[str] = None,
+        category: str | None = None,
         mode: str = "standard",
-        ttl: Optional[float] = None,
+        ttl: float | None = None,
     ) -> None:
         """Stores response in cache unless freshness sensitive."""
         if self._is_freshness_sensitive(query):

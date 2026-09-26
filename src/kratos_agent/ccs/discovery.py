@@ -1,11 +1,11 @@
-import platform
 import os
-from typing import Dict, Any, Optional
+import platform
+from typing import Any
 
 from .base import ComputerController
 
-_CONTROLLER_INSTANCE: Optional[ComputerController] = None
-_CAPABILITY_MAP: Optional[Dict[str, Any]] = None
+_CONTROLLER_INSTANCE: ComputerController | None = None
+_CAPABILITY_MAP: dict[str, Any] | None = None
 
 def get_computer_controller() -> ComputerController:
     """Returns the platform-specific computer controller singleton."""
@@ -31,7 +31,7 @@ def get_computer_controller() -> ComputerController:
         
     return _CONTROLLER_INSTANCE
 
-def get_capability_map() -> Dict[str, Any]:
+def get_capability_map() -> dict[str, Any]:
     """Detects and caches the host's capabilities."""
     global _CAPABILITY_MAP
     if _CAPABILITY_MAP is not None:

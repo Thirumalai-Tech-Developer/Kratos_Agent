@@ -1,15 +1,15 @@
 """Visual scene interpreter and UI state understander."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
 
-from kratos_agent.ccs.perception.screenshot import take_screenshot
+from typing import Any
+
 from kratos_agent.computer.vision.detector import get_vision_detector
 
 
 class VisualInterpreter:
     """Interprets screen state visually when accessibility trees or DOM are unavailable."""
 
-    def describe_scene(self) -> Dict[str, Any]:
+    def describe_scene(self) -> dict[str, Any]:
         """Produces a structured visual summary of current screen content."""
         elements = get_vision_detector().detect_elements()
         texts = [e.name for e in elements if e.name]

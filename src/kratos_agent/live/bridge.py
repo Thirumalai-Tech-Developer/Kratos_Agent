@@ -1,20 +1,21 @@
 """Bridge from Gemini semantic missions to Master/Slave execution."""
 from __future__ import annotations
 
-import logging
 import asyncio
-from typing import Any, Dict, Optional
+import logging
+from typing import Any
 
 from kratos_agent.diagnostics.errors import error_from_exception
 from kratos_agent.master.supervisor import get_master_supervisor
 from kratos_agent.slave.executor import get_slave_executor
+
 from .events import LiveState, LiveStatusHub
 
 logger = logging.getLogger(__name__)
 
 
 class KratosBridge:
-    def __init__(self, runtime: Optional[Any] = None, status_hub: Optional[LiveStatusHub] = None) -> None:
+    def __init__(self, runtime: Any | None = None, status_hub: LiveStatusHub | None = None) -> None:
         if runtime is None:
             from kratos_agent.main import runtime as default_runtime
             runtime = default_runtime
@@ -35,11 +36,11 @@ class KratosBridge:
     async def submit_task(
         self,
         task_description: str,
-        visual_context: Optional[str] = None,
+        visual_context: str | None = None,
         action: str = "generic_task",
-        parameters: Optional[Dict[str, Any]] = None,
-        constraints: Optional[Dict[str, Any]] = None,
-        expected_result: Optional[Dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        expected_result: dict[str, Any] | None = None,
         priority: str = "normal",
         timeout: float = 60.0,
         force: bool = False,
@@ -47,9 +48,9 @@ class KratosBridge:
         turn_id: str = "",
         tool_call_id: str = "",
         wait_for_result: bool = False,
-    ) -> Dict[str, Any]:
-        from kratos_agent.live.echo_guard import get_echo_guard
+    ) -> dict[str, Any]:
         from kratos_agent.core.task_deduplicator import get_task_deduplicator
+        from kratos_agent.live.echo_guard import get_echo_guard
 
         if get_echo_guard().should_suppress_mic():
             return {"status": "echo_suppressed", "message": "Ignored microphone echo during or immediately after TTS playback."}
@@ -126,7 +127,7 @@ class KratosBridge:
             "capability": result.get("capability") or capability or "generic_task",
         }
 
-    async def cancel_active_task(self) -> Dict[str, Any]:
+    async def cancel_active_task(self) -> dict[str, Any]:
         result = await self.supervisor.cancel_active_task()
         if hasattr(self.runtime, "cancel"):
             self.runtime.cancel()
@@ -134,7 +135,7 @@ class KratosBridge:
             self.status_hub.update(active_task_id=None, current_state=LiveState.IDLE)
         return result
 
-    def get_status(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_status(self, task_id: str | None = None) -> dict[str, Any]:
         status = self.supervisor.get_status(task_id)
         if status.get("last_error"):
             status["task_error"] = status["last_error"]

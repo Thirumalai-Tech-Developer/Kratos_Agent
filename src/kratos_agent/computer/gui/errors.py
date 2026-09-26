@@ -1,7 +1,8 @@
 """Failure classification and error types for Computer Use Engine."""
 from __future__ import annotations
+
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class FailureType(str, Enum):
@@ -23,13 +24,13 @@ class FailureType(str, Enum):
 
 class ComputerError(Exception):
     """Base exception for computer control operations."""
-    def __init__(self, message: str, failure_type: FailureType = FailureType.UNKNOWN_ERROR, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, failure_type: FailureType = FailureType.UNKNOWN_ERROR, details: dict[str, Any] | None = None):
         super().__init__(message)
         self.message = message
         self.failure_type = failure_type
         self.details = details or {}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "error": self.message,
             "failure_type": self.failure_type.value,
@@ -38,30 +39,30 @@ class ComputerError(Exception):
 
 
 class TargetNotFoundError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.TARGET_NOT_FOUND, details)
 
 
 class AmbiguousTargetError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.AMBIGUOUS_TARGET, details)
 
 
 class ElementDisabledError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.ELEMENT_DISABLED, details)
 
 
 class StaleElementError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.STALE_ELEMENT, details)
 
 
 class BackendUnavailableError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.BACKEND_UNAVAILABLE, details)
 
 
 class VerificationFailedError(ComputerError):
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message, FailureType.VERIFICATION_FAILED, details)

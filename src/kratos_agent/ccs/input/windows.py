@@ -1,10 +1,12 @@
-import ctypes
-import ctypes.wintypes as wintypes
-import time
-import random
-from typing import List, Dict, Any, Optional
 
-from kratos_agent.ccs.base import CapabilityUnavailable, Point, Rect, ActionResult
+import logging
+logger = logging.getLogger(__name__)
+import ctypes
+import random
+import time
+from ctypes import wintypes
+
+from kratos_agent.ccs.base import ActionResult, Point
 from kratos_agent.ccs.input.keys import get_vk_and_scancode
 
 # ── ctypes setups ────────────────────────────────────────────────────────
@@ -73,7 +75,7 @@ class WindowsInputEngine:
     def __init__(self, humanize: bool = False):
         self.humanize = humanize
 
-    def _send_inputs(self, inputs: List[INPUT]) -> None:
+    def _send_inputs(self, inputs: list[INPUT]) -> None:
         nInputs = len(inputs)
         pInputs = (INPUT * nInputs)(*inputs)
         cbSize = ctypes.sizeof(INPUT)
@@ -123,7 +125,7 @@ class WindowsInputEngine:
             return ActionResult(False, "mouse_move", str(e))
 
     def mouse_click(self, p: Point | None = None, button: str = "left",
-                    clicks: int = 1, modifiers: List[str] = [], style: str = "instant") -> ActionResult:
+                    clicks: int = 1, modifiers: list[str] = [], style: str = "instant") -> ActionResult:
         try:
             if p:
                 self.mouse_move(p, style=style)
@@ -193,7 +195,7 @@ class WindowsInputEngine:
             return ActionResult(False, "mouse_scroll", str(e))
 
     # ── KEYBOARD ─────────────────────────────────────────────────────────────
-    def key_tap(self, keys: List[str]) -> ActionResult:
+    def key_tap(self, keys: list[str]) -> ActionResult:
         try:
             inputs_down = []
             inputs_up = []
@@ -222,8 +224,8 @@ class WindowsInputEngine:
                 old = ""
                 try:
                     old = pyperclip.paste()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
                 try:
                     pyperclip.copy(text)
                     self.key_tap(["ctrl", "v"])
@@ -231,8 +233,8 @@ class WindowsInputEngine:
                 finally:
                     try:
                         pyperclip.copy(old)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Operation error suppressed: %s", exc)
                 return ActionResult(True, "type_text", "used clipboard")
             else:
                 # Batch the WHOLE string into ONE SendInput call for instant execution

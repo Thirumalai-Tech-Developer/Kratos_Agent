@@ -6,10 +6,13 @@ structured RuntimeEvents.
 """
 from __future__ import annotations
 
-import threading
-from typing import Callable, Dict, List, Optional
-from .runtime_contracts import EventKind, RuntimeEvent
+import logging
+logger = logging.getLogger(__name__)
 
+import threading
+from collections.abc import Callable
+
+from .runtime_contracts import EventKind, RuntimeEvent
 
 EventListener = Callable[[RuntimeEvent], None]
 
@@ -18,11 +21,11 @@ class EventBus:
     """Thread-safe publish/subscribe bus for RuntimeEvents."""
 
     def __init__(self) -> None:
-        self._listeners: List[EventListener] = []
-        self._kind_listeners: Dict[EventKind, List[EventListener]] = {}
+        self._listeners: list[EventListener] = []
+        self._kind_listeners: dict[EventKind, list[EventListener]] = {}
         self._lock = threading.RLock()
 
-    def subscribe(self, listener: EventListener, event_kind: Optional[EventKind] = None) -> None:
+    def subscribe(self, listener: EventListener, event_kind: EventKind | None = None) -> None:
         """Subscribe a listener to all events or a specific EventKind."""
         with self._lock:
             if event_kind is None:
@@ -34,7 +37,7 @@ class EventBus:
                 if listener not in self._kind_listeners[event_kind]:
                     self._kind_listeners[event_kind].append(listener)
 
-    def unsubscribe(self, listener: EventListener, event_kind: Optional[EventKind] = None) -> None:
+    def unsubscribe(self, listener: EventListener, event_kind: EventKind | None = None) -> None:
         """Unsubscribe a listener."""
         with self._lock:
             if event_kind is None:
@@ -57,14 +60,14 @@ class EventBus:
         for listener in all_listeners:
             try:
                 listener(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         for listener in kind_listeners:
             try:
                 listener(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
     def clear(self) -> None:
         """Clear all listeners."""

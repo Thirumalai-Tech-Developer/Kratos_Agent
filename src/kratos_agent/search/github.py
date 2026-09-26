@@ -6,7 +6,6 @@ import logging
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
 
 from .citations import attach_citations
 from .models import SearchResponse, SearchResult
@@ -29,9 +28,9 @@ class GitHubSearchProvider(SearchProvider):
         self,
         query: str,
         *,
-        category: Optional[str] = None,
-        domains: Optional[List[str]] = None,
-        language: Optional[str] = None,
+        category: str | None = None,
+        domains: list[str] | None = None,
+        language: str | None = None,
         max_results: int = 10,
     ) -> SearchResponse:
         start_time = time.monotonic()
@@ -57,7 +56,7 @@ class GitHubSearchProvider(SearchProvider):
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
 
             items = data.get("items", [])
-            results: List[SearchResult] = []
+            results: list[SearchResult] = []
 
             for idx, item in enumerate(items[:max_results], start=1):
                 repo_url = item.get("html_url") or ""

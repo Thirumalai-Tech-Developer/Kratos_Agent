@@ -3,13 +3,12 @@ Elevated Helper Process.
 Runs as High IL (Administrator) and listens on a named pipe for commands from Kratos.
 Provides UAC-free input injection and file operations for the session.
 """
-import sys
-import os
-import win32file
-import win32pipe
 import json
 import logging
-import time
+import sys
+
+import win32file
+import win32pipe
 
 logger = logging.getLogger(__name__)
 

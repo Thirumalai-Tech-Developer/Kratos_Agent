@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -15,8 +19,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from kratos_agent.brain.config import DEFAULT_MODEL, get_default_model
 from kratos_agent.brain.client import BrainClient
+from kratos_agent.brain.config import DEFAULT_MODEL, get_default_model
 
 
 def _clean_command_payload(cmd_str: str) -> str:
@@ -44,7 +48,7 @@ def clean_file_path(fp_str: str) -> str:
     return cleaned.strip('"\' \t\n')
 
 
-def _fallback_extract_tool_call(text: str) -> Optional[Dict[str, Any]]:
+def _fallback_extract_tool_call(text: str) -> dict[str, Any] | None:
     """Resilient extraction when JSON has unescaped quotes or formatting issues."""
     if "edit_file" in text:
         fp_m = re.search(r'(?<![a-zA-Z0-9_])file_path\s*[:=]\s*(?:[rfbRFB]#*|#*)?(?:"([^"]+)"|\'([^\']+)\'|([^"\',\s\n\(\)]+))', text)
@@ -85,7 +89,7 @@ def _fallback_extract_tool_call(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _extract_json_object(text: str, start_idx: int) -> Tuple[Optional[Dict[str, Any]], int, int]:
+def _extract_json_object(text: str, start_idx: int) -> tuple[dict[str, Any] | None, int, int]:
     """Extracts a JSON object starting from or after start_idx by balancing braces respecting string quotes."""
     idx = text.find("{", start_idx)
     if idx == -1:
@@ -139,10 +143,10 @@ def _extract_json_object(text: str, start_idx: int) -> Tuple[Optional[Dict[str, 
     return None, -1, -1
 
 
-def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
+def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
     """Extracts tool calls in formats: Harmony / OpenAI OSS, XML, JSON markdown, and call:name{json}."""
-    tool_calls: List[Dict[str, Any]] = []
-    removed_spans: List[Tuple[int, int]] = []
+    tool_calls: list[dict[str, Any]] = []
+    removed_spans: list[tuple[int, int]] = []
 
     VALID_TOOLS = {
         "write_file", "edit_file", "read_file", "list_directory",
@@ -179,8 +183,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             if name in VALID_TOOLS or name.isidentifier():
                 tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
                 removed_spans.append((m.start(), m.end()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse tool call args: %s", e)
 
     # 1b. DeepSeek DSML <｜｜DSML｜｜ invoke name="...">...<｜｜DSML｜｜ parameter name="...">...</｜｜DSML｜｜ parameter> format:
     dsml_invoke_pattern = re.compile(
@@ -198,7 +202,7 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
         if tool_name.lower() in RESERVED_TOOL_NAMES or len(tool_name) < 2:
             continue
         params_body = m.group(2)
-        args: Dict[str, Any] = {}
+        args: dict[str, Any] = {}
         for p in dsml_param_pattern.finditer(params_body):
             p_name = p.group(1)
             p_val = p.group(2).strip()
@@ -207,8 +211,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                 try:
                     args[p_name] = json.loads(p_val)
                     continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse DSML parameter JSON: %s", e)
             args[p_name] = p_val
 
         # Fallback: check if params body contains raw JSON object
@@ -219,8 +223,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                     parsed = json.loads(json_m.group(0))
                     if isinstance(parsed, dict):
                         args = parsed
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse DSML raw JSON fallback: %s", e)
 
         if tool_name in VALID_TOOLS or tool_name.isidentifier():
             tool_calls.append({"name": tool_name, "args": args})
@@ -255,8 +259,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed parsing tool arguments JSON: %s", e)
             if name and (name in VALID_TOOLS or name.isidentifier()) and name not in RESERVED_TOOL_NAMES:
                 tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
                 end_span = json_end
@@ -284,13 +288,13 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to decode stringified tool args: %s", e)
             if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
                 tool_calls.append({"name": name, "args": args})
                 removed_spans.append((m.start(), m.end()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse JSON block tool call: %s", e)
 
     # 2c. Standalone JSON with "name" and "arguments"
     raw_json_pattern = re.compile(r'\{[\s\n]*"(?:name|function|tool)"\s*:\s*"([a-zA-Z0-9_]+)"[\s\S]*?\}')
@@ -309,8 +313,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to decode stringified standalone JSON args: %s", e)
             if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
                 tool_calls.append({"name": name, "args": args})
                 removed_spans.append((json_start, end_span))
@@ -334,8 +338,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                 args = json.loads(raw_json)
                 tool_calls.append({"name": name, "args": args})
                 removed_spans.append((m.start(), m.end()))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to parse harmony tool call: %s", e)
 
     # 4. XML <tool_call> format (Hermes, Qwen, Claude):
     xml_pattern = re.compile(r'<tool_call>\s*([\s\S]*?)\s*</tool_call>')
@@ -351,14 +355,14 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Failed to decode XML tool args string: %s", e)
                 if name and (name in VALID_TOOLS or (name.isidentifier() and len(name) >= 2)) and name.lower() not in RESERVED_TOOL_NAMES:
                     tool_calls.append({"name": name, "args": args})
                     removed_spans.append((m.start(), m.end()))
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse XML inner JSON: %s", e)
 
         # Fallback to call:NAME{...} inside <tool_call>
         call_m = re.search(r'(?:call:)?([a-zA-Z0-9_]+)\s*(\{[\s\S]*\})', inner)
@@ -369,8 +373,8 @@ def extract_tool_calls_from_text(text: str) -> Tuple[str, List[Dict[str, Any]]]:
                     args = json.loads(call_m.group(2))
                     tool_calls.append({"name": c_name, "args": args})
                     removed_spans.append((m.start(), m.end()))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse XML call fallback: %s", e)
 
     # 5. Standard Kratos format: call:NAME{...} or NAME{...}
     pattern = re.compile(r'(call:)?([a-zA-Z0-9_]+)\s*\{')
@@ -449,7 +453,7 @@ class BrainChatModel(BaseChatModel):
     model_name: str = DEFAULT_MODEL
     client: BrainClient = None
 
-    def __init__(self, model: Optional[str] = None, client: Optional[BrainClient] = None, **kwargs):
+    def __init__(self, model: str | None = None, client: BrainClient | None = None, **kwargs):
         target_model = model or get_default_model()
         super().__init__(model_name=target_model, **kwargs)
         self.model_name = target_model
@@ -461,12 +465,12 @@ class BrainChatModel(BaseChatModel):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        dict_messages: List[Dict[str, Any]] = []
+        dict_messages: list[dict[str, Any]] = []
         system_instruction = None
 
         for msg in messages:
@@ -491,12 +495,12 @@ class BrainChatModel(BaseChatModel):
 
     def _stream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
-        dict_messages: List[Dict[str, Any]] = []
+        dict_messages: list[dict[str, Any]] = []
         system_instruction = None
 
         for msg in messages:

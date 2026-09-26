@@ -1,7 +1,10 @@
 """Mouse input engine (LOWEST PRIORITY FALLBACK)."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
+
 import sys
-from typing import List, Optional
 
 from kratos_agent.computer.gui.models import Point
 from kratos_agent.computer.state import ActionResult
@@ -31,8 +34,8 @@ class MouseEngine:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.mouse_move(Point(x, y), duration_ms=duration_ms)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             pyautogui.moveTo(x, y, duration=duration_ms / 1000.0 if duration_ms else 0.0)
@@ -42,11 +45,11 @@ class MouseEngine:
 
     def click(
         self,
-        x: Optional[int] = None,
-        y: Optional[int] = None,
+        x: int | None = None,
+        y: int | None = None,
         button: str = "left",
         clicks: int = 1,
-        modifiers: Optional[List[str]] = None,
+        modifiers: list[str] | None = None,
     ) -> ActionResult:
         """Clicks the mouse at specified or current coordinates."""
         pt = Point(x, y) if x is not None and y is not None else None
@@ -56,8 +59,8 @@ class MouseEngine:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.mouse_click(p=pt, button=button, clicks=clicks, modifiers=modifiers or [])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             if pt:
@@ -70,10 +73,10 @@ class MouseEngine:
 
         return ActionResult(ok=False, action="mouse_click", detail="No mouse driver available")
 
-    def double_click(self, x: Optional[int] = None, y: Optional[int] = None) -> ActionResult:
+    def double_click(self, x: int | None = None, y: int | None = None) -> ActionResult:
         return self.click(x=x, y=y, button="left", clicks=2)
 
-    def right_click(self, x: Optional[int] = None, y: Optional[int] = None) -> ActionResult:
+    def right_click(self, x: int | None = None, y: int | None = None) -> ActionResult:
         return self.click(x=x, y=y, button="right", clicks=1)
 
     def drag(self, from_x: int, from_y: int, to_x: int, to_y: int, button: str = "left", duration_ms: int = 200) -> ActionResult:
@@ -83,8 +86,8 @@ class MouseEngine:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.mouse_drag(Point(from_x, from_y), Point(to_x, to_y), button=button, duration_ms=duration_ms)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             pyautogui.moveTo(from_x, from_y)
@@ -93,7 +96,7 @@ class MouseEngine:
 
         return ActionResult(ok=False, action="mouse_drag", detail="No mouse driver available")
 
-    def scroll(self, dy: int, dx: int = 0, x: Optional[int] = None, y: Optional[int] = None) -> ActionResult:
+    def scroll(self, dy: int, dx: int = 0, x: int | None = None, y: int | None = None) -> ActionResult:
         """Scrolls mouse wheel vertically or horizontally."""
         pt = Point(x, y) if x is not None and y is not None else None
         if sys.platform == "win32":
@@ -101,8 +104,8 @@ class MouseEngine:
                 from kratos_agent.ccs.input.windows import WindowsInputEngine
                 engine = WindowsInputEngine(humanize=False)
                 return engine.mouse_scroll(dy=dy, dx=dx, at=pt)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Operation error suppressed: %s", exc)
 
         if pyautogui:
             if pt:

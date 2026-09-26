@@ -5,7 +5,7 @@ from .router import RetrievalRouter, get_retrieval_router
 __all__ = [
     "RetrievalQuery",
     "RetrievalResult",
-    "RetrievalTarget",
     "RetrievalRouter",
+    "RetrievalTarget",
     "get_retrieval_router",
 ]

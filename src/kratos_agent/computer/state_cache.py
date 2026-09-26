@@ -1,12 +1,11 @@
 """State-aware observation cache with UI hashing and incremental diffs."""
 from __future__ import annotations
+
 import hashlib
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from kratos_agent.computer.state import ComputerState, ObservationDiff
-from kratos_agent.computer.gui.models import GUIElement
+from kratos_agent.computer.state import ComputerState
 
 
 class StateCache:
@@ -18,17 +17,17 @@ class StateCache:
 
     def __init__(self, ttl_seconds: float = 5.0) -> None:
         self.ttl_seconds = ttl_seconds
-        self.last_state: Optional[ComputerState] = None
+        self.last_state: ComputerState | None = None
         self.last_observation_time: float = 0.0
         self.generation: int = 1
-        self.active_window: Optional[Dict[str, Any]] = None
-        self.focused_element: Optional[Dict[str, Any]] = None
+        self.active_window: dict[str, Any] | None = None
+        self.focused_element: dict[str, Any] | None = None
         self.ui_tree_hash: str = ""
         self.browser_state_hash: str = ""
         self.cache_hits: int = 0
         self.cache_misses: int = 0
 
-    def compute_quick_hash(self, active_window_title: str, window_count: int, browser_url: Optional[str]) -> str:
+    def compute_quick_hash(self, active_window_title: str, window_count: int, browser_url: str | None) -> str:
         """Computes a sub-millisecond hash of top-level window and browser state."""
         raw = f"{active_window_title}|{window_count}|{browser_url or ''}"
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
@@ -50,7 +49,7 @@ class StateCache:
         observe_func: Any,
         quick_hash: str,
         force_refresh: bool = False,
-    ) -> Tuple[ComputerState, bool]:
+    ) -> tuple[ComputerState, bool]:
         """Returns (cached_state, was_cache_hit)."""
         if not force_refresh and self.is_valid(quick_hash):
             self.cache_hits += 1
@@ -71,7 +70,7 @@ class StateCache:
         self.last_observation_time = 0.0
 
 
-_state_cache: Optional[StateCache] = None
+_state_cache: StateCache | None = None
 
 
 def get_state_cache() -> StateCache:

@@ -7,7 +7,6 @@ import re
 import socket
 import urllib.parse
 import urllib.request
-from typing import Optional, Tuple
 
 from .models import ExtractedPage
 
@@ -34,7 +33,7 @@ BLOCKED_HOSTNAMES = {
 }
 
 
-def is_url_safe(url: str) -> Tuple[bool, str]:
+def is_url_safe(url: str) -> tuple[bool, str]:
     """Validates that a URL does not target localhost, private subnets, or metadata services."""
     try:
         parsed = urllib.parse.urlparse(url)
