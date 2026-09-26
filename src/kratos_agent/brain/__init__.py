@@ -18,9 +18,7 @@ from kratos_agent.brain.config import (
     DEFAULT_MODEL_ENDPOINT,
     # Backward compatibility aliases
     DEFAULT_OMNIROUTE_URL,
-    DEFAULT_PUBLIC_MODELS,
     DEFAULT_TIMEOUT_SECONDS,
-    PUBLIC_MODELS,
     BrainBadRequestError,
     BrainConnectionError,
     BrainError,
@@ -55,8 +53,6 @@ __all__ = [
     "DEFAULT_MODEL",
     "DEFAULT_TIMEOUT_SECONDS",
     "DEFAULT_MAX_RETRIES",
-    "DEFAULT_PUBLIC_MODELS",
-    "PUBLIC_MODELS",
     "get_base_url",
     "get_endpoint_url",
     "get_model_endpoint_url",

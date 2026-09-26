@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kratos-agent",
   "main": "worker.js",
-  "compatibility_date": "2024-09-01",
+  "compatibility_date": "2026-03-01",
   "compatibility_flags": [
     "nodejs_compat"
   ],
@@ -18,13 +18,13 @@
     }
   ],
   "vars": {
-    "CHAT_ENDPOINT": "http://138.252.100.105:20128/v1/chat/completions",
-    "MODEL_ENDPOINT": "http://138.252.100.105:20128/v1/models",
-    "BRAIN_BASE_URL": "http://138.252.100.105:20128/v1",
+    "CHAT_ENDPOINT": "http://127.0.0.1:20128/v1/chat/completions",
+    "MODEL_ENDPOINT": "http://127.0.0.1:20128/v1/models",
+    "BRAIN_BASE_URL": "http://127.0.0.1:20128/v1",
     "BRAIN_MODEL": "antigravity/gemini-3.7-flash-high",
-    "OMNIROUTE_BASE_URL": "http://138.252.100.105:20128/v1",
+    "OMNIROUTE_BASE_URL": "http://127.0.0.1:20128/v1",
     "OMNIROUTE_MODEL": "antigravity/gemini-3.7-flash-high",
-    "NORMAL_MODE_MODEL": "ds-web/deepseek-v4-flash-think",
+    "NORMAL_MODE_MODEL": "antigravity/gemini-3.7-flash-high",
     "AGENT_MODEL": "antigravity/gemini-3.7-flash-high"
   }
 }

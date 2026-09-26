@@ -1089,7 +1089,6 @@ dependencies = [
     { name = "pyaudio" },
     { name = "pyautogui" },
     { name = "pygetwindow" },
-    { name = "pyinstaller" },
     { name = "pynput" },
     { name = "pyperclip" },
     { name = "python-dotenv" },
@@ -1104,6 +1103,9 @@ dependencies = [
 [package.optional-dependencies]
 benchmark = [
     { name = "harbor" },
+]
+build = [
+    { name = "pyinstaller" },
 ]
 dev = [
     { name = "pytest" },
@@ -1137,7 +1139,7 @@ requires-dist = [
     { name = "pyaudio", specifier = ">=0.2.14" },
     { name = "pyautogui", specifier = ">=0.9.54" },
     { name = "pygetwindow", specifier = ">=0.0.9" },
-    { name = "pyinstaller", specifier = ">=6.10.0" },
+    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.10.0" },
     { name = "pynput", specifier = ">=1.7.7" },
     { name = "pyperclip", specifier = ">=1.9.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -1152,7 +1154,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.52.4" },
     { name = "websocket-client", specifier = ">=1.8.0" },
 ]
-provides-extras = ["dev", "benchmark", "headroom"]
+provides-extras = ["dev", "build", "benchmark", "headroom"]
 
 [[package]]
 name = "langchain"

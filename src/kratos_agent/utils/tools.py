@@ -715,17 +715,8 @@ def google_search(query: str) -> str:
         )
 
         router = get_search_router()
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                resp = pool.submit(lambda: asyncio.run(router.search(query))).result(timeout=15.0)
-        else:
-            resp = asyncio.run(router.search(query))
+        from kratos_agent.utils.async_runner import run_coroutine
+        resp = run_coroutine(router.search(query), timeout=15.0)
 
         if resp and resp.results:
             formatted = format_search_results_with_citations(resp.results)

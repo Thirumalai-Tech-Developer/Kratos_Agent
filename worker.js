@@ -203,11 +203,7 @@ export default {
     // Initialize D1 Schema on first request if DB binding exists
     if (env.DB && !workerSchemaInitialized) {
       try {
-        const statements = SCHEMA_SQL
-          .replace(/--.*$/gm, "")
-          .split(/;\s*$/m)
-          .map(s => s.trim())
-          .filter(Boolean);
+        const statements = parseSqlStatements(SCHEMA_SQL);
         for (const st of statements) {
           await env.DB.prepare(st).run();
         }
@@ -238,6 +234,69 @@ export default {
 
 export function getSchemaSql() {
   return SCHEMA_SQL;
+}
+
+export function parseSqlStatements(sql) {
+  const statements = [];
+  let current = "";
+  let inString = false;
+  let stringChar = "";
+  let inComment = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+
+    if (inComment) {
+      if (ch === "\n") {
+        inComment = false;
+      }
+      continue;
+    }
+
+    if (!inString && ch === "-" && next === "-") {
+      inComment = true;
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      current += ch;
+      if (ch === stringChar) {
+        if (next === stringChar) {
+          current += next;
+          i++;
+        } else {
+          inString = false;
+        }
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ";") {
+      const trimmed = current.trim();
+      if (trimmed) {
+        statements.push(trimmed);
+      }
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  const remainder = current.trim();
+  if (remainder) {
+    statements.push(remainder);
+  }
+  return statements;
 }
 
 export { corsHeaders, jsonResponse, handleApi };

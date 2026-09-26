@@ -12,6 +12,7 @@ import mimetypes
 import os
 import queue
 import threading
+import time
 import urllib.parse
 import webbrowser
 from http import HTTPStatus
@@ -44,6 +45,31 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:7860",
     "http://localhost:7860",
 }
+
+
+class TokenBucketRateLimiter:
+    """Thread-safe in-memory token bucket rate limiter keyed by client IP."""
+
+    def __init__(self, rate: float = 2.0, capacity: float = 10.0):
+        self.rate = rate
+        self.capacity = capacity
+        self._buckets: dict[str, tuple[float, float]] = {}
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, cost: float = 1.0) -> bool:
+        now = time.time()
+        with self._lock:
+            tokens, last_time = self._buckets.get(key, (self.capacity, now))
+            elapsed = max(0.0, now - last_time)
+            tokens = min(self.capacity, tokens + elapsed * self.rate)
+            if tokens >= cost:
+                self._buckets[key] = (tokens - cost, now)
+                return True
+            self._buckets[key] = (tokens, now)
+            return False
+
+
+_chat_limiter = TokenBucketRateLimiter(rate=2.0, capacity=10.0)
 
 
 class KratosWebHandler(BaseHTTPRequestHandler):
@@ -157,6 +183,15 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception:
             payload = {}
 
+        if path in ("/api/chat", "/api/chat/sync"):
+            client_ip = self.client_address[0] if self.client_address else "127.0.0.1"
+            if not _chat_limiter.allow(client_ip):
+                self._send_json(
+                    {"error": "Rate limit exceeded. Please wait a moment before sending more messages."},
+                    status=HTTPStatus.TOO_MANY_REQUESTS,
+                )
+                return
+
         if path == "/api/chat":
             self._handle_chat_sse(payload)
             return
@@ -254,13 +289,12 @@ class KratosWebHandler(BaseHTTPRequestHandler):
 
     def _handle_voice_dispute(self, task_id: str, payload: dict[str, Any]) -> None:
         try:
-            import asyncio
-
             from kratos_agent.core.dispute import handle_dispute
             from kratos_agent.main import runtime
+            from kratos_agent.utils.async_runner import run_coroutine
             obs = payload.get("user_observation", "") or payload.get("observation", "")
             lang = payload.get("lang", "auto")
-            res = asyncio.run(handle_dispute(runtime, task_id=task_id, observation=obs, lang=lang))
+            res = run_coroutine(handle_dispute(runtime, task_id=task_id, observation=obs, lang=lang), timeout=30.0)
             self._send_json(res.to_dict())
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)

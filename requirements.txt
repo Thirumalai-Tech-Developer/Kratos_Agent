@@ -6,8 +6,6 @@ aiohttp==3.14.3
     # via langchain-community
 aiosignal==1.4.0
     # via aiohttp
-altgraph==0.17.5
-    # via pyinstaller
 annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
@@ -212,14 +210,9 @@ packaging==26.3
     #   langchain-core
     #   langsmith
     #   onnxruntime
-    #   pyinstaller
-    #   pyinstaller-hooks-contrib
-pefile==2024.8.26
-    # via pyinstaller
 pillow==12.3.0
     # via
     #   kratos-agent (pyproject.toml)
-    #   pyscreeze
     #   rapidocr-onnxruntime
 playwright==1.63.0
     # via kratos-agent (pyproject.toml)
@@ -272,10 +265,6 @@ pygetwindow==0.0.9
     #   pyautogui
 pygments==2.21.0
     # via rich
-pyinstaller==6.22.2
-    # via kratos-agent (pyproject.toml)
-pyinstaller-hooks-contrib==2026.7
-    # via pyinstaller
 pyjwt==2.15.0
     # via mcp
 pymsgbox==2.0.1
@@ -300,8 +289,6 @@ pytweening==1.2.0
     # via pyautogui
 pywin32==312
     # via mcp
-pywin32-ctypes==0.2.3
-    # via pyinstaller
 pyyaml==6.0.3
     # via
     #   kratos-agent (pyproject.toml)
@@ -334,8 +321,6 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-setuptools==84.0.0
-    # via pyinstaller
 shapely==2.1.2
     # via rapidocr-onnxruntime
 six==1.17.0

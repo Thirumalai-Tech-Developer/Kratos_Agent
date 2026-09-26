@@ -19,9 +19,6 @@ DEFAULT_MODEL = "antigravity/gemini-3.7-flash-high"
 DEFAULT_TIMEOUT_SECONDS: float = 60.0
 DEFAULT_MAX_RETRIES: int = 2
 
-# Dynamic fallback list (no longer hardcoded with static models)
-DEFAULT_PUBLIC_MODELS: list[str] = []
-
 _cached_models: list[str] = []
 _cache_timestamp: float = 0.0
 _CACHE_TTL_SECONDS: float = 30.0
@@ -135,7 +132,7 @@ def get_model(
     refresh: bool = False,
 ) -> list[str]:
     """Dynamically fetches available models from the active model endpoint or cache."""
-    global _cached_models, _cache_timestamp, PUBLIC_MODELS
+    global _cached_models, _cache_timestamp
 
     target_endpoint = endpoint or get_model_endpoint_url()
     now = time.time()
@@ -165,10 +162,6 @@ def get_model(
     # If fetch failed, fall back to cached models if available
     if _cached_models:
         return list(_cached_models)
-
-    # If explicit fallback models provided, use them
-    if DEFAULT_PUBLIC_MODELS:
-        return list(DEFAULT_PUBLIC_MODELS)
 
     # Dynamic fallback: configured default model from environment
     default_model = get_default_model()

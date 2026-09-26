@@ -306,14 +306,8 @@ class McpManager:
                     raise RuntimeError(self._format_result(result))
                 return self._format_result(result)
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(run())
-        # Tool handlers are normally called from worker threads; keep this safe for
-        # embedding hosts that invoke MCP discovery from an active event loop too.
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, run()).result()
+        from kratos_agent.utils.async_runner import run_coroutine
+        return run_coroutine(run())
 
     @asynccontextmanager
     async def _client(self, server: McpServerConfig):

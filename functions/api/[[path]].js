@@ -3,7 +3,7 @@
  * Handles all REST and streaming endpoints for Kratos on Cloudflare Pages.
  */
 
-import { handleApi, corsHeaders, getSchemaSql } from "../../worker.js";
+import { handleApi, corsHeaders, getSchemaSql, parseSqlStatements } from "../../worker.js";
 
 let schemaInitialized = false;
 
@@ -23,11 +23,7 @@ export async function onRequest(context) {
   if (env.DB && !schemaInitialized) {
     try {
       const rawSql = getSchemaSql();
-      const statements = rawSql
-        .replace(/--.*$/gm, "")
-        .split(/;\s*$/m)
-        .map(s => s.trim())
-        .filter(Boolean);
+      const statements = parseSqlStatements(rawSql);
       for (const st of statements) {
         await env.DB.prepare(st).run();
       }

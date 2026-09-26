@@ -1156,21 +1156,17 @@ Kratos_Agent/
 │           ├── kratos_banner.jpg    # Banner image
 │           └── fonts/               # Pixl custom font (OTF + TTF)
 │
-├── docs/                            # Project Documentation
+├── docs/                            # Project Documentation & Reference Manuals
 │   ├── architecture.md              # Runtime architecture deep-dive
-│   ├── cloudflare_d1_setup.md       # D1 database setup guide
-│   └── kratos_web_ui.png            # Web UI screenshot
-│
-├── documentation/                   # Detailed Reference Documentation
-│   ├── README.md                    # Documentation index
-│   ├── architecture.md              # Architecture reference
 │   ├── brain-reference.md           # Brain subsystem reference
+│   ├── cloudflare_d1_setup.md       # D1 database setup guide
+│   ├── file-catalog.md              # Complete file catalog
 │   ├── frontend-reference.md        # Frontend component reference
 │   ├── python-reference.md          # Python codebase reference
-│   ├── file-catalog.md              # Complete file catalog
 │   ├── testing-and-build.md         # Testing & build guide
 │   ├── tools-and-data.md            # Tools & data reference
-│   └── web-api.md                   # Web API endpoint reference
+│   ├── web-api.md                   # Web API endpoint reference
+│   └── kratos_web_ui.png            # Web UI screenshot
 │
 └── tests/                           # Automated Test Suite (18 modules)
     ├── test_agent_execution_ux.py

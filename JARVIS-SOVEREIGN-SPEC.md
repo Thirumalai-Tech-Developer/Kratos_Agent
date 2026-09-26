@@ -3073,7 +3073,7 @@ Do them in order. Do not skip Phase 0. Commit after each phase with a message na
 3. **`docs/computer-control.md`** — CCS reference: backends, capabilities per platform, the grounding ladder, the interlock, elevation internals, the wave groups, adding a new adapter, the self-install loop.
 4. **`docs/sovereign-mode.md`** — the authority model, what it grants, the three control features, the eight invariants, how to step down to a lower mode.
 5. **`docs/voice-api.md`** — every route with request/response examples and a captured SSE transcript.
-6. **`documentation/web-api.md`** — add the `/api/voice/*` surface in the existing format.
+6. **`docs/web-api.md`** — add the `/api/voice/*` surface in the existing format.
 7. **Omni README** (create `README-OMNI.md` if none exists) — the §4.2 flow diagram, both environments, both start commands, env vars, all run modes, overlay controls and hotkeys, cancellation, steering, undo, microphone troubleshooting, Kratos connectivity troubleshooting.
 8. **`.env.example`** (both halves) — every var from §29, with a one-line comment each, placeholders only.
 9. **`KRATOS.md`** — the project-memory file: record the CCS architecture decisions and the sovereign default so future runs inherit them.

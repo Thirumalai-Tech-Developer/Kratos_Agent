@@ -32,7 +32,7 @@ This document provides a comprehensive, folder-by-folder, subfolder-by-subfolder
 13. [`src/kratos_agent/tui/` & `web/` (Terminal UI & Web Server)](#13-srckratos_agenttui--web)
 14. [`docs/` (Architecture & Specifications)](#14-docs)
 15. [Root Workspace Files & Build Scripts](#15-root-workspace-files--build-scripts)
-16. [`documentation/` (Reference Manuals)](#16-documentation)
+16. [`docs/` (Reference Manuals & Guides)](#16-docs-reference-manuals)
 17. [`frontend/` (Vite + React Cloudflare Pages Web App)](#17-frontend)
 18. [`functions/` (Cloudflare Pages API Functions)](#18-functions)
 19. [`tests/` (Test Suites & Benchmarks)](#19-tests)
@@ -777,19 +777,18 @@ Core scripts, deployment configurations, and specifications residing at the root
 
 ---
 
-## 16. `documentation/`
+## 16. `docs/` (Reference Manuals & Guides)
 
-Structured reference manuals providing in-depth guides for developers, systems engineers, and API consumers.
+Structured reference manuals providing in-depth guides for developers, systems engineers, and API consumers (consolidated into `docs/`).
 
-- [`documentation/README.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/README.md): Index and reading guide for the technical documentation library.
-- [`documentation/architecture.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/architecture.md): Deep-dive into the Kratos Agent architectural layers, multi-turn loop, and subsystem communication contracts.
-- [`documentation/brain-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/brain-reference.md): Technical specification for the Brain gateway, OmniRoute protocol, and model adapter contracts.
-- [`documentation/file-catalog.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/file-catalog.md): Component-level catalog mapping core files to system responsibilities.
-- [`documentation/frontend-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/frontend-reference.md): Architectural guide for the React + Vite frontend, explaining SSE streaming, tab state, and components.
-- [`documentation/python-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/python-reference.md): Python coding guidelines, typing standards, asynchronous patterns, and error-handling idioms.
-- [`documentation/testing-and-build.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/testing-and-build.md): Guide to running pytest test suites, benchmark harnesses, and packaging Windows binaries.
-- [`documentation/tools-and-data.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/tools-and-data.md): Detailed specifications for built-in tools, argument schemas, execution timeouts, and D1 database tables.
-- [`documentation/web-api.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/documentation/web-api.md): REST and WebSocket API reference for `/api/chat`, `/api/task`, `/api/sessions`, and `/ws`.
+- [`docs/architecture.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/architecture.md): Deep-dive into the Kratos Agent architectural layers, multi-turn loop, and subsystem communication contracts.
+- [`docs/brain-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/brain-reference.md): Technical specification for the Brain gateway, OmniRoute protocol, and model adapter contracts.
+- [`docs/file-catalog.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/file-catalog.md): Component-level catalog mapping core files to system responsibilities.
+- [`docs/frontend-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/frontend-reference.md): Architectural guide for the React + Vite frontend, explaining SSE streaming, tab state, and components.
+- [`docs/python-reference.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/python-reference.md): Python coding guidelines, typing standards, asynchronous patterns, and error-handling idioms.
+- [`docs/testing-and-build.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/testing-and-build.md): Guide to running pytest test suites, benchmark harnesses, and packaging Windows binaries.
+- [`docs/tools-and-data.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/tools-and-data.md): Detailed specifications for built-in tools, argument schemas, execution timeouts, and D1 database tables.
+- [`docs/web-api.md`](file:///c:/Users/thiru/Documents/Kratos_Agent/docs/web-api.md): REST and WebSocket API reference for `/api/chat`, `/api/task`, `/api/sessions`, and `/ws`.
 
 ---
 

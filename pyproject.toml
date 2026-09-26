@@ -16,7 +16,6 @@ dependencies = [
     "prompt-toolkit>=3.0.53",
     "python-dotenv>=1.0.0",
     "pillow>=10.0.0",
-    "pyinstaller>=6.10.0",
     "rich>=15.0.0",
     "uvicorn>=0.52.4",
     "sounddevice>=0.5.6",
@@ -48,6 +47,9 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "ruff>=0.8.0",
+]
+build = [
+    "pyinstaller>=6.10.0",
 ]
 benchmark = [
     "harbor>=0.23.0",
