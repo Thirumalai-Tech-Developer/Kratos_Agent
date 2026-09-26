@@ -26,12 +26,30 @@ class AuditPlugin(HarnessPlugin):
                 version="1.0.0",
                 description="Append-only event trace recorder, session replay, and inspection.",
                 category="audit",
+                required_services=[],
+                provides_services=["audit"],
             ),
             config=config,
         )
         self._trace_events: list[dict[str, Any]] = []
         self._seq: int = 0
         self.log_file_path: Path | None = None
+
+    def on_register(self) -> None:
+        """Called when audit plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when audit plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when audit plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the audit plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)

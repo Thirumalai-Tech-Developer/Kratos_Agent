@@ -25,12 +25,30 @@ class DeepSeekModelPlugin(HarnessPlugin):
                 version="1.0.0",
                 description="Specialized adapter for DeepSeek-V3 and DeepSeek-R1 reasoning and DSML format.",
                 category="model",
+                required_services=[],
+                provides_services=["deepseek_model"],
             ),
             config=config,
         )
         self.temperature: float = 0.5
         self.max_tokens: int = 8192
         self.thinking_enabled: bool = True
+
+    def on_register(self) -> None:
+        """Called when deepseek_model plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when deepseek_model plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when deepseek_model plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the deepseek_model plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)

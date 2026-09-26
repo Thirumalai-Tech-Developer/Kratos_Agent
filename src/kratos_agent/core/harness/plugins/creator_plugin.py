@@ -24,9 +24,27 @@ class CreatorPlugin(HarnessPlugin):
                 version="1.0.0",
                 description="Meta-programming runtime for authoring and inspecting harness plugins.",
                 category="creator",
+                required_services=[],
+                provides_services=["creator"],
             ),
             config=config,
         )
+
+    def on_register(self) -> None:
+        """Called when creator plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when creator plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when creator plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the creator plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)

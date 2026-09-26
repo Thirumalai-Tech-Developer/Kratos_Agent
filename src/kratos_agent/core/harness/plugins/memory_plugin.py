@@ -25,10 +25,28 @@ class MemoryPlugin(HarnessPlugin):
                 version="1.0.0",
                 description="Cognitive multi-tier memory subsystem for DeepSeek Harness.",
                 category="memory",
+                required_services=[],
+                provides_services=["memory"],
             ),
             config=config,
         )
         self._local_cognitive_store: CognitiveMemoryStore | None = None
+
+    def on_register(self) -> None:
+        """Called when memory plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when memory plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when memory plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the memory plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)

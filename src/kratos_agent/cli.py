@@ -100,6 +100,7 @@ HELP_TEXT = """
   [bold cyan]/skill[/bold cyan] [dim][add|list|show|rm][/dim] - Add, view, or manage skills from URL / Internet
   [bold cyan]/create-tool[/bold cyan] [dim][desc][/dim]    - Autonomously forge and hot-reload a new tool
   [bold cyan]/tools[/bold cyan]                   - Inspect all active & self-created tools (edit_file, grep, etc.)
+  [bold cyan]/plugins[/bold cyan]                 - Inspect loaded harness plugins, state & services
   [bold cyan]/compact[/bold cyan]                 - Compress conversation context (alias: /compress)
   [bold cyan]/headroom[/bold cyan] [dim][on|off|status][/dim]  - Headroom context compression stats & toggle
   [bold cyan]/parallel[/bold cyan] [dim][on|off|status][/dim]  - Toggle or configure parallel tool & subagent execution
@@ -179,6 +180,7 @@ class KratosCompleter(Completer):
         ("/skill remove", "Uninstall an active skill (e.g. /skill remove <name>)"),
         ("/create-tool", "Autonomously forge and hot-reload a new tool"),
         ("/tools", "Inspect active and self-created tools (edit_file, grep, etc.)"),
+        ("/plugins", "Inspect loaded harness plugins, version, state and services"),
         ("/plan", "Toggle or enter Plan Mode for architectural exploration"),
         ("/plan on", "Turn on Plan Mode (read-only architectural exploration)"),
         ("/plan off", "Turn off Plan Mode (resume full execution capability)"),
@@ -2066,6 +2068,47 @@ def start_interactive_cli():
                         tool_table.add_row(t.name, t.description or "No description")
                     console.print(tool_table)
                     console.print()
+                continue
+
+            if user_input.lower() == "/plugins":
+                if not hasattr(runtime, "harness") or not runtime.harness:
+                    console.print("[dim]Harness kernel is not active in current runtime.[/dim]\n")
+                else:
+                    plugins = runtime.harness.list_plugins()
+                    if not plugins:
+                        console.print("[dim]No harness plugins registered.[/dim]\n")
+                    else:
+                        table = Table(title="🔌 Harness Plugins", border_style="cyan")
+                        table.add_column("Plugin", style="bold gold1")
+                        table.add_column("Version", style="dim")
+                        table.add_column("State", style="bold")
+                        table.add_column("Services (Req → Prov)", style="white")
+                        table.add_column("Status / Error", style="dim")
+
+                        state_styles = {
+                            "enabled": "[bold green]ENABLED[/bold green]",
+                            "failed": "[bold red]FAILED[/bold red]",
+                            "error": "[bold red]ERROR[/bold red]",
+                            "disabled": "[yellow]DISABLED[/yellow]",
+                            "loaded": "[cyan]LOADED[/cyan]",
+                            "unloaded": "[dim]UNLOADED[/dim]",
+                        }
+
+                        for p in plugins:
+                            st = state_styles.get(p.get("state", "").lower(), p.get("state", ""))
+                            req = ", ".join(p.get("required_services", [])) or "none"
+                            prov = ", ".join(p.get("provides_services", [])) or "none"
+                            services_str = f"{req} → {prov}"
+                            err = f"[red]{p.get('error')}[/red]" if p.get("error") else "[green]healthy[/green]"
+                            table.add_row(
+                                p.get("name", "unknown"),
+                                p.get("version", "1.0.0"),
+                                st,
+                                services_str,
+                                err,
+                            )
+                        console.print(table)
+                        console.print()
                 continue
 
             # /mode [suggest|auto-edit|full-auto] — Codex-style approval mode

@@ -1,0 +1,71 @@
+{
+  "version": "1.0.0",
+  "plugins": {
+    "deepseek_model": {
+      "name": "deepseek_model",
+      "version": "1.0.0",
+      "class": "DeepSeekModelPlugin",
+      "module": "kratos_agent.core.harness.plugins.deepseek_model_plugin",
+      "description": "Specialized adapter for DeepSeek reasoning and DSML format.",
+      "category": "model",
+      "required_services": [],
+      "provides_services": ["deepseek_model"],
+      "presets": ["standard", "code", "full"]
+    },
+    "memory": {
+      "name": "memory",
+      "version": "1.0.0",
+      "class": "MemoryPlugin",
+      "module": "kratos_agent.core.harness.plugins.memory_plugin",
+      "description": "Cognitive multi-tier memory subsystem.",
+      "category": "memory",
+      "required_services": [],
+      "provides_services": ["memory"],
+      "presets": ["standard", "code", "minimal", "full"]
+    },
+    "audit": {
+      "name": "audit",
+      "version": "1.0.0",
+      "class": "AuditPlugin",
+      "module": "kratos_agent.core.harness.plugins.audit_plugin",
+      "description": "Append-only event trace recorder and session replay.",
+      "category": "audit",
+      "required_services": [],
+      "provides_services": ["audit"],
+      "presets": ["standard", "code", "full"]
+    },
+    "creator": {
+      "name": "creator",
+      "version": "1.0.0",
+      "class": "CreatorPlugin",
+      "module": "kratos_agent.core.harness.plugins.creator_plugin",
+      "description": "Meta-programming runtime for authoring and inspecting harness plugins.",
+      "category": "creator",
+      "required_services": [],
+      "provides_services": ["creator"],
+      "presets": ["standard", "creator", "full"]
+    },
+    "tools": {
+      "name": "tools",
+      "version": "1.0.0",
+      "class": "ToolsPlugin",
+      "module": "kratos_agent.core.harness.plugins.tools_plugin",
+      "description": "Manages tool availability, permissions, and execution filtering.",
+      "category": "tool",
+      "required_services": [],
+      "provides_services": ["tools"],
+      "presets": ["standard", "code", "minimal", "creator", "full"]
+    },
+    "headroom": {
+      "name": "headroom",
+      "version": "1.0.0",
+      "class": "HeadroomPlugin",
+      "module": "kratos_agent.core.harness.plugins.headroom_plugin",
+      "description": "Headroom context compression plugin.",
+      "category": "general",
+      "required_services": [],
+      "provides_services": ["headroom"],
+      "presets": ["standard", "full"]
+    }
+  }
+}

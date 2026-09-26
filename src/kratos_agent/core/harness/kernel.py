@@ -79,7 +79,7 @@ class HarnessKernel:
     # --------------------------------------------------------------------------
 
     def register_plugin(self, plugin: HarnessPlugin, enable_immediately: bool = True) -> bool:
-        """Register and optionally enable a plugin."""
+        """Register and optionally start a plugin."""
         name = plugin.name
         if name in self._plugins:
             logger.warning(f"[HarnessKernel] Plugin '{name}' is already registered. Updating registration.")
@@ -89,13 +89,17 @@ class HarnessKernel:
         try:
             plugin.on_load(self)
         except Exception as e:
-            plugin.state = PluginState.ERROR
+            plugin.state = PluginState.FAILED
             plugin.error_message = str(e)
             logger.error(f"[HarnessKernel] Failed to load plugin '{name}': {e}", exc_info=True)
+            try:
+                plugin.on_error(e)
+            except Exception as err:
+                logger.debug(f"[HarnessKernel] Error in on_error for plugin '{name}': {err}")
             return False
 
         if enable_immediately:
-            return self.enable_plugin(name)
+            return self.start_plugin(name)
         return True
 
     def unregister_plugin(self, name: str) -> bool:
@@ -105,6 +109,7 @@ class HarnessKernel:
             return False
 
         try:
+            self.stop_plugin(name)
             plugin.on_unload()
         except Exception as e:
             logger.warning(f"[HarnessKernel] Exception while unloading plugin '{name}': {e}")
@@ -112,34 +117,67 @@ class HarnessKernel:
             self._plugins.pop(name, None)
         return True
 
-    def enable_plugin(self, name: str) -> bool:
-        """Enable a loaded plugin after verifying its dependencies."""
+    def start_plugin(self, name: str) -> bool:
+        """Safely start an individual plugin, validating services and isolating any crash."""
         plugin = self._plugins.get(name)
         if not plugin:
-            logger.error(f"[HarnessKernel] Cannot enable unknown plugin '{name}'.")
+            logger.error(f"[HarnessKernel] Cannot start unknown plugin '{name}'.")
             return False
 
-        # Validate dependencies
+        # 1. Validate required services
+        missing_services = [s for s in plugin.required_services if s not in self._services]
+        if missing_services:
+            err_msg = f"Missing required services: {', '.join(missing_services)}"
+            plugin.state = PluginState.FAILED
+            plugin.error_message = err_msg
+            logger.error(f"[HarnessKernel] Cannot start plugin '{name}': {err_msg}")
+            try:
+                plugin.on_error(RuntimeError(err_msg))
+            except Exception as err:
+                logger.debug(f"[HarnessKernel] Error in on_error for plugin '{name}': {err}")
+            return False
+
+        # 2. Validate plugin dependencies
         for dep in plugin.metadata.dependencies:
             dep_plugin = self._plugins.get(dep)
             if not dep_plugin or dep_plugin.state != PluginState.ENABLED:
-                logger.warning(
-                    f"[HarnessKernel] Cannot enable '{name}': missing or disabled dependency '{dep}'."
-                )
+                err_msg = f"Missing or disabled dependency: '{dep}'"
+                plugin.state = PluginState.FAILED
+                plugin.error_message = err_msg
+                logger.warning(f"[HarnessKernel] Cannot start plugin '{name}': {err_msg}")
+                try:
+                    plugin.on_error(RuntimeError(err_msg))
+                except Exception as err:
+                    logger.debug(f"[HarnessKernel] Error in on_error for plugin '{name}': {err}")
                 return False
 
+        # 3. Start plugin with try/except isolation
         try:
+            plugin.on_start()
             plugin.on_enable()
+            plugin.state = PluginState.ENABLED
+            plugin.error_message = None
+
+            # Register services provided by this plugin
+            for svc in plugin.provides_services:
+                if svc not in self._services:
+                    self.register_service(svc, plugin)
+
             self.emit("plugin_enabled", plugin=name)
+            logger.debug(f"[HarnessKernel] Plugin '{name}' started successfully.")
             return True
         except Exception as e:
-            plugin.state = PluginState.ERROR
+            plugin.state = PluginState.FAILED
             plugin.error_message = str(e)
-            logger.error(f"[HarnessKernel] Failed to enable plugin '{name}': {e}", exc_info=True)
+            logger.error(f"[HarnessKernel] Plugin '{name}' crashed in on_start(): {e}", exc_info=True)
+            try:
+                plugin.on_error(e)
+            except Exception as err:
+                logger.debug(f"[HarnessKernel] Error in on_error for plugin '{name}': {err}")
             return False
 
-    def disable_plugin(self, name: str) -> bool:
-        """Disable an active plugin."""
+    def stop_plugin(self, name: str) -> bool:
+        """Stop an active plugin and unregister its provided services."""
         plugin = self._plugins.get(name)
         if not plugin or plugin.state != PluginState.ENABLED:
             return False
@@ -148,19 +186,40 @@ class HarnessKernel:
         for other_name, other_plugin in self._plugins.items():
             if other_plugin.state == PluginState.ENABLED and name in other_plugin.metadata.dependencies:
                 logger.warning(
-                    f"[HarnessKernel] Disabling '{name}' also requires disabling dependent '{other_name}'."
+                    f"[HarnessKernel] Stopping '{name}' also requires stopping dependent '{other_name}'."
                 )
-                self.disable_plugin(other_name)
+                self.stop_plugin(other_name)
 
         try:
+            plugin.on_stop()
             plugin.on_disable()
+            plugin.state = PluginState.DISABLED
+
+            # Unregister services provided by this plugin
+            for svc in plugin.provides_services:
+                if self._services.get(svc) is plugin:
+                    self.unregister_service(svc)
+
             self.emit("plugin_disabled", plugin=name)
+            logger.debug(f"[HarnessKernel] Plugin '{name}' stopped.")
             return True
         except Exception as e:
-            plugin.state = PluginState.ERROR
+            plugin.state = PluginState.FAILED
             plugin.error_message = str(e)
-            logger.error(f"[HarnessKernel] Failed to disable plugin '{name}': {e}", exc_info=True)
+            logger.error(f"[HarnessKernel] Failed to stop plugin '{name}': {e}", exc_info=True)
+            try:
+                plugin.on_error(e)
+            except Exception as err:
+                logger.debug(f"[HarnessKernel] Error in on_error for plugin '{name}': {err}")
             return False
+
+    def enable_plugin(self, name: str) -> bool:
+        """Alias for start_plugin."""
+        return self.start_plugin(name)
+
+    def disable_plugin(self, name: str) -> bool:
+        """Alias for stop_plugin."""
+        return self.stop_plugin(name)
 
     def get_plugin(self, name: str) -> HarnessPlugin | None:
         """Get plugin instance by name."""
@@ -189,15 +248,24 @@ class HarnessKernel:
         self._preset_directives = preset.directives
         self._active_tools_filter = set(preset.allowed_tools) if preset.allowed_tools is not None else None
 
+        from .presets import get_plugins_for_preset
+
+        manifest_plugins = get_plugins_for_preset(preset.name)
+        enabled_target = (
+            set(preset.enabled_plugins)
+            if preset.enabled_plugins is not None
+            else (set(manifest_plugins) if manifest_plugins else None)
+        )
+
         # Apply preset configuration across all plugins
         for name, plugin in self._plugins.items():
             plugin_cfg = preset.plugin_configs.get(name, {})
-            # Enable/disable plugins declared in preset
-            if preset.enabled_plugins is not None:
-                if name in preset.enabled_plugins and plugin.state != PluginState.ENABLED:
-                    self.enable_plugin(name)
-                elif name not in preset.enabled_plugins and plugin.state == PluginState.ENABLED:
-                    self.disable_plugin(name)
+            # Enable/disable plugins declared in preset or manifest
+            if enabled_target is not None:
+                if name in enabled_target and plugin.state != PluginState.ENABLED:
+                    self.start_plugin(name)
+                elif name not in enabled_target and plugin.state == PluginState.ENABLED:
+                    self.stop_plugin(name)
 
             plugin.apply_preset(preset.name, plugin_cfg)
 

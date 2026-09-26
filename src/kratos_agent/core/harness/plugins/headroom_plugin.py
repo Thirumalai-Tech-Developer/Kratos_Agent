@@ -91,6 +91,8 @@ class HeadroomPlugin(HarnessPlugin):
         description="Headroom context compression — 20-60% token savings",
         author="Kratos Agent",
         category="general",
+        required_services=[],
+        provides_services=["headroom"],
         tags=["compression", "tokens", "optimization"],
     )
 
@@ -99,6 +101,22 @@ class HeadroomPlugin(HarnessPlugin):
         self.stats = HeadroomStats()
         self._compress_fn = None
         self._model_name: str = "gpt-4o"  # Default tokenizer model for Headroom
+
+    def on_register(self) -> None:
+        """Called when headroom plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when headroom plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when headroom plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the headroom plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         """Attach to kernel context."""

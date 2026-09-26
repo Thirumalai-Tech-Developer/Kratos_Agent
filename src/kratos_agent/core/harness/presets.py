@@ -182,3 +182,24 @@ def load_preset_from_file(file_path: str | Path) -> HarnessPreset:
     preset = HarnessPreset.from_dict(data)
     register_preset(preset)
     return preset
+
+
+def load_manifest() -> dict[str, Any]:
+    """Load the plugin manifest from manifest.json."""
+    manifest_path = Path(__file__).parent / "plugins" / "manifest.json"
+    if manifest_path.exists():
+        import json
+
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+    return {"plugins": {}}
+
+
+def get_plugins_for_preset(preset_name: str) -> list[str]:
+    """Return all plugin names belonging to the specified preset according to manifest.json."""
+    manifest = load_manifest()
+    plugins = manifest.get("plugins", {})
+    return [
+        name for name, meta in plugins.items()
+        if preset_name.lower() in [p.lower() for p in meta.get("presets", [])]
+    ]
+

@@ -23,10 +23,28 @@ class ToolsPlugin(HarnessPlugin):
                 version="1.0.0",
                 description="Manages tool availability, permissions, and execution filtering.",
                 category="tool",
+                required_services=[],
+                provides_services=["tools"],
             ),
             config=config,
         )
         self._custom_tool_registry: dict[str, Any] = {}
+
+    def on_register(self) -> None:
+        """Called when tools plugin is registered."""
+        pass
+
+    def on_start(self) -> None:
+        """Called when tools plugin starts."""
+        pass
+
+    def on_stop(self) -> None:
+        """Called when tools plugin stops."""
+        pass
+
+    def on_error(self, exc: Exception) -> None:
+        """Called when an error occurs in the tools plugin."""
+        super().on_error(exc)
 
     def on_load(self, kernel: HarnessKernel) -> None:
         super().on_load(kernel)
