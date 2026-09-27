@@ -363,9 +363,13 @@ def print_welcome():
 
         _mic_badge = "[bold green]ONLINE[/bold green]" if _st.microphone_active else "[dim]OFFLINE[/dim]"
         _cam_badge = "[bold green]ONLINE[/bold green]" if _st.camera_active else "[dim]OFFLINE[/dim]"
-        _scr_badge = "[bold green]ONLINE[/bold green]" if _st.screen_active else "[dim]OFFLINE[/dim]"
         _voice_eng = get_native_voice()
-        _voice_badge = "[bold yellow]MUTED[/bold yellow]" if (_st.muted or _voice_eng.is_muted) else "[bold green]ONLINE (Native SAPI)[/bold green]"
+        if _st.muted or (_voice_eng and _voice_eng.is_muted):
+            _voice_badge = "[bold yellow]MUTED[/bold yellow]"
+        elif _st.gemini_connected:
+            _voice_badge = f"[bold green]ONLINE (Gemini Live: {_live_rt.config.voice_name})[/bold green]"
+        else:
+            _voice_badge = "[bold green]ONLINE (Native SAPI)[/bold green]"
 
         grid.add_row("🎤  Voice", f"{_voice_badge}  [dim]| /voice on|off|speak[/dim]")
         grid.add_row("👁  Vision", f"Screen: {_scr_badge}  Camera: {_cam_badge}  [dim]| /vision screen|camera|describe[/dim]")
@@ -554,24 +558,153 @@ def handle_model_command(arg: str = ""):
         console.print("[dim]Model selection cancelled.[/dim]\n")
 
 
-def handle_memory_command():
-    """Displays persistent agentic memory overview and executed commands."""
-    table = Table(title="🧠 Agentic Memory & Command History", border_style="gold1")
-    table.add_column("Timestamp", style="dim white")
-    table.add_column("Command / Action", style="bold cyan")
-    table.add_column("Status", style="bold green")
+def handle_memory_command(arg: str = ""):
+    """Unified handler for agentic memory inspection, maintenance, and optimization."""
+    arg_clean = arg.strip().lower()
 
-    cmds = memory.data.get("executed_commands", [])
-    if not cmds:
-        console.print("[dim]No terminal commands recorded yet in memory.[/dim]\n")
-    else:
-        for c in cmds[-10:]:
-            status = "[green]✓ Success[/green]" if c.get("returncode") == 0 else f"[red]Exit {c.get('returncode')}[/red]"
-            table.add_row(c.get("timestamp", ""), c.get("command", ""), status)
+    # 1. Memory Optimization & Maintenance
+    if arg_clean in ("optimize", "maintain", "tune", "opt"):
+        with console.status("[bold cyan]🧠 Running Memory Maintenance & Optimization Engine...[/bold cyan]", spinner="dots"):
+            from kratos_agent.memory.maintenance import get_memory_optimizer
+            report = get_memory_optimizer().run_maintenance()
+
+        table = Table(title="⚡ Memory Maintenance & Optimization Report", border_style="#00ff9d")
+        table.add_column("Optimization Metric", style="bold white", width=32)
+        table.add_column("Result / Status", style="bold cyan")
+
+        status_color = "#00ff9d" if report.health_score >= 85 else ("yellow" if report.health_score >= 65 else "red")
+        table.add_row("Overall Memory Health", f"[{status_color}]{report.health_score:.1f}% ({report.health_status})[/{status_color}]")
+        table.add_row("Execution Duration", f"{report.duration_ms:.1f} ms")
+        table.add_row("Decayed Memories", f"{report.decayed_count} records updated")
+        table.add_row("Pruned Stale/Low-Confidence", f"[yellow]{report.pruned_records_count} records purged[/yellow]")
+        table.add_row("Deduplicated Facts", f"[green]{report.deduplicated_count} facts merged[/green]")
+        table.add_row("Cross-Tier Synced to V2", f"[cyan]{report.synced_to_v2_count} facts mirrored[/cyan]")
+        table.add_row("Cross-Tier Synced to Cognitive", f"[cyan]{report.synced_to_cognitive_count} facts mirrored[/cyan]")
+        table.add_row("Cognitive Records Cleaned", f"{report.cognitive_records_pruned} scratchpads pruned")
+        table.add_row("Session Outputs Trimmed", f"{report.tool_outputs_trimmed} traces compacted")
+        table.add_row("Database Reclaimed", f"[bold #00ff9d]{report.db_reclaimed_bytes:,} bytes[/bold #00ff9d]")
+        table.add_row("Active Retained Memories", f"[bold green]{report.retained_records_count} records[/bold green]")
+
+        console.print()
         console.print(table)
+        console.print("[dim]✓ Memory layers optimized, cross-tier synced, and hot-cache purged.[/dim]\n")
+        return
 
-    sessions_count = len(memory.data.get("sessions", []))
-    console.print(f"[dim]Stored Turns: {sessions_count} | Memory File: .kratos/agent_memory.json[/dim]\n")
+    # 2. Cross-Tier Synchronization
+    if arg_clean.startswith(("sync", "mirror")):
+        with console.status("[bold cyan]🔄 Synchronizing Memory Tiers...[/bold cyan]", spinner="dots"):
+            from kratos_agent.memory import get_memory_manager
+            synced_v2, synced_cog = get_memory_manager().sync_tiers()
+        console.print(f"\n[bold green]✓ Memory Tiers Synchronized:[/bold green] [cyan]{synced_v2} facts mirrored to V2[/cyan], [cyan]{synced_cog} facts mirrored to Cognitive[/cyan]\n")
+        return
+
+    # 3. Memory Export / Backup
+    if arg_clean.startswith(("export", "backup")):
+        parts = arg.split(maxsplit=1)
+        export_target = parts[1].strip() if len(parts) > 1 else None
+        from pathlib import Path
+        from kratos_agent.memory import get_memory_manager
+        target_path = Path(export_target) if export_target else None
+        saved_path = get_memory_manager().export_memory(target_path)
+        console.print(f"\n[bold green]✓ Memory exported successfully to:[/bold green] [cyan]{saved_path}[/cyan]\n")
+        return
+
+    # 4. Memory Import / Restore
+    if arg_clean.startswith(("import", "restore")):
+        parts = arg.split(maxsplit=1)
+        if len(parts) < 2:
+            console.print("\n[bold yellow]Usage:[/bold yellow] /memory import <file_path.json>\n")
+            return
+        import_path = parts[1].strip()
+        from pathlib import Path
+        from kratos_agent.memory import get_memory_manager
+        p = Path(import_path)
+        if not p.exists():
+            console.print(f"\n[bold red]Error:[/bold red] Import file not found: [cyan]{import_path}[/cyan]\n")
+            return
+        count = get_memory_manager().import_memory(p)
+        console.print(f"\n[bold green]✓ Imported and consolidated {count} memory records from:[/bold green] [cyan]{p}[/cyan]\n")
+        return
+
+    # 5. Memory Cleaning / Purging
+    if arg_clean.startswith(("clean", "clear", "purge", "prune")):
+        sub = arg_clean.split(maxsplit=1)[1] if " " in arg_clean else "working"
+        if sub in ("working", "scratchpad"):
+            from kratos_agent.core.cognitive_memory import cognitive_memory
+            count = cognitive_memory.clear(memory_type="working")
+            console.print(f"\n[bold green]✓ Cleared working memory scratchpads[/bold green] [dim]({count} records)[/dim]\n")
+        elif sub in ("episodic", "history"):
+            from kratos_agent.core.cognitive_memory import cognitive_memory
+            count = cognitive_memory.clear(memory_type="episodic")
+            console.print(f"\n[bold green]✓ Cleared episodic memory[/bold green] [dim]({count} records)[/dim]\n")
+        elif sub in ("all", "everything"):
+            from kratos_agent.core.cognitive_memory import cognitive_memory
+            count = cognitive_memory.clear()
+            console.print(f"\n[bold yellow]⚠ Cleared all cognitive memories[/bold yellow] [dim]({count} records)[/dim]\n")
+        else:
+            console.print(f"\n[bold yellow]Usage:[/bold yellow] /memory clean working | /memory clean episodic | /memory clean all\n")
+        return
+
+    # 6. Memory Recall / Search
+    if arg_clean.startswith(("recall", "search", "query", "find")):
+        query_text = arg.split(maxsplit=1)[1].strip() if " " in arg else ""
+        if not query_text:
+            console.print("[bold yellow]Usage:[/bold yellow] /memory recall <query text>\n")
+            return
+        from kratos_agent.memory import get_memory_manager
+        records = get_memory_manager().recall(query_text, limit=6)
+        if not records:
+            console.print(f"\n[dim]No memory records found matching:[/dim] [cyan]{query_text}[/cyan]\n")
+            return
+        table = Table(title=f"🔍 Recalled Memories for: '{query_text}'", border_style="cyan")
+        table.add_column("Layer", style="bold gold1", width=14)
+        table.add_column("Confidence", style="bold green", width=12)
+        table.add_column("Content", style="white")
+        for r in records:
+            layer_name = r.layer.value.upper() if hasattr(r.layer, "value") else str(r.layer).upper()
+            table.add_row(layer_name, f"{r.confidence:.2f}", r.content)
+        console.print()
+        console.print(table)
+        console.print()
+        return
+
+    # 7. Default: Rich Memory Dashboard
+    from kratos_agent.core.cognitive_memory import cognitive_memory
+    from kratos_agent.memory import get_memory_manager
+
+    cog_summary = cognitive_memory.get_summary()
+    mgr = get_memory_manager()
+    v2_records = mgr.store.list_records()
+    health = mgr.get_health_metrics()
+
+    health_score = health.get("health_score", 100.0)
+    health_status = health.get("health_status", "OPTIMAL")
+    status_color = "#00ff9d" if health_score >= 85 else ("yellow" if health_score >= 65 else "red")
+    cache_stats = health.get("cache", {})
+
+    table = Table(
+        title=f"🧠 Kratos Agentic Memory Architecture  ·  [{status_color}]Health: {health_score:.1f}% ({health_status})[/{status_color}]",
+        border_style="gold1"
+    )
+    table.add_column("Memory Layer", style="bold gold1", width=22)
+    table.add_column("Type / Scope", style="white", width=26)
+    table.add_column("Records", style="bold cyan", width=12)
+    table.add_column("Decay Policy", style="dim white", width=22)
+
+    table.add_row("📚 Semantic", "Project Facts & Architecture", str(cog_summary.get("semantic", 0)), "0.1% / day (slow)")
+    table.add_row("⚙️ Procedural", "Workflows & Playbooks", str(cog_summary.get("procedural", 0)), "0.5% / day (medium)")
+    table.add_row("📜 Episodic", "Past Session Experience", str(cog_summary.get("episodic", 0)), "5.0% / day (fast)")
+    table.add_row("🧠 Working", "Active Session Scratchpad", str(cog_summary.get("working", 0)), "50.0% / day (rapid)")
+    table.add_row("📦 Memory V2 Store", ".kratos/memory_v2.json", str(len(v2_records)), "Layer-adaptive")
+
+    console.print()
+    console.print(table)
+
+    d1_stats = runtime.d1_db.get_stats()
+    mode_text = "[bold green]Cloudflare D1 (Cloud)[/bold green]" if d1_stats.get("is_remote") else "[bold yellow]Local SQLite Mirror (.kratos/kratos_d1.db)[/bold yellow]"
+    console.print(f"[dim]• Database: {mode_text} | Sessions: {d1_stats.get('sessions_count', 0)} | Turns: {d1_stats.get('turns_count', 0)}[/dim]")
+    console.print(f"[dim]• Hot-Cache: Hit Rate: {cache_stats.get('hit_rate_pct', 0.0)}% | Active Cache: {cache_stats.get('cache_size', 0)}/{cache_stats.get('cache_max', 128)} entries[/dim]")
+    console.print("[dim]• Commands: [bold gold1]/memory optimize[/bold gold1] | [bold gold1]/memory sync[/bold gold1] | [bold gold1]/memory clean[/bold gold1] | [bold gold1]/memory recall <query>[/bold gold1] | [bold gold1]/memory export[/bold gold1][/dim]\n")
 
 
 def handle_web_command(arg: str = ""):
@@ -1738,7 +1871,7 @@ def start_interactive_cli():
                 arg_lower = arg_raw.lower()
                 import asyncio
 
-                if arg_lower.startswith(("describe", "analyze", "look", "see", "screen", "capture", "check")):
+                if arg_lower.startswith(("describe", "analyze", "look", "see", "capture", "check")):
                     prompt = "Describe what is currently visible on the screen in detail and note any key elements or errors."
                     if " " in arg_raw:
                         prompt = arg_raw.split(maxsplit=1)[1].strip()
@@ -1752,9 +1885,12 @@ def start_interactive_cli():
                         except Exception as e:
                             v_reply = f"Vision error: {e}"
                     console.print(Panel(v_reply, title="[bold cyan]👁 OmniRoute Screen Analysis[/bold cyan]", border_style="cyan"))
-                    from kratos_agent.output.native_voice import get_native_voice
-                    if not get_native_voice().is_muted:
-                        get_native_voice().speak(v_reply)
+                    if live_runtime and not live_runtime.audio.is_muted and v_reply:
+                        live_runtime.speak(v_reply)
+                    else:
+                        from kratos_agent.output.native_voice import get_native_voice
+                        if not get_native_voice().is_muted:
+                            get_native_voice().speak(v_reply)
                     continue
 
                 if not arg_raw:
@@ -2387,12 +2523,15 @@ def start_interactive_cli():
                     messages.pop()
             else:
                 messages.append({"role": "assistant", "content": reply_text})
-                # Native Voice Narration
+                # Voice Narration (Gemini Live natural voice prioritized)
                 try:
-                    from kratos_agent.output.native_voice import get_native_voice
-                    voice_eng = get_native_voice()
-                    if not voice_eng.is_muted and reply_text:
-                        voice_eng.speak(reply_text)
+                    if live_runtime and not live_runtime.audio.is_muted and reply_text:
+                        live_runtime.speak(reply_text)
+                    else:
+                        from kratos_agent.output.native_voice import get_native_voice
+                        voice_eng = get_native_voice()
+                        if not voice_eng.is_muted and reply_text:
+                            voice_eng.speak(reply_text)
                 except Exception as e:
                     logger.debug("[CLI] Voice output error: %s", e)
 
@@ -2415,15 +2554,20 @@ def start_interactive_cli():
                 console.print()
             else:
                 console.print()
-                console.print(
-                    Panel(
-                        Markdown(reply_text),
-                        title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
-                        title_align="left",
-                        border_style="red",
-                        padding=(1, 2)
+                if "```" in reply_text:
+                    console.print(f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}\n")
+                    from kratos_agent.tui.highlighter import render_markdown_code_blocks
+                    render_markdown_code_blocks(reply_text, console=console)
+                else:
+                    console.print(
+                        Panel(
+                            Markdown(reply_text),
+                            title=f"[bold red]⚔️  KRATOS[/bold red] [dim]({runtime.model_name})[/dim] {approval_gate.mode_badge()}",
+                            title_align="left",
+                            border_style="red",
+                            padding=(1, 2)
+                        )
                     )
-                )
                 console.print()
 
         except (KeyboardInterrupt, EOFError):

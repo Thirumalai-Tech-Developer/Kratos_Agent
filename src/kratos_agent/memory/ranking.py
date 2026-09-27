@@ -28,14 +28,34 @@ SCOPE_PRIORITY = {
 }
 
 
+from kratos_agent.memory.consolidation import STOPWORDS
+
+
 def _compute_text_overlap(query_text: str, content: str) -> float:
-    """Computes normalized word overlap similarity."""
+    """Computes normalized word overlap similarity with stopword filtering and phrase bonuses."""
     q_words = set(query_text.lower().split())
     c_words = set(content.lower().split())
     if not q_words or not c_words:
         return 0.0
-    overlap = len(q_words & c_words)
-    return overlap / max(len(q_words), 1)
+
+    # Filter out stopwords for content-rich matching
+    q_content = {w for w in q_words if w not in STOPWORDS and len(w) > 1}
+    c_content = {w for w in c_words if w not in STOPWORDS and len(w) > 1}
+
+    # If content words exist, compute overlap primarily on content words
+    if q_content and c_content:
+        overlap = len(q_content & c_content)
+        base_score = overlap / max(len(q_content), 1)
+    else:
+        overlap = len(q_words & c_words)
+        base_score = overlap / max(len(q_words), 1)
+
+    # Phrase match bonus: if exact query substring appears in content
+    clean_q = query_text.strip().lower()
+    if len(clean_q) > 3 and clean_q in content.lower():
+        base_score = min(1.0, base_score + 0.25)
+
+    return base_score
 
 
 def rank_memories(
@@ -53,8 +73,14 @@ def rank_memories(
         if rec.confidence < query.min_confidence:
             continue
 
-        # 1. Similarity (word overlap / token match)
+        # 1. Similarity (word overlap / token match + tag/key match)
         similarity = _compute_text_overlap(query.text, rec.content)
+        q_tokens = {w for w in query.text.lower().split() if w not in STOPWORDS and len(w) > 1}
+        if q_tokens:
+            rec_tags = {str(t).lower() for t in rec.tags}
+            rec_key = str(rec.metadata.get("key", "")).lower()
+            if any(t in rec_tags or t in rec_key for t in q_tokens):
+                similarity = min(1.0, similarity + 0.15)
 
         # 2. Task relevance
         relevance = 0.5

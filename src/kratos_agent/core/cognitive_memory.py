@@ -336,7 +336,7 @@ class CognitiveMemoryStore:
             return ""
 
         return (
-            "### 🏛️ PRIMARY MEMORY (Essential Context):\n"
+            "### 🏛️ COGNITIVE MEMORY BASE (Essential Context):\n"
             + "\n\n".join(sections)
             + "\n\n*Note: Each chat starts clean without previous episodic baggage. Use `read_memory` if specific historical facts or past experiences are explicitly needed.*"
         )

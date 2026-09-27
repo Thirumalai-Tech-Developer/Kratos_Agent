@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 logger = logging.getLogger(__name__)
 
+from pathlib import Path
 import threading
 import time
 from typing import Any
@@ -311,6 +312,26 @@ class KratosLiveRenderer:
         elif kind == EventKind.TOOL_FAILED:
             self._renderer.on_tool_completed(payload, failed=True)
             self._status_bar.set_thinking("Recovering…")
+        elif kind in (EventKind.FILE_CREATED, EventKind.FILE_MODIFIED):
+            fp = payload.get("file_path") or ""
+            action = "CREATED FILE" if kind == EventKind.FILE_CREATED else "MODIFIED FILE"
+            p = Path(fp)
+            if p.exists() and p.is_file():
+                try:
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                    from .highlighter import render_code_dialog
+                    panel = render_code_dialog(content, file_path=fp, action=action)
+                    if self._live is not None:
+                        self._live.console.print()
+                        self._live.console.print(panel)
+                        self._live.console.print()
+                    else:
+                        from rich.console import Console
+                        Console().print()
+                        Console().print(panel)
+                        Console().print()
+                except Exception as exc:
+                    logger.debug("Code highlight display error: %s", exc)
         elif kind in (EventKind.TURN_COMPLETED, EventKind.AGENT_COMPLETED):
             if "plan" in payload and isinstance(payload["plan"], dict):
                 self._renderer.on_plan_updated(payload["plan"])

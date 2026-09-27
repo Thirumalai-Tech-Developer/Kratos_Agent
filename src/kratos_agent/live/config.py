@@ -8,6 +8,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Ensure Google APIs and localhost bypass local system proxies (e.g. tethering/hotspot)
+_current_no_proxy = os.getenv("NO_PROXY", "")
+_bypass = "googleapis.com,generativelanguage.googleapis.com,127.0.0.1,localhost"
+if not _current_no_proxy:
+    os.environ["NO_PROXY"] = _bypass
+    os.environ["no_proxy"] = _bypass
+elif "googleapis.com" not in _current_no_proxy:
+    os.environ["NO_PROXY"] = f"{_current_no_proxy},{_bypass}"
+    os.environ["no_proxy"] = os.environ["NO_PROXY"]
+
 
 def _resolve_api_key() -> str:
     """Resolve Gemini credentials from the process environment / project .env only."""
@@ -20,7 +30,7 @@ class LiveConfig:
     """Live multimodal configuration settings."""
     api_key: str = field(default_factory=_resolve_api_key)
     model: str = field(
-        default_factory=lambda: os.getenv("KRATOS_LIVE_MODEL", "gemini-3.8-live-extended-thinking")
+        default_factory=lambda: os.getenv("KRATOS_LIVE_MODEL", "gemini-3.8-live")
     )
     voice_name: str = field(
         default_factory=lambda: os.getenv("KRATOS_LIVE_VOICE", "Zephyr")

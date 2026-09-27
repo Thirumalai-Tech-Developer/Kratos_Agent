@@ -194,9 +194,15 @@ def get_voice_buffer() -> VoiceBuffer:
 def get_tts_queue() -> TTSQueue:
     global _tts_queue
     if _tts_queue is None:
-        try:
-            from .native_voice import get_native_voice
-            _tts_queue = TTSQueue(speech_func=get_native_voice().speak)
-        except Exception:
-            _tts_queue = TTSQueue()
+        def _speak_handler(text: str) -> None:
+            try:
+                from kratos_agent.live import get_live_runtime
+                get_live_runtime().speak(text)
+            except Exception:
+                try:
+                    from .native_voice import get_native_voice
+                    get_native_voice().speak(text)
+                except Exception:
+                    pass
+        _tts_queue = TTSQueue(speech_func=_speak_handler)
     return _tts_queue

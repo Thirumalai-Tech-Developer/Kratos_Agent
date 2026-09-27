@@ -198,6 +198,37 @@ class D1DatabaseClient:
             "error": error_msg,
         }
 
+    def optimize(self) -> dict[str, Any]:
+        """Runs PRAGMA wal_checkpoint(TRUNCATE), PRAGMA optimize, and VACUUM to reclaim space and defragment."""
+        reclaimed_bytes = 0
+        initial_size = 0
+        final_size = 0
+        wal_path = self.local_db_path.with_name(self.local_db_path.name + "-wal")
+        if self.local_db_path.exists():
+            try:
+                initial_size = self.local_db_path.stat().st_size
+                if wal_path.exists():
+                    initial_size += wal_path.stat().st_size
+
+                conn = sqlite3.connect(str(self.local_db_path))
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("PRAGMA optimize")
+                conn.execute("VACUUM")
+                conn.close()
+
+                final_size = self.local_db_path.stat().st_size
+                if wal_path.exists():
+                    final_size += wal_path.stat().st_size
+
+                reclaimed_bytes = max(0, initial_size - final_size)
+            except Exception as exc:
+                logger.debug("Database optimize error: %s", exc)
+        return {
+            "initial_size_bytes": initial_size,
+            "final_size_bytes": final_size,
+            "reclaimed_bytes": reclaimed_bytes,
+        }
+
 
 # Global D1 database singleton client
 d1_db = D1DatabaseClient()

@@ -27,15 +27,28 @@ class UIAWorker:
         self.t.start()
 
     def _worker(self):
-        # Must run in MTA mode
-        comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
-        self.uia = comtypes.client.CreateObject(CUIAutomation, interface=IUIAutomation)
-        self.tree_walker = self.uia.ControlViewWalker
-        self.root = self.uia.GetRootElement()
+        try:
+            comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+        except Exception:
+            try:
+                comtypes.CoInitialize()
+            except Exception:
+                pass
+        try:
+            self.uia = comtypes.client.CreateObject(CUIAutomation, interface=IUIAutomation)
+            self.tree_walker = self.uia.ControlViewWalker
+            self.root = self.uia.GetRootElement()
+        except Exception as e:
+            logger.debug("[UIAWorker] Failed to initialize UIA: %s", e)
+            self.uia = None
+            self.tree_walker = None
+            self.root = None
 
         while True:
             func, args, kwargs, result_q = self.q.get()
             try:
+                if self.uia is None:
+                    raise RuntimeError("UIAutomation is unavailable on this host.")
                 res = func(*args, **kwargs)
                 result_q.put((res, None))
             except Exception as e:

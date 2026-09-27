@@ -115,13 +115,39 @@ class MemoryManager:
         """Synchronously consolidates and deduplicates memories."""
         return self.store.consolidate()
 
+    def optimize(self, **kwargs: Any) -> Any:
+        """Runs full memory maintenance, decay, deduplication, and database optimization."""
+        from kratos_agent.memory.maintenance import get_memory_optimizer
+        return get_memory_optimizer().run_maintenance(**kwargs)
+
+    def maintain(self, **kwargs: Any) -> Any:
+        """Alias for optimize()."""
+        return self.optimize(**kwargs)
+
+    def sync_tiers(self) -> tuple[int, int]:
+        """Bidirectionally syncs memories between CognitiveMemory and Memory V2."""
+        from kratos_agent.memory.maintenance import get_memory_optimizer
+        return get_memory_optimizer().sync_tiers()
+
+    def get_health_metrics(self) -> dict[str, Any]:
+        """Returns health score, distribution, and cache statistics."""
+        return self.store.get_health_metrics()
+
+    def export_memory(self, path: Any = None) -> Any:
+        """Exports memory records to JSON."""
+        return self.store.export_records(path)
+
+    def import_memory(self, data_or_path: Any, merge: bool = True) -> int:
+        """Imports memory records from JSON or dictionaries."""
+        return self.store.import_records(data_or_path, merge=merge)
+
     def async_consolidate(self) -> None:
         """Run at most one consolidation worker at a time."""
         if not self._consolidate_lock.acquire(blocking=False):
             return
         def worker() -> None:
             try:
-                self.store.consolidate()
+                self.optimize()
             finally:
                 self._consolidate_lock.release()
         threading.Thread(target=worker, name="kratos-memory-consolidate", daemon=True).start()

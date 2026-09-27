@@ -30,6 +30,8 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._cache_max_entries = 128
         self._hot_cache: dict[str, tuple[float, list[MemoryRecord]]] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
         self._dirty_accesses = 0
         self._last_save = 0.0
         self._load()
@@ -108,7 +110,9 @@ class MemoryStore:
         with self._lock:
             cached = self._hot_cache.get(cache_key)
             if cached and (now - cached[0]) < self.cache_ttl:
+                self._cache_hits += 1
                 return list(cached[1])
+            self._cache_misses += 1
             records = list(self._records.values())
             if query.scope:
                 records = [r for r in records if r.scope == query.scope]
@@ -141,3 +145,99 @@ class MemoryStore:
         self.invalidate_cache()
         self.save()
         return initial_count - len(self._records)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        total = self._cache_hits + self._cache_misses
+        return (self._cache_hits / total * 100.0) if total > 0 else 0.0
+
+    def get_cache_stats(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "hits": self._cache_hits,
+                "misses": self._cache_misses,
+                "hit_rate_pct": round(self.cache_hit_rate, 1),
+                "cache_size": len(self._hot_cache),
+                "cache_max": self._cache_max_entries,
+            }
+
+    def export_records(self, export_path: Path | None = None) -> Path:
+        """Exports all records to a JSON file."""
+        target = export_path or (self.storage_path.parent / f"memory_export_{int(time.time())}.json")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            data = {
+                "version": 2,
+                "exported_at": time.time(),
+                "records": [r.to_dict() for r in self._records.values()],
+            }
+            target.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def import_records(self, data_or_path: Path | str | list[dict[str, Any]], merge: bool = True) -> int:
+        """Imports memory records from file or dictionary list."""
+        imported_records: list[MemoryRecord] = []
+        if isinstance(data_or_path, (str, Path)):
+            p = Path(data_or_path)
+            if not p.exists():
+                return 0
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            items = raw.get("records", raw) if isinstance(raw, dict) else raw
+        else:
+            items = data_or_path
+
+        for item in items:
+            if isinstance(item, dict):
+                try:
+                    imported_records.append(MemoryRecord.from_dict(item))
+                except Exception as exc:
+                    logger.debug("Record import parse error: %s", exc)
+
+        with self._lock:
+            if merge:
+                combined = list(self._records.values()) + imported_records
+                consolidated = consolidate_memories(combined)
+                self._records = {r.id: r for r in consolidated}
+            else:
+                self._records = {r.id: r for r in imported_records}
+            self.invalidate_cache()
+            self.save()
+        return len(imported_records)
+
+    def get_health_metrics(self) -> dict[str, Any]:
+        """Calculates memory store health and quality indicators."""
+        with self._lock:
+            recs = list(self._records.values())
+            total = len(recs)
+            if total == 0:
+                return {
+                    "total_records": 0,
+                    "avg_confidence": 0.0,
+                    "high_confidence_pct": 100.0,
+                    "layer_counts": {},
+                    "health_score": 100.0,
+                    "health_status": "OPTIMAL",
+                    "cache": self.get_cache_stats(),
+                }
+
+            high_conf = sum(1 for r in recs if r.confidence >= 0.70)
+            avg_conf = sum(r.confidence for r in recs) / total
+            high_conf_pct = (high_conf / total) * 100.0
+
+            layer_counts: dict[str, int] = {}
+            for r in recs:
+                layer_name = r.layer.value if hasattr(r.layer, "value") else str(r.layer)
+                layer_counts[layer_name] = layer_counts.get(layer_name, 0) + 1
+
+            health_score = round(avg_conf * 60.0 + (high_conf_pct * 0.40), 1)
+            status = "OPTIMAL" if health_score >= 85.0 else ("HEALTHY" if health_score >= 65.0 else "NEEDS_OPTIMIZATION")
+
+            return {
+                "total_records": total,
+                "avg_confidence": round(avg_conf, 2),
+                "high_confidence_pct": round(high_conf_pct, 1),
+                "layer_counts": layer_counts,
+                "health_score": health_score,
+                "health_status": status,
+                "cache": self.get_cache_stats(),
+            }

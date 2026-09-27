@@ -491,6 +491,11 @@ def write_file(file_path: str, content: str) -> str:
         if not existed:
             stat_bar = f"[bold green]+{num_lines} lines[/bold green] [green]{'█' * min(10, max(1, num_lines // 15))}[/green]"
             step_tracker.complete(f"[bold white]Created[/bold white] [cyan]{file_path}[/cyan]", stat_bar, success=True)
+            try:
+                from kratos_agent.tui.highlighter import print_code_dialog
+                print_code_dialog(content_str, file_path=file_path, action="CREATED FILE", console=console)
+            except Exception as exc:
+                logger.debug("Code highlight display error: %s", exc)
             return f"Successfully created '{file_path}' (+{num_lines} lines)."
         else:
             diff = list(difflib.unified_diff(old_content.splitlines(), new_lines, lineterm=""))
@@ -498,6 +503,11 @@ def write_file(file_path: str, content: str) -> str:
             removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
             stat_bar = format_diff_stat(added, removed)
             step_tracker.complete(f"[bold white]Wrote[/bold white] [cyan]{file_path}[/cyan]", stat_bar, success=True)
+            try:
+                from kratos_agent.tui.highlighter import print_code_dialog
+                print_code_dialog(content_str, file_path=file_path, action="UPDATED FILE", console=console)
+            except Exception as exc:
+                logger.debug("Code highlight display error: %s", exc)
             return f"Successfully updated '{file_path}' (+{added}, -{removed} lines)."
     except Exception as e:
         step_tracker.fail(f"[bold red]Failed writing[/bold red] [cyan]{file_path}[/cyan]", str(e))
@@ -877,6 +887,36 @@ def clear_memory(memory_type: str = "") -> str:
     except Exception as e:
         step_tracker.fail("Failed to clear memory", str(e))
         return f"Error clearing memory: {e}"
+
+
+def optimize_memory(min_confidence: float = 0.15) -> str:
+    """
+    Performs full memory maintenance and optimization across all memory layers:
+      - Applies time-based decay policies
+      - Prunes low-confidence, stale, and expired records
+      - Deduplicates facts and merges redundant memory entries
+      - Trims oversized tool and command logs in sessions
+      - Runs VACUUM on the database to reclaim disk space
+    """
+    step_tracker.start("Optimizing memory systems...")
+    try:
+        from kratos_agent.memory.maintenance import get_memory_optimizer
+        report = get_memory_optimizer().run_maintenance(min_confidence=min_confidence)
+        stats_str = (
+            f"Memory optimization completed in {report.duration_ms:.1f}ms:\n"
+            f"• Decayed records: {report.decayed_count}\n"
+            f"• Pruned stale records: {report.pruned_records_count}\n"
+            f"• Deduplicated facts: {report.deduplicated_count}\n"
+            f"• Cognitive records cleaned: {report.cognitive_records_pruned}\n"
+            f"• Session logs trimmed: {report.tool_outputs_trimmed}\n"
+            f"• Database reclaimed: {report.db_reclaimed_bytes:,} bytes\n"
+            f"• Active retained memories: {report.retained_records_count}"
+        )
+        step_tracker.complete("[bold white]Memory Optimized[/bold white]", f"{report.retained_records_count} records", success=True)
+        return stats_str
+    except Exception as e:
+        step_tracker.fail("Failed to optimize memory", str(e))
+        return f"Error optimizing memory: {e}"
 
 
 # ──────────────────────────────────────────────────────────

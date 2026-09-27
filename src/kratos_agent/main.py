@@ -242,9 +242,8 @@ class KratosRuntime:
         def _get_compact_memory_context() -> str:
             mm = get_memory_manager()
             mems = mm.get_compact_context(query_text=str(getattr(self, "last_request", "") or ""))
-            if not mems:
-                return ""
-            return "RELEVANT MEMORY:\n" + "\n".join(f"- {m}" for m in mems)
+            memory_section = ("\n\nRELEVANT MEMORY:\n" + "\n".join(f"- {m}" for m in mems)) if mems else ""
+            return KRATOS_COGNITIVE_MEMORY_PROMPT + memory_section
 
         self.instructions.register(InstructionModule("cognitive-memory-framework", "system", _get_compact_memory_context, 15))
 

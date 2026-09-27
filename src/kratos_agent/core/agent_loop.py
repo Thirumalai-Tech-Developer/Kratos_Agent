@@ -684,21 +684,23 @@ class AgentLoop:
                 if self.current_run:
                     self.current_run.record_inspected_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_INSPECTED, {"file_path": fp}, turn_id))
-        elif name == "run_terminal_command":
-            cmd = str(args.get("command", "")).strip()
+        elif name in ("run_terminal_command", "computer_launch"):
+            cmd = str(args.get("command", "") or args.get("target", "") or " ".join(str(x) for x in args.get("args", []))).strip()
             if cmd:
                 self.workspace_tracker.record_command(cmd, 1 if is_error else 0)
                 if self.current_run:
                     self.current_run.record_command(cmd)
                 if not is_error:
+                    created_targets = []
                     for target in re.findall(r'(?:Set-Content|Out-File)\s+(?:-Path\s+)?["\']?([^"\'\s>|]+\.[a-zA-Z0-9]+)["\']?', cmd, re.IGNORECASE):
-                        self.workspace_tracker.record_file_created(target)
-                        if self.current_run:
-                            self.current_run.record_written_file(target)
+                        created_targets.append(target)
                     for target in re.findall(r'(?:>|>>)\s*["\']?([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)["\']?', cmd):
+                        created_targets.append(target)
+                    for target in created_targets:
                         self.workspace_tracker.record_file_created(target)
                         if self.current_run:
                             self.current_run.record_written_file(target)
+                        self.emit(RuntimeEvent(EventKind.FILE_CREATED, {"file_path": target}, turn_id))
                 self.emit(RuntimeEvent(EventKind.COMMAND_COMPLETED, {"command": cmd, "is_error": is_error}, turn_id))
 
     def run(
@@ -1059,6 +1061,11 @@ class AgentLoop:
                 history.append(ChatMessage(role="assistant", content=final))
                 self.emit(RuntimeEvent(EventKind.TURN_COMPLETED, {"steps": step + 1, "final": final}, turn_id))
                 profiler.finish()
+                try:
+                    from kratos_agent.memory import get_memory_manager
+                    get_memory_manager().async_consolidate()
+                except Exception as exc:
+                    logger.debug("Async memory consolidation error: %s", exc)
                 return final, history
 
             # Assistant Message with Tool Calls

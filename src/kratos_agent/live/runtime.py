@@ -186,6 +186,22 @@ class LiveRuntime:
         else:
             self.audio.mute()
 
+    def speak(self, text: str) -> None:
+        """Speaks text using Gemini Live natural voice when connected, or falls back to native voice."""
+        if not text or not text.strip():
+            return
+        if self.config.is_gemini_backend and self._loop and self._loop.is_running() and self.session and self.status_hub.get_status().gemini_connected:
+            asyncio.run_coroutine_threadsafe(
+                self.session.speak_text(text),
+                self._loop,
+            )
+        else:
+            try:
+                from kratos_agent.output.native_voice import get_native_voice
+                get_native_voice().speak(text)
+            except Exception as e:
+                logger.debug("[LiveRuntime] Fallback voice error: %s", e)
+
     def send_text_input_sync(self, text: str) -> None:
         """Safely dispatches text input to the LiveSession from non-async threads."""
         if self._loop and self._loop.is_running():

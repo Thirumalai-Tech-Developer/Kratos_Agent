@@ -121,6 +121,52 @@ class TestLayeredMemory(unittest.TestCase):
         self.assertLessEqual(len(ctx), 3)
         self.assertTrue(any("Playwright" in c for c in ctx))
 
+    def test_fuzzy_semantic_deduplication(self) -> None:
+        r1 = MemoryRecord(content="Always use uv pip install to add dependencies", layer=MemoryLayer.SEMANTIC)
+        r2 = MemoryRecord(content="Use uv pip install for adding project dependencies", layer=MemoryLayer.SEMANTIC)
+        deduped = deduplicate_records([r1, r2], fuzzy_threshold=0.75)
+        self.assertEqual(len(deduped), 1)
+
+    def test_cache_telemetry(self) -> None:
+        self.mm.remember("FastAPI server runs on port 8000", importance=0.8, confidence=0.9)
+        # First query: cache miss
+        _ = self.mm.recall("FastAPI server")
+        # Second identical query: cache hit
+        _ = self.mm.recall("FastAPI server")
+
+        stats = self.mm.store.get_cache_stats()
+        self.assertGreaterEqual(stats["hits"], 1)
+        self.assertGreaterEqual(stats["misses"], 1)
+        self.assertGreater(stats["hit_rate_pct"], 0.0)
+
+    def test_export_and_import_memory(self) -> None:
+        self.mm.remember("Unique exported fact about quantum computing", importance=0.9, confidence=0.95)
+        export_file = Path(self.tmp_dir.name) / "exported_mem.json"
+        saved = self.mm.export_memory(export_file)
+        self.assertTrue(saved.exists())
+
+        # Create fresh MemoryManager and import
+        new_mm = MemoryManager()
+        new_mm.store.storage_path = Path(self.tmp_dir.name) / "new_mem.json"
+        imported_count = new_mm.import_memory(saved)
+        self.assertGreaterEqual(imported_count, 1)
+        recalled = new_mm.recall("quantum computing")
+        self.assertTrue(any("quantum computing" in r.content for r in recalled))
+
+    def test_memory_optimizer_full_maintenance(self) -> None:
+        from kratos_agent.memory.maintenance import MemoryOptimizer
+        opt = MemoryOptimizer(memory_store=self.mm.store)
+
+        # Seed working and episodic records
+        self.mm.store.add(MemoryRecord(content="Ephemeral task step", layer=MemoryLayer.WORKING, importance=0.05, confidence=0.05))
+        self.mm.store.add(MemoryRecord(content="Permanent architecture rule", layer=MemoryLayer.SEMANTIC, importance=0.9, confidence=0.9, tags=["permanent"]))
+
+        report = opt.run_maintenance(min_confidence=0.20, optimize_db=True, optimize_sessions=False)
+        self.assertIsNotNone(report)
+        self.assertGreater(report.duration_ms, 0.0)
+        self.assertIn(report.health_status, ("OPTIMAL", "HEALTHY", "NEEDS_OPTIMIZATION"))
+        self.assertGreaterEqual(report.health_score, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

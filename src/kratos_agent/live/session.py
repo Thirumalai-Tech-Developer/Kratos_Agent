@@ -493,6 +493,25 @@ class LiveSession:
         finally:
             self._turn_complete_event = None
 
+    async def speak_text(self, text: str) -> None:
+        """Prompts Gemini Live to speak the given response to the user using its natural neural voice."""
+        if self.session is None or not text.strip():
+            return
+        clean = self._sanitize_narration(text.strip())
+        if not clean:
+            return
+        if len(clean) > 500:
+            prompt = (
+                f"[SYSTEM: Speak a clear, friendly, and concise 1-2 sentence spoken summary of this result to the user. "
+                f"Do not read raw code, markdown, symbols, or formatting]:\n{clean[:800]}"
+            )
+        else:
+            prompt = (
+                f"[SYSTEM: Speak the following answer aloud to the user in a natural, friendly tone. "
+                f"Do not read markdown formatting, code syntax, or symbols]:\n{clean}"
+            )
+        await self.send_text_input(prompt, end_of_turn=True)
+
     async def send_narration(self, text: str) -> None:
         """Prompts Gemini to speak an event update to the user."""
         if self.session is None or not text.strip():
@@ -509,8 +528,16 @@ class LiveSession:
 
     @staticmethod
     def _sanitize_narration(text: str) -> str:
-        """Strips JSON-like payloads, internal identifiers, and raw debug data from narration text."""
+        """Strips JSON-like payloads, code blocks, internal identifiers, and raw debug data from speech text."""
         import re as _re
+        # Remove code blocks
+        text = _re.sub(r'```[\s\S]*?```', '', text)
+        # Remove ANSI escape sequences
+        text = _re.sub(r'\x1b\[[0-9;]*[mK]', '', text)
+        # Convert markdown links [text](url) to text
+        text = _re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+        # Remove markdown heading/bold/italic markers
+        text = _re.sub(r'[*_#`]', '', text)
         # Remove JSON-like objects: {key:val, key:val}
         text = _re.sub(r'\{[^}]{0,200}\}', '', text)
         # Remove raw key=value pairs like err=0 or status=completed
