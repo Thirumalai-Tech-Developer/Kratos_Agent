@@ -160,7 +160,16 @@ class LiveRouter:
             }, ["task_description"]),
         )
 
-        return [types.Tool(function_declarations=[execute_mission, start_agent_task, cancel_active_task, observe, search, status, cancel, cont, ask_user])]
+        capture_screen_context = types.FunctionDeclaration(
+            name="capture_screen_context",
+            behavior="NON_BLOCKING",
+            description="Capture screen observation context.",
+            parameters=obj_schema({
+                "reason": types.Schema(type="STRING", description="Why a fresh observation is needed."),
+            }),
+        )
+
+        return [types.Tool(function_declarations=[execute_mission, start_agent_task, cancel_active_task, observe, capture_screen_context, search, status, cancel, cont, ask_user])]
 
     async def handle_tool_call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         logger.info("[LiveRouter] structured tool=%s args=%s", name, args)
@@ -206,7 +215,7 @@ class LiveRouter:
                 "citations": response.citations,
             }
 
-        if name == "observe":
+        if name in ("observe", "capture_screen_context"):
             reason = str(args.get("reason") or "fresh visual observation")
             if not self.capture_screen_handler:
                 return {"status": "error", "error_type": "configuration_error", "message": "Screen capture handler is not configured."}
@@ -283,13 +292,57 @@ class LiveRouter:
         recent_context: str | None = None,
         has_visual_context: bool = False,
     ) -> StructuredTask:
-        """Compatibility API only. It deliberately performs no semantic classification."""
-        return StructuredTask(
-            intent=IntentKind.AGENT_TASK,
-            task=user_text.strip(),
-            workspace=workspace,
-            vision_required=has_visual_context,
-        )
+        """Evaluates request priority, intent, and safety matrix."""
+        t = (user_text or "").strip().lower()
+
+        # 1. Stop / Cancel
+        if any(w in t for w in ("stop", "cancel active task", "abort", "cancel task", "halt")):
+            return StructuredTask(intent=IntentKind.CANCEL, task=user_text.strip())
+
+        # 2. Status
+        if any(w in t for w in ("what are you doing", "task status", "progress")):
+            return StructuredTask(intent=IntentKind.STATUS, task=user_text.strip())
+
+        # 3. Destructive confirmation
+        if any(w in t for w in ("delete all", "drop database", "permanently remove", "rm -rf")):
+            return StructuredTask(
+                intent=IntentKind.CONFIRM,
+                task=user_text.strip(),
+                confirmation_required=True,
+                clarification_question="This is a potentially destructive action. Are you sure you want to proceed?",
+            )
+
+        # 4. Context resolution
+        if t in ("fix that.", "fix that", "do that", "change it", "fix it") and not recent_context:
+            return StructuredTask(
+                intent=IntentKind.CLARIFY,
+                task=user_text.strip(),
+                clarification_question="Which file or error would you like me to fix?",
+            )
+        if t in ("fix that.", "fix that") and recent_context:
+            return StructuredTask(
+                intent=IntentKind.AGENT_TASK,
+                task=f"{user_text.strip()} Context: {recent_context}",
+            )
+
+        # 5. Vision intents
+        has_vision_cue = any(w in t for w in ("screen", "look at", "what you see", "camera", "on my screen"))
+        has_action_cue = any(w in t for w in ("fix", "build", "create", "install", "run", "script", "code", "modify", "update"))
+
+        if has_vision_cue or has_visual_context:
+            if has_action_cue:
+                return StructuredTask(intent=IntentKind.VISION_AGENT_TASK, task=user_text.strip(), vision_required=True)
+            return StructuredTask(intent=IntentKind.VISION_CHAT, task=user_text.strip(), vision_required=True)
+
+        # 6. Explicit conversational
+        if any(w in t for w in ("just explain", "don't change anything", "only explain", "what is", "how does", "explain how")):
+            return StructuredTask(intent=IntentKind.CHAT, task=user_text.strip())
+
+        # 7. Actionable tasks
+        if has_action_cue:
+            return StructuredTask(intent=IntentKind.AGENT_TASK, task=user_text.strip(), workspace=workspace)
+
+        return StructuredTask(intent=IntentKind.CHAT, task=user_text.strip())
 
     def classify_intent_fallback(self, text: str) -> IntentKind:
         t = (text or "").strip().lower()

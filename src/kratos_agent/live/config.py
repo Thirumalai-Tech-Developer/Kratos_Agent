@@ -47,7 +47,10 @@ class LiveConfig:
     avatar_image_path: str = field(
         default_factory=lambda: os.getenv("KRATOS_AVATAR_IMAGE", "kratos-illu.png")
     )
-    avatar_size: int = 110
+    avatar_size: int = 120
+    pet_breed: str = field(
+        default_factory=lambda: os.getenv("KRATOS_PET_BREED", "kitty").lower()
+    )
 
     # Audio stream settings
     microphone_device: int | str | None = field(

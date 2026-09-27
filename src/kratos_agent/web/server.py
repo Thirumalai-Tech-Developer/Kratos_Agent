@@ -282,6 +282,22 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             elif action == "reconnect":
                 live_rt.stop_background()
                 live_rt.start_in_background()
+            elif action == "avatar_toggle":
+                if live_rt.avatar:
+                    live_rt.stop_floating_avatar()
+                else:
+                    live_rt.start_floating_avatar()
+            elif action == "avatar_dock":
+                if live_rt.avatar:
+                    live_rt.avatar.toggle_dock()
+            elif action == "set_pet_breed" and isinstance(val, str):
+                if live_rt.avatar:
+                    live_rt.avatar.set_pet_breed(val)
+                else:
+                    live_rt.start_floating_avatar(pet_breed=val)
+            elif action == "pet_react":
+                if live_rt.avatar:
+                    live_rt.avatar.trigger_pet_reaction()
 
             self._send_json(live_rt.get_status().to_dict())
         except Exception as e:

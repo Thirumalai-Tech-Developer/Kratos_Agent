@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from kratos_agent.memory.consolidation import consolidate_memories, should_store
 from kratos_agent.memory.models import (

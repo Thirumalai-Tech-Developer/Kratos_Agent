@@ -110,7 +110,8 @@ HELP_TEXT = """
   [bold cyan]/d1[/bold cyan]                     - Inspect Cloudflare D1 connection, database stats & diagnostics
   [bold cyan]/voice[/bold cyan] [dim][on|off][/dim]             - Toggle microphone voice input / mute
   [bold cyan]/vision[/bold cyan] [dim][camera|screen|both|off][/dim] - Control camera & screen capture vision
-  [bold cyan]/avatar[/bold cyan] [dim][on|off|dock][/dim]          - Control floating desktop avatar
+  [bold cyan]/avatar[/bold cyan] [dim][on|off|dock|kitty|bot|shiba|dragon][/dim] - Control OpenPets desktop AI companion
+  [bold cyan]/pet[/bold cyan] [dim][kitty|bot|shiba|dragon|react][/dim]    - Switch AI Pet breed or trigger petting reaction
   [bold cyan]/live[/bold cyan] [dim][status|reconnect][/dim]        - Inspect or manage Gemini Live multimodal session
   [bold cyan]/search[/bold cyan] [dim][web|tools|memory|github] <q>[/dim] - Query unified search & retrieval fabric
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
@@ -1954,27 +1955,65 @@ def start_interactive_cli():
                     if live_runtime._loop and live_runtime._loop.is_running():
                         asyncio.run_coroutine_threadsafe(live_runtime.set_vision_mode("none"), live_runtime._loop)
                     console.print("\n[bold yellow]👁 Vision capture disabled.[/bold yellow]\n")
+                continue
 
-            if user_input.lower().startswith("/avatar"):
-                parts = user_input.split(maxsplit=1)
-                arg = parts[1].strip().lower() if len(parts) > 1 else ""
-                if arg in ("off", "hide", "close", "0"):
+            if user_input.lower().startswith("/avatar") or user_input.lower().startswith("/pet"):
+                parts = user_input.split(maxsplit=2)
+                cmd = parts[0].lower()
+                arg1 = parts[1].strip().lower() if len(parts) > 1 else ""
+                arg2 = parts[2].strip() if len(parts) > 2 else ""
+
+                if cmd == "/pet" and arg1 in ("kitty", "bot", "shiba", "dragon", "custom"):
+                    if not live_runtime.avatar:
+                        live_runtime.start_floating_avatar(pet_breed=arg1)
+                    else:
+                        live_runtime.avatar.set_pet_breed(arg1)
+                    console.print(f"\n[bold green]🐾 Switched AI Pet companion to [bold cyan]{arg1.title()}[/bold cyan]![/bold green]\n")
+                elif arg1 in ("pet", "breed", "companion"):
+                    target_breed = arg2.lower() if arg2 else "kitty"
+                    if target_breed in ("kitty", "bot", "shiba", "dragon", "custom"):
+                        if not live_runtime.avatar:
+                            live_runtime.start_floating_avatar(pet_breed=target_breed)
+                        else:
+                            live_runtime.avatar.set_pet_breed(target_breed)
+                        console.print(f"\n[bold green]🐾 AI Pet breed changed to [bold cyan]{target_breed.title()}[/bold cyan]![/bold green]\n")
+                    else:
+                        console.print("\n[bold yellow]Available breeds: kitty, bot, shiba, dragon, custom[/bold yellow]\n")
+                elif arg1 in ("off", "hide", "close", "0"):
                     live_runtime.stop_floating_avatar()
-                    console.print("\n[bold yellow]Floating avatar hidden.[/bold yellow]\n")
-                elif arg in ("on", "show", "open", "1"):
-                    live_runtime.start_floating_avatar()
-                    console.print("\n[bold green]Floating avatar active on desktop.[/bold green]\n")
-                elif arg in ("dock", "undock", "toggle"):
+                    console.print("\n[bold yellow]Floating AI Pet hidden.[/bold yellow]\n")
+                elif arg1 in ("on", "show", "open", "1"):
+                    breed = arg2.lower() if arg2 in ("kitty", "bot", "shiba", "dragon", "custom") else "kitty"
+                    live_runtime.start_floating_avatar(pet_breed=breed)
+                    console.print(f"\n[bold green]🐾 Floating AI Pet ([bold cyan]{breed.title()}[/bold cyan]) active on desktop.[/bold green]\n")
+                elif arg1 in ("dock", "undock", "toggle"):
                     if live_runtime.avatar:
                         live_runtime.avatar.toggle_dock()
-                        console.print("\n[bold cyan]Floating avatar dock toggled.[/bold cyan]\n")
+                        console.print("\n[bold cyan]Floating AI Pet dock toggled.[/bold cyan]\n")
                     else:
-                        console.print("\n[bold yellow]Floating avatar is not currently active.[/bold yellow]\n")
+                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
+                elif arg1 in ("react", "pet", "love", "heart"):
+                    if live_runtime.avatar:
+                        live_runtime.avatar.trigger_pet_reaction()
+                        console.print("\n[bold pink1]❤️ ✨ AI Pet petted! Joyful reaction triggered![/bold pink1]\n")
+                    else:
+                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
+                elif arg1 in ("chat", "say", "bubble"):
+                    if live_runtime.avatar and arg2:
+                        live_runtime.avatar.show_speech_bubble(arg2)
+                        console.print("\n[bold cyan]💬 Speech bubble displayed on pet.[/bold cyan]\n")
+                    elif live_runtime.avatar:
+                        live_runtime.avatar.toggle_chat()
+                        console.print("\n[bold cyan]💬 Chat balloon opened on desktop pet.[/bold cyan]\n")
+                    else:
+                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
                 else:
                     active = live_runtime.avatar is not None
                     docked = live_runtime.avatar.is_docked if active else False
-                    console.print(f"\n[bold gold1]Floating Avatar:[/bold gold1] {'[bold green]ACTIVE[/bold green]' if active else '[dim]INACTIVE[/dim]'} (Docked: {docked})")
-                    console.print("[dim]Usage: /avatar on | /avatar off | /avatar dock[/dim]\n")
+                    breed = getattr(live_runtime.avatar, "pet_breed", "kitty") if active else "kitty"
+                    console.print(f"\n[bold gold1]🐾 Floating AI Pet:[/bold gold1] {'[bold green]ACTIVE[/bold green]' if active else '[dim]INACTIVE[/dim]'} (Breed: [bold cyan]{breed}[/bold cyan], Docked: {docked})")
+                    console.print("[dim]Usage: /avatar on [kitty|bot|shiba|dragon] | /avatar off | /avatar dock | /pet <breed>[/dim]")
+                    console.print("[dim]Hover over pet on desktop to reveal: 💬 Chat | 🎙️ Mic | 👁️ Vision | ⋯ More[/dim]\n")
                 continue
 
             if user_input.lower().startswith("/live"):
@@ -2458,6 +2497,14 @@ def start_interactive_cli():
                 else:
                     msg = background_runner.cancel(task_id)
                     console.print(f"[bold yellow]{msg}[/bold yellow]\n")
+                continue
+
+            # Safeguard: Slash commands (/...) are strictly for settings, options, and utilities.
+            # They must NEVER fall through to trigger the agent loop or waste tokens.
+            if user_input.startswith("/") and not user_input.lower().startswith(("/direct ", "/kratos ", "/agent ")):
+                cmd_name = user_input.split()[0]
+                console.print(f"\n[bold yellow]⚠ Unknown or unhandled slash command: {cmd_name}[/bold yellow]")
+                console.print("[dim]Type /help to see all available commands.[/dim]\n")
                 continue
 
             # Parse @file attachments

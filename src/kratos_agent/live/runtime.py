@@ -247,11 +247,14 @@ class LiveRuntime:
                 self._loop,
             )
 
-    def start_floating_avatar(self) -> None:
-        """Launches the Windows floating assistant avatar."""
+    def start_floating_avatar(self, pet_breed: str | None = None) -> None:
+        """Launches the Windows floating assistant AI pet avatar."""
         if self.avatar is not None:
+            if pet_breed:
+                self.avatar.set_pet_breed(pet_breed)
             return
         try:
+            breed = pet_breed or getattr(self.config, "pet_breed", "kitty")
             self.avatar = FloatingAvatar(
                 image_path=self.config.avatar_image_path,
                 status_hub=self.status_hub,
@@ -260,6 +263,7 @@ class LiveRuntime:
                 on_mute_toggle=self.toggle_mute,
                 on_interrupt=self.audio.handle_interruption,
                 avatar_size=self.config.avatar_size,
+                pet_breed=breed,
             )
             self.avatar.start()
         except Exception as e:
