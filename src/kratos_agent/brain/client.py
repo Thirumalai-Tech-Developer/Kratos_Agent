@@ -4,6 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 import json
+import os
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -112,8 +113,16 @@ class BrainClient:
                 })
             else:
                 if isinstance(content, list):
-                    text_parts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in content]
-                    formatted_messages.append({"role": "user", "content": "\n".join(text_parts)})
+                    # Check if this content list contains multimodal parts (image_url, image, input_audio)
+                    has_multimodal = any(
+                        isinstance(p, dict) and p.get("type") in ("image_url", "image", "input_audio")
+                        for p in content
+                    )
+                    if has_multimodal:
+                        formatted_messages.append({"role": "user", "content": content})
+                    else:
+                        text_parts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in content]
+                        formatted_messages.append({"role": "user", "content": "\n".join(text_parts)})
                 else:
                     formatted_messages.append({"role": "user", "content": str(content)})
 
@@ -122,6 +131,20 @@ class BrainClient:
             "messages": formatted_messages,
             "stream": stream,
         }
+
+        # User requirement: Always max effort for reasoning / thinking models
+        from kratos_agent.brain.config import get_model_details, is_thinking_model
+        model_meta = get_model_details(target_model)
+        caps = model_meta.get("capabilities") or {}
+        always_max = (
+            is_thinking_model(target_model)
+            or bool(caps.get("thinking") or caps.get("supportsThinking") or caps.get("reasoning") or caps.get("effort_tiers"))
+            or os.getenv("KRATOS_MAX_EFFORT", "true").lower() in ("true", "1", "yes", "max")
+        )
+        if always_max:
+            payload["reasoning_effort"] = "max"
+            if caps.get("supportsThinking") or caps.get("thinking"):
+                payload["thinking"] = {"type": "enabled", "budget_tokens": 64000}
 
         if tools:
             clean_tools = []

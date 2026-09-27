@@ -14,6 +14,13 @@ from .events import LiveState, LiveStatusHub
 logger = logging.getLogger(__name__)
 
 
+class AwaitableDict(dict):
+    def __await__(self):
+        async def _async_self():
+            return self
+        return _async_self().__await__()
+
+
 class KratosBridge:
     def __init__(self, runtime: Any | None = None, status_hub: LiveStatusHub | None = None) -> None:
         if runtime is None:
@@ -24,6 +31,8 @@ class KratosBridge:
         self.supervisor = get_master_supervisor()
         self.slave_executor = get_slave_executor()
         self.slave_executor.runtime = self.runtime
+        self.active_task_id: str | None = None
+        self.active_task_desc: str | None = None
         try:
             asyncio.get_running_loop()
             self.slave_executor.start()
@@ -31,7 +40,7 @@ class KratosBridge:
             pass
 
     def is_busy(self) -> bool:
-        return self.supervisor.is_busy()
+        return self.supervisor.is_busy() or bool(self.active_task_id)
 
     async def submit_task(
         self,
@@ -49,6 +58,10 @@ class KratosBridge:
         tool_call_id: str = "",
         wait_for_result: bool = False,
     ) -> dict[str, Any]:
+        if (getattr(self, "active_task_id", None) or self.is_busy()) and not force:
+            desc = getattr(self, "active_task_desc", None) or getattr(self, "active_task_id", None) or "another mission"
+            return {"status": "busy", "message": f"Kratos is already working on {desc}."}
+
         from kratos_agent.core.task_deduplicator import get_task_deduplicator
         from kratos_agent.live.echo_guard import get_echo_guard
 
@@ -127,13 +140,19 @@ class KratosBridge:
             "capability": result.get("capability") or capability or "generic_task",
         }
 
-    async def cancel_active_task(self) -> dict[str, Any]:
-        result = await self.supervisor.cancel_active_task()
+    def cancel_active_task(self) -> AwaitableDict:
+        self.active_task_id = None
+        self.active_task_desc = None
         if hasattr(self.runtime, "cancel"):
             self.runtime.cancel()
         if self.status_hub:
             self.status_hub.update(active_task_id=None, current_state=LiveState.IDLE)
-        return result
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.supervisor.cancel_active_task())
+        except RuntimeError:
+            pass
+        return AwaitableDict({"status": "cancelled", "message": "Active task cancelled."})
 
     def get_status(self, task_id: str | None = None) -> dict[str, Any]:
         status = self.supervisor.get_status(task_id)

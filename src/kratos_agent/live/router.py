@@ -141,12 +141,36 @@ class LiveRouter:
             }, ["question"]),
         )
 
-        return [types.Tool(function_declarations=[execute_mission, observe, search, status, cancel, cont, ask_user])]
+        cancel_active_task = types.FunctionDeclaration(
+            name="cancel_active_task",
+            behavior="NON_BLOCKING",
+            description="Cancel the active agent task.",
+            parameters=obj_schema({
+                "reason": types.Schema(type="STRING", description="Cancellation reason."),
+            }),
+        )
+
+        start_agent_task = types.FunctionDeclaration(
+            name="start_agent_task",
+            behavior="NON_BLOCKING",
+            description="Start an agent task with description and optional visual context.",
+            parameters=obj_schema({
+                "task_description": types.Schema(type="STRING", description="Task description."),
+                "visual_context": types.Schema(type="STRING", description="Visual context from screen."),
+            }, ["task_description"]),
+        )
+
+        return [types.Tool(function_declarations=[execute_mission, start_agent_task, cancel_active_task, observe, search, status, cancel, cont, ask_user])]
 
     async def handle_tool_call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         logger.info("[LiveRouter] structured tool=%s args=%s", name, args)
 
-        if name in {"execute_mission", "delegate_task", "start_agent_task"}:
+        if name == "start_agent_task":
+            task_desc = str(args.get("task_description") or args.get("mission") or "").strip()
+            visual_ctx = args.get("visual_context")
+            return await self.bridge.submit_task(task_desc, visual_context=visual_ctx)
+
+        if name in {"execute_mission", "delegate_task"}:
             mission: MissionIntent = mission_from_tool_call(args)
             if not mission.goal:
                 return {
@@ -227,8 +251,11 @@ class LiveRouter:
                     "stage": "status_lookup",
                 }
 
-        if name == "cancel_task":
-            return await self.bridge.cancel_active_task()
+        if name in ("cancel_task", "cancel_active_task"):
+            res = self.bridge.cancel_active_task()
+            if inspect.isawaitable(res):
+                res = await res
+            return res
 
         if name == "continue_task":
             instructions = str(args.get("instructions") or "").strip()
@@ -265,4 +292,15 @@ class LiveRouter:
         )
 
     def classify_intent_fallback(self, text: str) -> IntentKind:
+        t = (text or "").strip().lower()
+        if any(w in t for w in ("stop", "cancel", "abort", "halt", "quit")):
+            return IntentKind.CANCEL
+        if any(w in t for w in ("what are you doing", "status", "progress")):
+            return IntentKind.STATUS
+        if any(w in t for w in ("what is on my screen", "screen", "camera", "look at")):
+            return IntentKind.VISION
+        if any(w in t for w in ("fix", "build", "code", "run", "create", "write", "debug")):
+            return IntentKind.AGENT_TASK
+        if any(w in t for w in ("hello", "hi", "hey")):
+            return IntentKind.CHAT
         return IntentKind.AGENT_TASK

@@ -11,7 +11,7 @@ from .audio import AudioManager
 from .avatar import FloatingAvatar
 from .bridge import KratosBridge
 from .config import LiveConfig
-from .events import LiveStatus, LiveStatusHub
+from .events import LiveState, LiveStatus, LiveStatusHub
 from .narration import NarrationManager
 from .router import LiveRouter
 from .session import LiveSession
@@ -125,11 +125,15 @@ class LiveRuntime:
         )
         self.router.set_diagnostics_handler(self.session.get_diagnostics)
 
-        self.avatar: FloatingAvatar | None = None
-
-        # Narration sends spoken updates via the LiveSession
+        # Narration sends spoken updates via the Native Voice engine or LiveSession
         def _send_narration_speech(text: str) -> None:
-            if self._loop and self._loop.is_running():
+            if not self.config.is_gemini_backend:
+                try:
+                    from kratos_agent.output.native_voice import get_native_voice
+                    get_native_voice().speak(text)
+                except Exception as e:
+                    logger.debug("[LiveRuntime] Native voice narration error: %s", e)
+            elif self._loop and self._loop.is_running():
                 asyncio.run_coroutine_threadsafe(
                     self.session.send_narration(text),
                     self._loop,
@@ -137,6 +141,10 @@ class LiveRuntime:
 
         self.narration = NarrationManager(send_speech_fn=_send_narration_speech)
 
+        self.avatar: FloatingAvatar | None = None
+
+        self.on_user_transcript = on_user_transcript
+        self.on_model_transcript = on_model_transcript
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._is_running = False
@@ -278,11 +286,33 @@ class LiveRuntime:
         if self.config.floating_avatar_enabled:
             self.start_floating_avatar()
 
-        self._session_task = asyncio.create_task(
-            self.session.run_connection_loop(),
-            name="kratos-live-session-loop",
-        )
-        logger.info("[LiveRuntime] Multimodal Live subsystems running.")
+        if self.config.is_gemini_backend:
+            self._session_task = asyncio.create_task(
+                self.session.run_connection_loop(),
+                name="kratos-live-session-loop",
+            )
+            logger.info("[LiveRuntime] Gemini Live session running.")
+        else:
+            # Native sovereign Kratos multimodal runtime (Voice TTS + Hearing STT + OmniRoute Vision)
+            try:
+                from .native_listener import get_native_hearing
+                def _on_heard(text: str):
+                    if self.on_user_transcript:
+                        try:
+                            self.on_user_transcript(text)
+                        except Exception:
+                            pass
+                self.native_hearing = get_native_hearing(on_transcription=_on_heard)
+                self.native_hearing.start()
+            except Exception as e:
+                logger.debug("[LiveRuntime] Native hearing init: %s", e)
+
+            self.status_hub.update(
+                gemini_connected=False,
+                live_health="native",
+                current_state=LiveState.IDLE,
+            )
+            logger.info("[LiveRuntime] Sovereign Native Kratos Multimodal runtime running.")
 
     async def stop(self) -> None:
         """Stops all Live subsystems cleanly."""
@@ -293,6 +323,12 @@ class LiveRuntime:
         logger.info("[LiveRuntime] Stopping Live subsystems...")
         self.stop_floating_avatar()
         self.narration.stop()
+
+        if hasattr(self, "native_hearing") and self.native_hearing:
+            try:
+                self.native_hearing.stop()
+            except Exception:
+                pass
 
         if self._session_task and not self._session_task.done():
             self._session_task.cancel()

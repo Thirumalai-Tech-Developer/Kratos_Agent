@@ -1,5 +1,6 @@
 """Search router managing execution modes (FAST, STANDARD, DEEP, RESEARCH) and provider selection."""
 from __future__ import annotations
+from kratos_agent.search import SearchResult
 
 import asyncio
 import logging

@@ -343,33 +343,32 @@ def print_welcome():
     mem_file = project_memory.file_path
     mem_label = str(mem_file.name) if mem_file else "KRATOS.md (none)"
 
-    grid.add_row("⚔  Model", f"[bold cyan]{runtime.model_name}[/bold cyan]  [dim](Brain LLM Gateway)[/dim]")
+    try:
+        from kratos_agent.brain.config import get_model_badge
+        _badge = get_model_badge(runtime.model_name)
+    except Exception:
+        _badge = ""
+    grid.add_row("⚔  Model", f"[bold cyan]{runtime.model_name}[/bold cyan]  [bold gold1]{_badge}[/bold gold1] [dim](OmniRoute Gateway)[/dim]")
     grid.add_row("⛓  Mode", f"{mode_badge}  [dim]| /mode suggest|auto-edit|full-auto|sovereign[/dim]")
     grid.add_row("🔧  Tools", f"[bold green]{num_tools} loaded[/bold green]  [dim]{', '.join(loaded_tool_names[:5])}{'...' if num_tools > 5 else ''}[/dim]")
     grid.add_row("🧠  Skills", f"[bold green]{num_skills} active[/bold green]  [dim]Use /skill to view or add[/dim]")
     grid.add_row("📜  Memory", f"[dim]{mem_label}[/dim]")
 
-    # Live Multimodal Status
+    # Multimodal Perception Status (Voice + Hearing + Vision)
     try:
         from kratos_agent.live import get_live_runtime
-        from kratos_agent.live.events import LiveState
+        from kratos_agent.output.native_voice import get_native_voice
         _live_rt = get_live_runtime()
         _st = _live_rt.get_status()
-        if _st.gemini_connected:
-            _gemini_badge = f"[bold green]CONNECTED ({_st.active_session_id or 'active'})[/bold green]"
-        elif _st.last_error:
-            _gemini_badge = f"[bold red]FAILED ({_st.last_error[:20]})[/bold red]"
-        elif _st.current_state in (LiveState.CONNECTING, LiveState.RECONNECTING) and (time.time() - _st.updated_at) < 15.0:
-            _gemini_badge = "[bold yellow]CONNECTING[/bold yellow]"
-        else:
-            _gemini_badge = "[dim]OFFLINE[/dim]"
 
         _mic_badge = "[bold green]ONLINE[/bold green]" if _st.microphone_active else "[dim]OFFLINE[/dim]"
         _cam_badge = "[bold green]ONLINE[/bold green]" if _st.camera_active else "[dim]OFFLINE[/dim]"
         _scr_badge = "[bold green]ONLINE[/bold green]" if _st.screen_active else "[dim]OFFLINE[/dim]"
-        grid.add_row("🎤  Voice", f"{_mic_badge}  [dim]| /voice on|off[/dim]")
-        grid.add_row("👁  Vision", f"Camera: {_cam_badge}  Screen: {_scr_badge}  [dim]| /vision camera|screen|both|off[/dim]")
-        grid.add_row("🌐  Live", f"{_gemini_badge}  [dim]| /live status[/dim]")
+        _voice_eng = get_native_voice()
+        _voice_badge = "[bold yellow]MUTED[/bold yellow]" if (_st.muted or _voice_eng.is_muted) else "[bold green]ONLINE (Native SAPI)[/bold green]"
+
+        grid.add_row("🎤  Voice", f"{_voice_badge}  [dim]| /voice on|off|speak[/dim]")
+        grid.add_row("👁  Vision", f"Screen: {_scr_badge}  Camera: {_cam_badge}  [dim]| /vision screen|camera|describe[/dim]")
     except Exception as e:
         logger.debug("Failed to populate live subsystem badges: %s", e)
 
@@ -459,18 +458,26 @@ def select_model_arrow_menu(model_ids: list[str], active_model: str) -> str | No
         if start_idx > 0:
             tokens.append(("#6C7086", "    ▲ ...\n"))
 
+        from kratos_agent.brain.config import is_vision_model, is_thinking_model
         for i in range(start_idx, end_idx):
             m = model_ids[i]
             is_active = (m == active_model)
             active_badge = " [★ ACTIVE]" if is_active else ""
-            
+            has_vis = is_vision_model(m)
+            has_thk = is_thinking_model(m)
+            vision_mark = " [👁️ VISION]" if has_vis else " [TEXT]"
+            think_mark = " [🧠 MAX-THINK]" if has_thk else ""
+            badge_str = f"{vision_mark}{think_mark}{active_badge}"
+
             if i == selected_idx:
-                tokens.append(("bold bg:#E63946 fg:#FFFFFF", f"  ❯ {m}{active_badge} \n"))
+                tokens.append(("bold bg:#E63946 fg:#FFFFFF", f"  ❯ {m}{badge_str} \n"))
             else:
                 if is_active:
-                    tokens.append(("bold #00E676", f"    {m}{active_badge}\n"))
+                    tokens.append(("bold #00E676", f"    {m}{badge_str}\n"))
+                elif has_vis:
+                    tokens.append(("bold #00E5FF", f"    {m}{badge_str}\n"))
                 else:
-                    tokens.append(("#CDD6F4", f"    {m}\n"))
+                    tokens.append(("#CDD6F4", f"    {m}{badge_str}\n"))
 
         if end_idx < len(model_ids):
             tokens.append(("#6C7086", "    ▼ ...\n"))
@@ -490,7 +497,14 @@ def handle_login(arg: str = ""):
 
 
 def handle_model_command(arg: str = ""):
-    """Handles the /model command with live endpoint fetching and arrow key navigation."""
+    """Handles the /model command with live endpoint fetching, capability filtering, and arrow key navigation."""
+    from kratos_agent.brain.config import (
+        get_available_models,
+        get_model_badge,
+        is_thinking_model,
+        is_vision_model,
+    )
+
     # Dynamically fetch available models from the active model endpoint
     live_models = get_available_models(refresh=True)
     if live_models:
@@ -500,29 +514,42 @@ def handle_model_command(arg: str = ""):
 
     if arg:
         target = arg.strip()
-        if target in model_ids:
+        t_lower = target.lower()
+        if t_lower in ("vision", "v", "images", "image", "img"):
+            model_ids = [m for m in model_ids if is_vision_model(m)]
+            console.print(f"\n[bold cyan]👁️ Filtered to {len(model_ids)} Vision-capable models (Image+Text input):[/bold cyan]")
+        elif t_lower in ("think", "t", "thinking", "reason", "reasoning"):
+            model_ids = [m for m in model_ids if is_thinking_model(m)]
+            console.print(f"\n[bold gold1]🧠 Filtered to {len(model_ids)} Thinking / Reasoning models (Always Max Effort):[/bold gold1]")
+        elif t_lower in ("all", "reset"):
+            console.print(f"\n[bold white]Showing all {len(model_ids)} available models:[/bold white]")
+        elif target in model_ids:
             runtime.set_model(target)
-            console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan]\n")
+            badge = get_model_badge(target)
+            console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan] [gold1]{badge}[/gold1]\n")
             return
         else:
             matches = [m for m in model_ids if target.lower() in m.lower()]
             if len(matches) == 1:
                 runtime.set_model(matches[0])
-                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{matches[0]}[/bold cyan]\n")
+                badge = get_model_badge(matches[0])
+                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{matches[0]}[/bold cyan] [gold1]{badge}[/gold1]\n")
                 return
             elif len(matches) > 1:
                 console.print(f"[dim]Found {len(matches)} models matching '{target}':[/dim]")
                 model_ids = matches
             else:
                 runtime.set_model(target)
-                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan]\n")
+                badge = get_model_badge(target)
+                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan] [gold1]{badge}[/gold1]\n")
                 return
 
     # Interactive Arrow Key Selection Menu
     selected_model = select_model_arrow_menu(model_ids, runtime.model_name)
     if selected_model:
         runtime.set_model(selected_model)
-        console.print(f"[bold green]⚡ Active model changed to:[/bold green] [bold cyan]{selected_model}[/bold cyan]\n")
+        badge = get_model_badge(selected_model)
+        console.print(f"[bold green]⚡ Active model changed to:[/bold green] [bold cyan]{selected_model}[/bold cyan] [gold1]{badge}[/gold1]\n")
     else:
         console.print("[dim]Model selection cancelled.[/dim]\n")
 
@@ -849,18 +876,20 @@ def handle_system_status_command():
     except Exception as exc:
         table.add_row("Displays", f"Unavailable: {escape(type(exc).__name__)}")
 
-    # Voice / Live
+    # Voice / Vision / Gemini Live
     try:
         live_rt = get_live_runtime()
         st = live_rt.get_status()
         live_state = "CONNECTED" if st.gemini_connected else (st.live_health or "OFFLINE").upper()
         mic_state = "muted" if st.muted else ("active" if st.microphone_active else "inactive")
         table.add_row("Gemini Live", f"{escape(live_state)} · microphone {mic_state} · speaker {'active' if st.speaker_active else 'inactive'}")
-        table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'}")
+        table.add_row("Voice", f"{'MUTED' if st.muted else 'ONLINE (Native SAPI TTS)'} · mic {mic_state}")
+        table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'} · OmniRoute vision routing")
         if st.last_error:
             table.add_row("Live error", escape(st.last_error))
     except Exception as exc:
         table.add_row("Gemini Live", f"Unavailable: {escape(type(exc).__name__)}")
+        table.add_row("Voice", f"Unavailable: {escape(type(exc).__name__)}")
         table.add_row("Vision", "Unavailable")
 
     # Tasks
@@ -1659,8 +1688,15 @@ def start_interactive_cli():
 
             if user_input.lower().startswith("/voice"):
                 parts = user_input.split(maxsplit=1)
-                arg = parts[1].strip().lower() if len(parts) > 1 else ""
-                if arg in ("devices", "list", "mics"):
+                arg = parts[1].strip() if len(parts) > 1 else ""
+                arg_lower = arg.lower()
+                from kratos_agent.output.native_voice import get_native_voice
+                voice_eng = get_native_voice()
+                if arg_lower.startswith("speak ") or arg_lower.startswith("say "):
+                    text_to_speak = arg.split(maxsplit=1)[1].strip()
+                    voice_eng.speak(text_to_speak)
+                    console.print(f"\n[bold green]🔊 Speaking:[/bold green] [white]{text_to_speak}[/white]\n")
+                elif arg_lower in ("devices", "list", "mics"):
                     devs = live_runtime.get_input_devices()
                     active_mic = live_runtime.get_active_microphone_name()
                     console.print(f"\n[bold cyan]🎤 Available Microphones ({len(devs)} detected):[/bold cyan]")
@@ -1668,36 +1704,63 @@ def start_interactive_cli():
                         prefix = "[bold green]▶ [/bold green]" if (d["name"] == active_mic or d.get("is_default")) else "  "
                         console.print(f"  {prefix}[bold white][{d['index']}][/bold white] {d['name']} [dim]({d.get('hostapi', '')}, {d.get('channels', 1)}ch)[/dim]")
                     console.print(f"[dim]Active: {active_mic}. Set via KRATOS_MIC_DEVICE=<index|name>[/dim]\n")
-                elif arg.startswith("device ") or arg.startswith("set ") or arg.startswith("select "):
+                elif arg_lower.startswith("device ") or arg_lower.startswith("set ") or arg_lower.startswith("select "):
                     target = arg.split(maxsplit=1)[1].strip()
                     new_name = live_runtime.set_microphone_device(target)
                     console.print(f"\n[bold green]🎤 Microphone switched to:[/bold green] [bold white]{new_name}[/bold white]\n")
-                elif arg.isdigit() and len(arg) <= 2:
-                    new_name = live_runtime.set_microphone_device(int(arg))
+                elif arg_lower.isdigit() and len(arg_lower) <= 2:
+                    new_name = live_runtime.set_microphone_device(int(arg_lower))
                     console.print(f"\n[bold green]🎤 Microphone switched to:[/bold green] [bold white]{new_name}[/bold white]\n")
-                elif arg in ("off", "mute", "disable", "0"):
+                elif arg_lower in ("off", "mute", "disable", "0"):
                     live_runtime.mute()
-                    console.print("\n[bold yellow]🎤 Voice input muted.[/bold yellow]\n")
-                elif arg in ("on", "unmute", "enable", "1"):
+                    voice_eng.mute()
+                    console.print("\n[bold yellow]🎤 Voice input and speech output muted.[/bold yellow]\n")
+                elif arg_lower in ("on", "unmute", "enable", "1"):
                     live_runtime.unmute()
-                    console.print("\n[bold green]🎤 Voice input active (unmuted).[/bold green]\n")
+                    voice_eng.unmute()
+                    voice_eng.speak("Voice enabled.")
+                    console.print("\n[bold green]🎤 Voice active (unmuted & speaking enabled).[/bold green]\n")
                 else:
-                    current_muted = live_runtime.get_status().muted
-                    if current_muted:
+                    if voice_eng.is_muted:
                         live_runtime.unmute()
-                        console.print("\n[bold green]🎤 Voice input active (unmuted).[/bold green]\n")
+                        voice_eng.unmute()
+                        voice_eng.speak("Voice unmuted.")
+                        console.print("\n[bold green]🎤 Voice active (unmuted & speaking enabled).[/bold green]\n")
                     else:
                         live_runtime.mute()
-                        console.print("\n[bold yellow]🎤 Voice input muted.[/bold yellow]\n")
+                        voice_eng.mute()
+                        console.print("\n[bold yellow]🎤 Voice muted.[/bold yellow]\n")
                 continue
 
             if user_input.lower().startswith("/vision"):
                 parts = user_input.split(maxsplit=1)
                 arg_raw = parts[1].strip() if len(parts) > 1 else ""
+                arg_lower = arg_raw.lower()
+                import asyncio
+
+                if arg_lower.startswith(("describe", "analyze", "look", "see", "screen", "capture", "check")):
+                    prompt = "Describe what is currently visible on the screen in detail and note any key elements or errors."
+                    if " " in arg_raw:
+                        prompt = arg_raw.split(maxsplit=1)[1].strip()
+                    with console.status("[bold cyan]👁 Analyzing screen with OmniRoute vision model...[/bold cyan]", spinner="dots"):
+                        fut = asyncio.run_coroutine_threadsafe(
+                            live_runtime.vision.analyze_vision(prompt=prompt, source="screen"),
+                            live_runtime._loop,
+                        )
+                        try:
+                            v_reply = fut.result(timeout=60.0)
+                        except Exception as e:
+                            v_reply = f"Vision error: {e}"
+                    console.print(Panel(v_reply, title="[bold cyan]👁 OmniRoute Screen Analysis[/bold cyan]", border_style="cyan"))
+                    from kratos_agent.output.native_voice import get_native_voice
+                    if not get_native_voice().is_muted:
+                        get_native_voice().speak(v_reply)
+                    continue
+
                 if not arg_raw:
                     st = live_runtime.get_status()
                     console.print(f"\n[bold gold1]👁 Vision mode:[/bold gold1] [bold cyan]{st.video_mode.upper()}[/bold cyan] (camera: {st.camera_active}, screen: {st.screen_active})")
-                    console.print("[dim]Usage: /vision camera | /vision screen | /vision both | /vision off[/dim]\n")
+                    console.print("[dim]Usage: /vision describe [prompt] | /vision camera | /vision screen | /vision both | /vision off[/dim]\n")
                     continue
 
                 arg_words = arg_raw.split()
@@ -1707,7 +1770,7 @@ def start_interactive_cli():
                 if mode_candidate not in valid_modes or len(arg_words) > 1:
                     bad_mode = mode_candidate if mode_candidate not in valid_modes else arg_raw
                     console.print(f"\n[bold red]Invalid /vision mode: {bad_mode}[/bold red]")
-                    console.print("Usage: /vision camera | /vision screen | /vision both | /vision off\n")
+                    console.print("Usage: /vision describe [prompt] | /vision camera | /vision screen | /vision both | /vision off\n")
                     continue
 
                 arg = mode_candidate
@@ -2277,35 +2340,29 @@ def start_interactive_cli():
                     console.print("[dim]Usage: /direct <query> or /kratos <query> to run directly on Kratos Agent.[/dim]\n")
                     continue
 
-            # Multi-turn history
-            messages.append({"role": "user", "content": processed_query})
-
-            # Normal user language never uses local semantic routing.
-            # Every natural-language request goes through Gemini/Omni first.
-            # Deterministic /commands remain handled above; the Brain fallback below is
-            # allowed only after the semantic path is unavailable.
-            # Check if Gemini Live multimodal layer is connected and should handle the query first
-            # Gemini will speak with voice, answer or assign task to Kratos Brain via start_agent_task
-            is_gemini_connected = (
-                not force_direct_kratos
-                and live_runtime is not None
-                and live_runtime.get_status().gemini_connected
-            )
-
-            if is_gemini_connected:
-                try:
-                    with console.status("[bold cyan]🌐 Gemini Live thinking & speaking...[/bold cyan]", spinner="dots"):
-                        reply_text = live_runtime.send_chat_turn_sync(processed_query, timeout=120.0)
-                    if reply_text and not reply_text.startswith("Gemini Live turn failed:"):
-                        messages.append({"role": "assistant", "content": reply_text})
-                        continue
-                    if reply_text and reply_text.startswith("Gemini Live turn failed:"):
-                        logger.warning(f"[CLI] {reply_text}. Falling back to Kratos Agent.")
-                        console.print("[dim yellow]⚠ Gemini Live turn timed out/failed; falling back to Kratos Agent directly...[/dim yellow]")
-                except Exception as e:
-                    logger.warning(f"[CLI] Gemini Live turn error, falling back to Kratos Agent: {e}")
-                    console.print("[dim yellow]⚠ Gemini Live unavailable, falling back to Kratos Agent directly...[/dim yellow]")
-
+            # Multi-turn history with multimodal image support
+            image_attachments = [
+                f for f in attached_files
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")) and os.path.exists(f)
+            ]
+            if image_attachments:
+                import base64
+                user_content: list[dict[str, Any]] = [{"type": "text", "text": processed_query}]
+                for img_path in image_attachments:
+                    try:
+                        with open(img_path, "rb") as f_img:
+                            b64_data = base64.b64encode(f_img.read()).decode("utf-8")
+                            ext = img_path.rsplit(".", 1)[-1].lower()
+                            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+                            user_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64_data}"}
+                            })
+                    except Exception as e:
+                        console.print(f"[dim red]Failed to load image {img_path}: {e}[/dim red]")
+                messages.append({"role": "user", "content": user_content})
+            else:
+                messages.append({"role": "user", "content": processed_query})
 
             # ── Live TUI invoke (replaces bare runtime.invoke) ──────────────
             try:
@@ -2330,6 +2387,14 @@ def start_interactive_cli():
                     messages.pop()
             else:
                 messages.append({"role": "assistant", "content": reply_text})
+                # Native Voice Narration
+                try:
+                    from kratos_agent.output.native_voice import get_native_voice
+                    voice_eng = get_native_voice()
+                    if not voice_eng.is_muted and reply_text:
+                        voice_eng.speak(reply_text)
+                except Exception as e:
+                    logger.debug("[CLI] Voice output error: %s", e)
 
             # Styled Box Output: Completion Card for coding/project tasks, clean Markdown for chat
             last_plan = _tui.get_last_plan()

@@ -80,6 +80,11 @@ class NarrationManager:
             narrative = str(payload.get("voice_text"))
             if int(payload.get("voice_priority", 50)) >= 80:
                 is_priority = True
+        elif kind in ("planning.started", "planning_started"):
+            narrative = "Planning the next steps."
+        elif kind in ("tool.started", "tool.call_started", "tool_call_started"):
+            tool_name = payload.get("name") or payload.get("tool") or "tool"
+            narrative = f"Running {tool_name}."
         elif kind == "task.started":
             title = payload.get("title", "")
             if title:

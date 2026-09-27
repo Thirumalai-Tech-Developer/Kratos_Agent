@@ -20,8 +20,16 @@ DEFAULT_TIMEOUT_SECONDS: float = 60.0
 DEFAULT_MAX_RETRIES: int = 2
 
 _cached_models: list[str] = []
+_cached_model_details: dict[str, dict[str, Any]] = {}
 _cache_timestamp: float = 0.0
 _CACHE_TTL_SECONDS: float = 30.0
+
+PUBLIC_MODELS: list[str] = [
+    "antigravity/gemini-3.7-flash-high",
+    "ds-web/deepseek-v4-pro",
+    "auto/best-vision",
+    "auto/best-fast",
+]
 
 
 def get_api_key(explicit_key: str | None = None) -> str:
@@ -99,8 +107,8 @@ def get_default_model() -> str:
     )
 
 
-def _extract_model_ids(payload: Any) -> list[str]:
-    """Extracts unique model IDs from various LLM gateway response schemas."""
+def _extract_model_catalog(payload: Any) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """Extracts unique model IDs and full model metadata from gateway response schemas."""
     raw_list: list[Any] = []
     if isinstance(payload, list):
         raw_list = payload
@@ -115,15 +123,118 @@ def _extract_model_ids(payload: Any) -> list[str]:
             raw_list = [payload]
 
     model_ids: list[str] = []
+    model_details: dict[str, dict[str, Any]] = {}
     for item in raw_list:
         mid = ""
+        meta: dict[str, Any] = {}
         if isinstance(item, str):
             mid = item.strip()
+            meta = {"id": mid}
         elif isinstance(item, dict):
             mid = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+            meta = dict(item)
+            meta["id"] = mid
         if mid and mid not in model_ids:
             model_ids.append(mid)
-    return model_ids
+            model_details[mid] = meta
+    return model_ids, model_details
+
+
+def _extract_model_ids(payload: Any) -> list[str]:
+    """Extracts unique model IDs from various LLM gateway response schemas."""
+    ids, _ = _extract_model_catalog(payload)
+    return ids
+
+
+def get_model_details(model_id: str | None = None) -> dict[str, Any]:
+    """Returns metadata dictionary for a model, if known."""
+    mid = model_id or get_default_model()
+    if not _cached_model_details:
+        get_available_models()
+    return _cached_model_details.get(mid, {"id": mid})
+
+
+def is_vision_model(model_id: str | None = None) -> bool:
+    """Returns True if the model supports image/vision + text input in OmniRoute."""
+    mid = (model_id or get_default_model()).strip()
+    mid_lower = mid.lower()
+
+    details = get_model_details(mid)
+    caps = details.get("capabilities") or {}
+
+    # 1. Check explicit capabilities dict from OmniRoute
+    if isinstance(caps, dict):
+        if caps.get("vision") or caps.get("image") or caps.get("multimodal"):
+            return True
+        modalities_in = caps.get("modalities_input") or []
+        if isinstance(modalities_in, list) and ("image" in modalities_in or "vision" in modalities_in):
+            return True
+
+    # 2. Check top-level modalities_input
+    modalities_in = details.get("modalities_input") or []
+    if isinstance(modalities_in, list) and ("image" in modalities_in or "vision" in modalities_in):
+        return True
+
+    # 3. Known vision prefixes/keywords in OmniRoute
+    vision_patterns = (
+        "vision", "image", "multimodal", "-vl", "gemini", "claude-3", "gpt-4o", "gpt-4-turbo", "qwen-vl", "pixtral"
+    )
+    return any(p in mid_lower for p in vision_patterns)
+
+
+def is_thinking_model(model_id: str | None = None) -> bool:
+    """Returns True if the model supports deep reasoning / thinking with effort tiers."""
+    mid = (model_id or get_default_model()).strip()
+    mid_lower = mid.lower()
+
+    details = get_model_details(mid)
+    caps = details.get("capabilities") or {}
+
+    if isinstance(caps, dict):
+        if caps.get("thinking") or caps.get("supportsThinking") or caps.get("reasoning"):
+            return True
+        if caps.get("effort_tiers"):
+            return True
+
+    thinking_patterns = ("think", "reason", "pro-think", "deepseek-r1", "qwq")
+    return any(p in mid_lower for p in thinking_patterns)
+
+
+def get_model_marks(model_id: str) -> list[str]:
+    """Returns human-readable capability marks for a model."""
+    marks = []
+    if is_vision_model(model_id):
+        marks.append("👁️ Vision+Text")
+    else:
+        marks.append("📝 Text Only")
+
+    if is_thinking_model(model_id):
+        marks.append("🧠 Think: Max Effort")
+
+    details = get_model_details(model_id)
+    caps = details.get("capabilities") or {}
+    if isinstance(caps, dict) and caps.get("tool_calling"):
+        marks.append("🔧 Tools")
+
+    return marks
+
+
+def get_model_badge(model_id: str) -> str:
+    """Returns a compact mark badge for UI / CLI display."""
+    marks = get_model_marks(model_id)
+    return " ".join(f"[{m}]" for m in marks)
+
+
+def get_vision_models(refresh: bool = False) -> list[str]:
+    """Returns all available models supporting image+text input from OmniRoute."""
+    models = get_available_models(refresh=refresh)
+    return [m for m in models if is_vision_model(m)]
+
+
+def get_thinking_models(refresh: bool = False) -> list[str]:
+    """Returns all available models supporting reasoning/thinking from OmniRoute."""
+    models = get_available_models(refresh=refresh)
+    return [m for m in models if is_thinking_model(m)]
 
 
 def get_model(
@@ -132,7 +243,7 @@ def get_model(
     refresh: bool = False,
 ) -> list[str]:
     """Dynamically fetches available models from the active model endpoint or cache."""
-    global _cached_models, _cache_timestamp
+    global _cached_models, _cached_model_details, _cache_timestamp
 
     target_endpoint = endpoint or get_model_endpoint_url()
     now = time.time()
@@ -148,9 +259,10 @@ def get_model(
         result = session.get(target_endpoint, headers=header, timeout=timeout)
         if result.status_code == 200:
             result_json = result.json()
-            model_list = _extract_model_ids(result_json)
+            model_list, model_details = _extract_model_catalog(result_json)
             if model_list:
                 _cached_models = list(model_list)
+                _cached_model_details.update(model_details)
                 _cache_timestamp = now
                 if "PUBLIC_MODELS" in globals() and isinstance(PUBLIC_MODELS, list):
                     PUBLIC_MODELS.clear()
@@ -176,9 +288,6 @@ def fetch_models(endpoint: str | None = None, timeout: float = 3.0, refresh: boo
 def get_available_models(refresh: bool = False, timeout: float = 3.0) -> list[str]:
     """Fetches currently available models dynamically from the active gateway."""
     return get_model(refresh=refresh, timeout=timeout)
-
-
-PUBLIC_MODELS: list[str] = []
 
 
 def get_normal_mode_model() -> str:

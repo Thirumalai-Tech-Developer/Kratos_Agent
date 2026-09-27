@@ -150,19 +150,43 @@ class VisionManager:
         return await self.capture_screen_now()
 
     async def describe_screen_fallback(self, prompt: str = "Describe what you see on the screen in detail.") -> str:
-        """Local vision fallback when Gemini Live stream is unavailable (§16, §40)."""
-        frame = self.screen.capture_now()
-        if not frame:
-            return "Screen capture failed. Unable to capture desktop frame."
+        """Local vision analysis using OmniRoute vision models without Gemini Live."""
+        return await self.analyze_vision(prompt=prompt, source="screen")
 
-        # Try Brain vision endpoint via OmniRoute / OpenAI-compatible payload
+    async def analyze_vision(self, prompt: str = "Describe what you see in detail.", source: str = "screen") -> str:
+        """Captures screen or camera frame and analyzes it using the active/best OmniRoute vision model."""
+        jpeg_bytes = None
+        width = 0
+        height = 0
+        if source == "camera" or self.mode == "camera":
+            cam_data = await self.capture_camera_now()
+            if cam_data and "data" in cam_data:
+                jpeg_bytes = cam_data["data"]
+                width, height = cam_data.get("width", 0), cam_data.get("height", 0)
+        else:
+            frame = self.screen.capture_now()
+            if frame:
+                jpeg_bytes = frame.jpeg
+                width, height = frame.width, frame.height
+
+        if not jpeg_bytes:
+            return f"{source.capitalize()} capture failed. Unable to capture visual frame."
+
         try:
             from kratos_agent.brain.client import BrainClient
-            from kratos_agent.brain.config import load_brain_config
+            from kratos_agent.brain.config import get_default_model, is_vision_model, get_vision_models
 
-            b64_img = base64.b64encode(frame.jpeg).decode("utf-8")
-            cfg = load_brain_config()
-            client = BrainClient(cfg)
+            # Determine vision model
+            active_model = get_default_model()
+            if is_vision_model(active_model):
+                target_model = active_model
+            else:
+                # If active model is text-only (e.g. ds-web/deepseek-v4-pro), choose an OmniRoute vision model
+                vision_models = get_vision_models()
+                target_model = vision_models[0] if vision_models else "antigravity/gemini-3.7-flash-high"
+
+            b64_img = base64.b64encode(jpeg_bytes).decode("utf-8")
+            client = BrainClient()
 
             messages = [
                 {
@@ -176,8 +200,14 @@ class VisionManager:
                     ],
                 }
             ]
-            response = await client.send_chat(messages, stream=False)
-            return response.get("content", "No description returned from model.")
+            text, _ = await asyncio.to_thread(
+                client.complete,
+                target_model,
+                messages,
+                timeout=45.0,
+                stream=True,
+            )
+            return text or f"Vision model {target_model} returned empty response."
         except Exception as e:
-            logger.warning(f"[VisionManager] Fallback vision description error: {e}")
-            return f"Captured {frame.width}x{frame.height} screen frame (hash: {frame.frame_hash}), but vision model analysis failed: {e}"
+            logger.warning(f"[VisionManager] Vision model analysis error: {e}")
+            return f"Captured {width}x{height} frame, but vision analysis failed: {e}"

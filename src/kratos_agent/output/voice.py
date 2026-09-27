@@ -178,6 +178,12 @@ _voice_buffer: VoiceBuffer | None = None
 _tts_queue: TTSQueue | None = None
 
 
+def sanitize_speech_text(text: str) -> str:
+    """Sanitizes text removing internal jargon, URLs, and code blocks for speech output."""
+    from .native_voice import clean_text_for_speech
+    return clean_text_for_speech(text)
+
+
 def get_voice_buffer() -> VoiceBuffer:
     global _voice_buffer
     if _voice_buffer is None:
@@ -188,5 +194,9 @@ def get_voice_buffer() -> VoiceBuffer:
 def get_tts_queue() -> TTSQueue:
     global _tts_queue
     if _tts_queue is None:
-        _tts_queue = TTSQueue()
+        try:
+            from .native_voice import get_native_voice
+            _tts_queue = TTSQueue(speech_func=get_native_voice().speak)
+        except Exception:
+            _tts_queue = TTSQueue()
     return _tts_queue

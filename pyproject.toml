@@ -63,6 +63,7 @@ headroom = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = [".", "src"]
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]

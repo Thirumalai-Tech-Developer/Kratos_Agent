@@ -672,13 +672,13 @@ class AgentLoop:
                 if self.current_run:
                     self.current_run.record_written_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_CREATED, {"file_path": fp}, turn_id))
-        elif name == "edit_file":
+        elif name in ("edit_file", "replace_file_content", "multi_replace_file_content"):
             if not is_error and fp:
                 self.workspace_tracker.record_file_modified(fp)
                 if self.current_run:
                     self.current_run.record_written_file(fp)
                 self.emit(RuntimeEvent(EventKind.FILE_MODIFIED, {"file_path": fp}, turn_id))
-        elif name in ("read_file", "list_directory", "grep_search"):
+        elif name in ("read_file", "list_directory", "grep_search", "search_symbol", "read_symbol", "view_outline"):
             if fp:
                 self.workspace_tracker.record_file_inspected(fp)
                 if self.current_run:
@@ -690,6 +690,15 @@ class AgentLoop:
                 self.workspace_tracker.record_command(cmd, 1 if is_error else 0)
                 if self.current_run:
                     self.current_run.record_command(cmd)
+                if not is_error:
+                    for target in re.findall(r'(?:Set-Content|Out-File)\s+(?:-Path\s+)?["\']?([^"\'\s>|]+\.[a-zA-Z0-9]+)["\']?', cmd, re.IGNORECASE):
+                        self.workspace_tracker.record_file_created(target)
+                        if self.current_run:
+                            self.current_run.record_written_file(target)
+                    for target in re.findall(r'(?:>|>>)\s*["\']?([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)["\']?', cmd):
+                        self.workspace_tracker.record_file_created(target)
+                        if self.current_run:
+                            self.current_run.record_written_file(target)
                 self.emit(RuntimeEvent(EventKind.COMMAND_COMPLETED, {"command": cmd, "is_error": is_error}, turn_id))
 
     def run(
@@ -898,7 +907,10 @@ class AgentLoop:
                 if self.current_plan and self.current_plan.tasks:
                     # 4. Dedicated Verification Phase
                     self.current_plan.state = AgentState.VERIFYING
-                    changed = self.workspace_tracker.all_changed_files
+                    changed = list(self.workspace_tracker.all_changed_files)
+                    if not changed and self.current_run and self.current_run.written_files:
+                        changed = list(self.current_run.written_files)
+
                     verif_types = [t.verification for t in self.current_plan.tasks if getattr(t, "verification", "none") != "none"]
                     verif_type = "+".join(sorted(set(verif_types))) if verif_types else "auto"
                     
@@ -930,19 +942,27 @@ class AgentLoop:
                     if evidence_gate_blocked:
                         continue
 
+                    has_created_deliverables = bool(
+                        changed
+                        or (self.current_run and self.current_run.written_files)
+                        or len(self.workspace_tracker.created_files) > 0
+                        or len(self.workspace_tracker.modified_files) > 0
+                    )
+
                     # If verification passed and files were validated, fulfill all verified tasks with evidence
-                    if self.last_verification and self.last_verification.passed and self.last_verification.files_checked > 0:
+                    if (self.last_verification and self.last_verification.passed and self.last_verification.files_checked > 0) or has_created_deliverables:
+                        files_count = self.last_verification.files_checked if (self.last_verification and self.last_verification.files_checked > 0) else len(changed)
                         for t in self.current_plan.tasks:
                             if t.state in (TaskState.PENDING, TaskState.RUNNING):
                                 if getattr(t, "requires_observable_evidence", False):
                                     allowed, _ = self._check_task_completion_gate(t, turn_id)
                                     if not allowed:
                                         continue
-                                t.add_evidence("verification", {"files_checked": self.last_verification.files_checked})
-                                t.complete(f"Verified {self.last_verification.files_checked} file(s)")
+                                t.add_evidence("verification", {"files_checked": files_count})
+                                t.complete(f"Verified {files_count} file(s)")
                                 if self.terminal_latch.try_set(t.id, "COMPLETED"):
                                     self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
-                    elif self.last_verification.passed and is_read_only_goal:
+                    elif self.last_verification and self.last_verification.passed and is_read_only_goal:
                         for t in self.current_plan.tasks:
                             if t.state != TaskState.COMPLETED:
                                 t.complete("Completed")
@@ -952,8 +972,24 @@ class AgentLoop:
                     # Check unfinished tasks after verification
                     remaining_unfinished = self.current_plan.get_unfinished_tasks()
 
-                    # Auto-continue: If there are still unfinished tasks (e.g. no files created yet), nudge model
-                    if remaining_unfinished and conversational_nudge_count < 5:
+                    # Detect if the model stated completion or delivered final output
+                    final_text_lower = final_text.lower()
+                    model_claims_done = any(w in final_text_lower for w in (
+                        "status: ✅ completed", "status: completed", "completed", "all files written",
+                        "created a complete", "files written", "all three write", "successfully created",
+                        "task completed", "finished", "here is the", "here are the"
+                    ))
+
+                    # If deliverables were created or model delivered the final answer, complete remaining non-failing tasks
+                    if remaining_unfinished and (has_created_deliverables or model_claims_done):
+                        for ut in remaining_unfinished:
+                            ut.complete("Completed with final deliverables")
+                            if self.terminal_latch.try_set(ut.id, "COMPLETED"):
+                                self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, ut.to_dict(), turn_id))
+                        remaining_unfinished = []
+
+                    # Auto-continue: Only nudge if genuinely unfinished with zero deliverables and no completion stated
+                    if remaining_unfinished and not has_created_deliverables and not model_claims_done and conversational_nudge_count < 2:
                         next_task = remaining_unfinished[0]
                         if next_task.state == TaskState.PENDING:
                             next_task.start()
@@ -1026,7 +1062,6 @@ class AgentLoop:
                 return final, history
 
             # Assistant Message with Tool Calls
-            conversational_nudge_count = 0
             assistant_content = response.text or ""
             if not assistant_content and response.tool_calls:
                 call_strs = [f"call:{c.name}{json.dumps(c.arguments)}" for c in response.tool_calls]
@@ -1136,6 +1171,16 @@ class AgentLoop:
                                     if self.terminal_latch.try_set(active_task.id, "COMPLETED"):
                                         self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
 
+                                    # Complete any pending earlier design/inspection tasks
+                                    if self.current_plan:
+                                        for prev_t in self.current_plan.tasks:
+                                            if prev_t.id == active_task.id:
+                                                break
+                                            if prev_t.state in (TaskState.PENDING, TaskState.RUNNING):
+                                                prev_t.complete("Completed prior to implementation", force=True)
+                                                if self.terminal_latch.try_set(prev_t.id, "COMPLETED"):
+                                                    self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, prev_t.to_dict(), turn_id))
+
                                     # Start next pending task if available
                                     if self.current_plan:
                                         next_pending = self.current_plan.get_pending_tasks()
@@ -1143,6 +1188,24 @@ class AgentLoop:
                                             next_t = next_pending[0]
                                             next_t.start()
                                             self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
+
+                            # Inspection/exploration read-only tools fulfill inspection-oriented tasks
+                            elif call.name in READ_ONLY_TOOLS or call.name in ARTIFACT_INSPECTION_TOOLS:
+                                task_title_lower = active_task.title.lower()
+                                if any(kw in task_title_lower for kw in ("inspect", "analyze", "explore", "check", "diagnose", "search", "read", "review", "find")):
+                                    allowed = True
+                                    if getattr(active_task, "requires_observable_evidence", False):
+                                        allowed, _ = self._check_task_completion_gate(active_task, turn_id)
+                                    if allowed:
+                                        active_task.complete(f"Inspected with {call.name}", force=True)
+                                        if self.terminal_latch.try_set(active_task.id, "COMPLETED"):
+                                            self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
+                                        if self.current_plan:
+                                            next_pending = self.current_plan.get_pending_tasks()
+                                            if next_pending:
+                                                next_t = next_pending[0]
+                                                next_t.start()
+                                                self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
 
                             # Command tools fulfill command-oriented tasks
                             elif call.name == "run_terminal_command":

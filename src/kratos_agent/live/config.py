@@ -66,6 +66,20 @@ class LiveConfig:
     context_trigger_tokens: int = 104857
     context_target_tokens: int = 52428
 
+    backend: str = "gemini"
+
     def is_valid(self) -> bool:
-        """Check if minimum requirements to connect are met."""
-        return bool(self.api_key and self.enabled)
+        """Check if minimum requirements to run multimodal layer are met."""
+        if not self.enabled:
+            return False
+        if self.backend == "native":
+            return True
+        return bool(self.api_key)
+
+    @property
+    def is_gemini_backend(self) -> bool:
+        if os.getenv("KRATOS_DISABLE_GEMINI_LIVE", "false").lower() in ("true", "1", "yes"):
+            return False
+        if os.getenv("KRATOS_LIVE_BACKEND", "").lower() == "native":
+            return False
+        return self.backend in ("gemini", "gemini_live") and bool(self.api_key)

@@ -840,15 +840,18 @@ def start_server(
     print(f"📊 Storage: {'Cloudflare D1 (Cloud)' if d1_db.is_remote else 'D1 SQLite Mirror (Local)'}")
     print("⚡ Real-time Agent Arena & Tool Dispatcher ready.\n")
 
-    # Start Gemini Live multimodal subsystem alongside Web (skip during automated test runs)
+    # Start Multimodal subsystem alongside Web (skip during automated test runs)
     if not os.getenv("PYTEST_CURRENT_TEST"):
         try:
             from kratos_agent.live import get_live_runtime
             live_runtime = get_live_runtime()
             live_runtime.start_in_background()
-            print("🎤 Gemini Live Multimodal Subsystem: ONLINE\n")
+            if live_runtime.config.is_gemini_backend:
+                print("🎤 Gemini Live Multimodal Subsystem: ONLINE\n")
+            else:
+                print("🎤 Sovereign Multimodal Subsystem (Native Voice & OmniRoute Vision): ONLINE\n")
         except Exception as e:
-            print(f"⚠️ Gemini Live could not start: {e}\n")
+            print(f"⚠️ Multimodal subsystem could not start: {e}\n")
 
     if open_browser:
         try:
