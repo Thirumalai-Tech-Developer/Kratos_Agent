@@ -22,7 +22,8 @@ class TestFocusPolicy(unittest.TestCase):
 
     @patch("kratos_agent.computer.apps.focus.get_window_manager")
     @patch("kratos_agent.computer.apps.focus.get_active_window")
-    def test_focus_target_with_verification(self, mock_get_active, mock_get_wm) -> None:
+    @patch("kratos_agent.computer.apps.focus.get_current_foreground_hwnd", return_value=12345)
+    def test_focus_target_with_verification(self, mock_get_foreground, mock_get_active, mock_get_wm) -> None:
         # Mock active window returning target handle
         mock_win = WindowInfo(
             id="12345",

@@ -1,53 +1,30 @@
+"""Compatibility facade over the first-party Kratos model SDK."""
 from __future__ import annotations
 
-import logging
-logger = logging.getLogger(__name__)
-
 import json
-import os
+import logging
 import time
-import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
 
-import requests
-
-from kratos_agent.brain.config import (
-    BrainBadRequestError,
-    BrainConnectionError,
-    BrainError,
-    BrainNotFoundError,
-    BrainRateLimitError,
-    BrainServerError,
-    BrainTimeoutError,
-    authenticate,
-    get_default_model,
-    get_endpoint_url,
-    get_max_retries,
-    get_request_timeout,
-)
+from kratos_agent.brain.config import get_default_model, get_endpoint_url, get_max_retries, get_request_timeout
 from kratos_agent.core.latency_tracker import latency_tracker
+from kratos_agent.sdk import KratosClient
+
+logger = logging.getLogger(__name__)
 
 
 class BrainClient:
-    """High-speed Brain / OpenAI-compatible API client.
-    
-    Communicates directly with the Brain gateway ignoring system proxy variables.
-    """
+    """Legacy application-facing API backed only by KratosClient."""
+
     def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or get_endpoint_url()
-        self._session: requests.Session | None = None
+        self.sdk = KratosClient(self.endpoint_url)
 
     @property
-    def session(self) -> requests.Session:
-        if self._session is None:
-            self._session = requests.Session()
-            # CRITICAL: Disable system proxy inheritance (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
-            self._session.trust_env = False
-            adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=0)
-            self._session.mount("http://", adapter)
-            self._session.mount("https://", adapter)
-        return self._session
+    def session(self):
+        """Compatibility access for existing diagnostics and tests."""
+        return self.sdk.session
 
     def build_envelope(
         self,
@@ -57,121 +34,33 @@ class BrainClient:
         stream: bool = True,
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Builds standard OpenAI-compatible chat payload."""
-        target_model = model or get_default_model()
-        formatted_messages: list[dict[str, Any]] = []
+        """Build a Kratos SDK request using the local gateway's chat contract."""
+        return self.sdk.build_request(model, messages, system_instruction, stream=stream, tools=tools)
 
-        if system_instruction:
-            formatted_messages.append({"role": "system", "content": system_instruction})
-
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role in ("system", "developer"):
-                formatted_messages.append({"role": "system", "content": str(content)})
-            elif role == "assistant":
-                msg_dict: dict[str, Any] = {"role": "assistant"}
-                raw_tools = msg.get("tool_calls") or msg.get("metadata", {}).get("tool_calls")
-                if content is not None:
-                    c_str = str(content)
-                    if raw_tools and (c_str.startswith("call:") or not c_str.strip()):
-                        msg_dict["content"] = None
-                    else:
-                        msg_dict["content"] = c_str
-                else:
-                    msg_dict["content"] = None
-
-                if raw_tools:
-                    clean_tcs = []
-                    for tc in raw_tools:
-                        if "type" in tc and "function" in tc:
-                            clean_tcs.append(tc)
-                        else:
-                            tc_id = tc.get("call_id") or tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
-                            tc_name = tc.get("name", "tool")
-                            tc_args = tc.get("arguments", {})
-                            if isinstance(tc_args, dict):
-                                tc_args = json.dumps(tc_args)
-                            clean_tcs.append({
-                                "id": tc_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc_name,
-                                    "arguments": tc_args,
-                                }
-                            })
-                    msg_dict["tool_calls"] = clean_tcs
-                formatted_messages.append(msg_dict)
-            elif role == "tool":
-                tool_call_id = msg.get("tool_call_id") or msg.get("metadata", {}).get("call_id") or f"call_{uuid.uuid4().hex[:8]}"
-                tool_name = msg.get("name") or msg.get("metadata", {}).get("name") or "tool"
-                formatted_messages.append({
-                    "role": "tool",
-                    "content": str(content),
-                    "tool_call_id": tool_call_id,
-                    "name": tool_name,
-                })
-            else:
-                if isinstance(content, list):
-                    # Check if this content list contains multimodal parts (image_url, image, input_audio)
-                    has_multimodal = any(
-                        isinstance(p, dict) and p.get("type") in ("image_url", "image", "input_audio")
-                        for p in content
-                    )
-                    if has_multimodal:
-                        formatted_messages.append({"role": "user", "content": content})
-                    else:
-                        text_parts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in content]
-                        formatted_messages.append({"role": "user", "content": "\n".join(text_parts)})
-                else:
-                    formatted_messages.append({"role": "user", "content": str(content)})
-
-        payload: dict[str, Any] = {
-            "model": target_model,
-            "messages": formatted_messages,
-            "stream": stream,
-        }
-
-        # User requirement: Always max effort for reasoning / thinking models
-        from kratos_agent.brain.config import get_model_details, is_thinking_model
-        model_meta = get_model_details(target_model)
-        caps = model_meta.get("capabilities") or {}
-        always_max = (
-            is_thinking_model(target_model)
-            or bool(caps.get("thinking") or caps.get("supportsThinking") or caps.get("reasoning") or caps.get("effort_tiers"))
-            or os.getenv("KRATOS_MAX_EFFORT", "true").lower() in ("true", "1", "yes", "max")
+    def complete_with_sdk(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
+        task_id: str = "",
+        stream: bool = True,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """The previous SDK entry point now delegates to the Kratos-owned SDK."""
+        return self.complete(
+            model=model,
+            messages=messages,
+            system_instruction=system_instruction,
+            tools=tools,
+            max_retries=max_retries,
+            timeout=timeout,
+            task_id=task_id,
+            stream=stream,
+            on_chunk=on_chunk,
         )
-        if always_max:
-            payload["reasoning_effort"] = "max"
-            if caps.get("supportsThinking") or caps.get("thinking"):
-                payload["thinking"] = {"type": "enabled", "budget_tokens": 64000}
-
-        if tools:
-            clean_tools = []
-            for t in tools:
-                if "type" in t and "function" in t:
-                    clean_tools.append({
-                        "type": t["type"],
-                        "function": {
-                            "name": t["function"].get("name"),
-                            "description": t["function"].get("description", ""),
-                            "parameters": t["function"].get("parameters", {}),
-                        }
-                    })
-                elif "name" in t:
-                    clean_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": t.get("name"),
-                            "description": t.get("description", ""),
-                            "parameters": t.get("parameters", {}),
-                        }
-                    })
-            if clean_tools:
-                payload["tools"] = clean_tools
-                payload["tool_choice"] = "auto"
-
-        return payload
 
     def complete(
         self,
@@ -185,214 +74,39 @@ class BrainClient:
         stream: bool = True,
         on_chunk: Callable[[str], None] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
-        """Executes generation with streaming, latency tracking, and native OpenAI tool call parsing.
-        Returns: (text, tool_calls)
-        where tool_calls is a list of dicts: [{'id': ..., 'name': ..., 'args': {...}}]
-        """
-        start_time = time.monotonic()
+        """Return text and validated native tool calls from the Kratos gateway."""
         target_model = model or get_default_model()
-        retries = max_retries if max_retries is not None else get_max_retries()
-        req_timeout = timeout if timeout is not None else get_request_timeout()
-
         metrics = latency_tracker.start_request(
             task_id=task_id,
             model=target_model,
-            provider="brain",
-            context_tokens=len(str(system_instruction or "")) // 4 + sum(len(str(m.get("content", ""))) // 4 for m in messages),
+            provider="kratos-sdk",
+            context_tokens=len(str(system_instruction or "")) // 4
+            + sum(len(str(message.get("content", ""))) // 4 for message in messages),
             history_messages=len(messages),
         )
-
-        chunks: list[str] = []
-        raw_tool_calls: dict[int, dict[str, Any]] = {}
-        parsed_tool_calls: list[dict[str, Any]] = []
-        ttft_recorded = False
-
+        started = time.monotonic()
         try:
-            if stream:
-                payload = self.build_envelope(target_model, messages, system_instruction, stream=True, tools=tools)
-                headers = authenticate()
-
-                attempt = 0
-                last_error: Exception | None = None
-                while attempt <= retries:
-                    attempt += 1
-                    try:
-                        with self.session.post(
-                            self.endpoint_url,
-                            headers=headers,
-                            json=payload,
-                            stream=True,
-                            timeout=req_timeout,
-                        ) as resp:
-                            if resp.status_code == 200:
-                                has_events = False
-                                for line in resp.iter_lines(decode_unicode=False):
-                                    if not line:
-                                        continue
-                                    line_str = line.decode('utf-8', errors='replace').strip() if isinstance(line, (bytes, bytearray)) else str(line).strip()
-                                    if line_str.startswith("data:"):
-                                        chunk_payload = line_str[5:].strip()
-                                        if chunk_payload == "[DONE]":
-                                            break
-                                        try:
-                                            data = json.loads(chunk_payload)
-                                            choices = data.get("choices", [])
-                                            if choices:
-                                                delta = choices[0].get("delta", {})
-                                                content = delta.get("content")
-                                                if content:
-                                                    has_events = True
-                                                    if not ttft_recorded:
-                                                        metrics.ttft_ms = (time.monotonic() - start_time) * 1000
-                                                        ttft_recorded = True
-                                                    chunks.append(content)
-                                                    if on_chunk:
-                                                        try:
-                                                            on_chunk(content)
-                                                        except Exception as exc:
-                                                            logger.debug("Operation error suppressed: %s", exc)
-                                                tc_list = delta.get("tool_calls")
-                                                if tc_list:
-                                                    has_events = True
-                                                    if not ttft_recorded:
-                                                        metrics.ttft_ms = (time.monotonic() - start_time) * 1000
-                                                        ttft_recorded = True
-                                                    for tc in tc_list:
-                                                        idx = tc.get("index", 0)
-                                                        if idx not in raw_tool_calls:
-                                                            raw_tool_calls[idx] = {
-                                                                "id": tc.get("id", ""),
-                                                                "name": "",
-                                                                "arguments": "",
-                                                            }
-                                                        if tc.get("id"):
-                                                            raw_tool_calls[idx]["id"] = tc.get("id")
-                                                        fn = tc.get("function", {})
-                                                        if fn.get("name"):
-                                                            raw_tool_calls[idx]["name"] = fn.get("name")
-                                                        if fn.get("arguments"):
-                                                            raw_tool_calls[idx]["arguments"] += fn.get("arguments")
-                                        except Exception:
-                                            continue
-
-                                if not has_events:
-                                    try:
-                                        json_resp = resp.json()
-                                        choices = json_resp.get("choices", [])
-                                        if choices:
-                                            msg = choices[0].get("message", {})
-                                            if msg.get("content"):
-                                                chunks.append(msg["content"])
-                                            for tc in msg.get("tool_calls", []):
-                                                fn = tc.get("function", {})
-                                                raw_args = fn.get("arguments", "{}")
-                                                try:
-                                                    parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                                                except Exception:
-                                                    parsed_args = {"raw": raw_args}
-                                                parsed_tool_calls.append({
-                                                    "id": tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",
-                                                    "name": fn.get("name", "tool"),
-                                                    "args": parsed_args,
-                                                })
-                                    except Exception as exc:
-                                        logger.debug("Operation error suppressed: %s", exc)
-                                break
-                            self._handle_http_error_status(resp, target_model, attempt, retries)
-                    except (BrainBadRequestError, BrainNotFoundError):
-                        raise
-                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, BrainRateLimitError, BrainServerError) as exc:
-                        last_error = exc
-                        if attempt <= retries:
-                            time.sleep(0.5 * (2 ** (attempt - 1)))
-                            continue
-                        break
-                    except Exception as exc:
-                        last_error = exc
-                        break
-                if last_error and not chunks and not raw_tool_calls and not parsed_tool_calls:
-                    if isinstance(last_error, requests.exceptions.ConnectionError):
-                        raise BrainConnectionError(
-                            f"Brain LLM is not running on {self.endpoint_url} (connection refused). "
-                            f"Please ensure Brain gateway is running."
-                        ) from last_error
-                    elif isinstance(last_error, requests.exceptions.Timeout):
-                        raise BrainTimeoutError(
-                            f"Brain request timed out after {req_timeout}s at {self.endpoint_url}."
-                        ) from last_error
-                    elif isinstance(last_error, BrainError):
-                        raise last_error
-                    elif last_error:
-                        raise BrainError(f"Brain request failed: {last_error}") from last_error
-            else:
-                text_out, non_stream_tools = self.request_non_streaming_full(target_model, messages, system_instruction, retries, req_timeout, tools=tools)
-                if text_out:
-                    chunks.append(text_out)
-                parsed_tool_calls.extend(non_stream_tools)
-                if on_chunk and text_out:
-                    try:
-                        on_chunk(text_out)
-                    except Exception as exc:
-                        logger.debug("Operation error suppressed: %s", exc)
-
-            for idx in sorted(raw_tool_calls.keys()):
-                item = raw_tool_calls[idx]
-                name = item["name"]
-                call_id = item["id"] or f"call_{uuid.uuid4().hex[:8]}"
-                raw_args = item["arguments"]
-                try:
-                    parsed_args = json.loads(raw_args) if raw_args else {}
-                except Exception:
-                    parsed_args = {"raw": raw_args}
-                parsed_tool_calls.append({"id": call_id, "name": name, "args": parsed_args})
-
-            text = "".join(chunks).strip()
-            # Some OpenAI-compatible reasoning gateways occasionally terminate a
-            # successful SSE stream without emitting user-facing content or tool
-            # deltas. Retry that one ambiguous case as a regular JSON completion;
-            # the non-streaming parser already handles both text and tool calls.
-            if stream and not text and not parsed_tool_calls:
-                try:
-                    fallback_text, fallback_calls = self.request_non_streaming_full(
-                        target_model,
-                        messages,
-                        system_instruction,
-                        max_retries=0,
-                        timeout=req_timeout,
-                        tools=tools,
-                    )
-                except Exception as exc:
-                    raise BrainError(
-                        f"Model {target_model} returned an empty streaming response; "
-                        f"non-streaming recovery failed ({type(exc).__name__})."
-                    ) from exc
-                text = str(fallback_text or "").strip()
-                parsed_tool_calls.extend(fallback_calls or [])
-                if on_chunk and text:
-                    try:
-                        on_chunk(text)
-                    except Exception as exc:
-                        logger.debug("Operation error suppressed: %s", exc)
-
-            total_duration = (time.monotonic() - start_time) * 1000
-            metrics.generation_ms = max(0.0, total_duration - metrics.context_build_ms)
-            metrics.total_ms = total_duration
-            metrics.output_tokens = max(1, len(text) // 4)
+            request = self.build_envelope(target_model, messages, system_instruction, stream=stream, tools=tools)
+            response = self.sdk.complete(
+                request,
+                stream=stream,
+                on_chunk=on_chunk,
+                max_retries=max_retries if max_retries is not None else get_max_retries(),
+                timeout=timeout if timeout is not None else get_request_timeout(),
+            )
+            calls = [{"id": call.id, "name": call.name, "args": call.arguments} for call in response.tool_calls]
+            duration_ms = (time.monotonic() - started) * 1000
+            metrics.ttft_ms = metrics.ttft_ms or duration_ms
+            metrics.generation_ms = duration_ms
+            metrics.total_ms = duration_ms
+            metrics.output_tokens = response.usage.get("completion_tokens", max(1, len(response.text) // 4))
             metrics.status = "completed"
             latency_tracker.record_completed(metrics)
-
-            if text or parsed_tool_calls:
-                return text, parsed_tool_calls
-
-            if stream:
-                raise BrainError(
-                    f"Model {target_model} returned no text or tool calls in streaming or non-streaming mode."
-                )
-            raise BrainError(f"Model {target_model} returned an empty response.")
+            return response.text, calls
         except Exception as exc:
             metrics.status = "failed"
             metrics.error = str(exc)
-            metrics.total_ms = (time.monotonic() - start_time) * 1000
+            metrics.total_ms = (time.monotonic() - started) * 1000
             latency_tracker.record_completed(metrics)
             raise
 
@@ -409,19 +123,10 @@ class BrainClient:
         on_chunk: Callable[[str], None] | None = None,
     ) -> str:
         text, tool_calls = self.complete(
-            model=model,
-            messages=messages,
-            system_instruction=system_instruction,
-            tools=tools,
-            max_retries=max_retries,
-            timeout=timeout,
-            task_id=task_id,
-            stream=stream,
-            on_chunk=on_chunk,
+            model, messages, system_instruction, tools, max_retries, timeout, task_id, stream, on_chunk
         )
         if not text and tool_calls:
-            call_strs = [f"call:{c['name']}{json.dumps(c['args'])}" for c in tool_calls]
-            return "\n".join(call_strs)
+            return "\n".join(f"call:{call['name']}{json.dumps(call['args'], ensure_ascii=False)}" for call in tool_calls)
         return text
 
     def request_non_streaming_full(
@@ -433,74 +138,7 @@ class BrainClient:
         timeout: float = 60.0,
         tools: list[dict[str, Any]] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
-        target_model = model or get_default_model()
-        payload = self.build_envelope(target_model, messages, system_instruction, stream=False, tools=tools)
-        headers = authenticate()
-
-        attempt = 0
-        last_error: Exception | None = None
-
-        while attempt <= max_retries:
-            attempt += 1
-            try:
-                resp = self.session.post(
-                    self.endpoint_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout,
-                )
-
-                if resp.status_code == 200:
-                    data = resp.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        content = (msg.get("content") or "").strip()
-                        tool_calls: list[dict[str, Any]] = []
-                        for tc in msg.get("tool_calls", []):
-                            fn = tc.get("function", {})
-                            raw_args = fn.get("arguments", "{}")
-                            try:
-                                parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                            except Exception:
-                                parsed_args = {"raw": raw_args}
-                            tool_calls.append({
-                                "id": tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",
-                                "name": fn.get("name", "tool"),
-                                "args": parsed_args,
-                            })
-                        return content, tool_calls
-                    return "", []
-
-                self._handle_http_error_status(resp, target_model, attempt, max_retries)
-
-            except (BrainBadRequestError, BrainNotFoundError):
-                raise
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, BrainRateLimitError, BrainServerError) as exc:
-                last_error = exc
-                if attempt <= max_retries:
-                    backoff = 0.5 * (2 ** (attempt - 1))
-                    time.sleep(backoff)
-                    continue
-                break
-            except Exception as exc:
-                last_error = exc
-                break
-
-        if isinstance(last_error, requests.exceptions.ConnectionError):
-            raise BrainConnectionError(
-                f"Brain LLM is not running on {self.endpoint_url} (connection refused). "
-                f"Please ensure Brain gateway is running."
-            ) from last_error
-        elif isinstance(last_error, requests.exceptions.Timeout):
-            raise BrainTimeoutError(
-                f"Brain request timed out after {timeout}s at {self.endpoint_url}."
-            ) from last_error
-        elif isinstance(last_error, BrainError):
-            raise last_error
-        elif last_error:
-            raise BrainError(f"Brain request failed: {last_error}") from last_error
-        raise BrainError(f"Brain gateway unreachable at {self.endpoint_url}.")
+        return self.complete(model, messages, system_instruction, tools, max_retries, timeout, stream=False)
 
     def request_non_streaming(
         self,
@@ -518,129 +156,22 @@ class BrainClient:
         model: str,
         messages: list[dict[str, Any]],
         system_instruction: str | None = None,
-        max_retries: int = 2,
-        timeout: float = 60.0,
+        max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
-        """Streams responses from Brain via Server-Sent Events (SSE)."""
-        target_model = model or get_default_model()
-        payload = self.build_envelope(target_model, messages, system_instruction, stream=True)
-        headers = authenticate()
+        request = self.build_envelope(model or get_default_model(), messages, system_instruction, stream=True)
+        yield from self.sdk.stream_text(
+            request,
+            max_retries=max_retries if max_retries is not None else get_max_retries(),
+            timeout=timeout if timeout is not None else get_request_timeout(),
+        )
 
-        attempt = 0
-        last_error: Exception | None = None
-
-        while attempt <= max_retries:
-            attempt += 1
-            try:
-                with self.session.post(
-                    self.endpoint_url,
-                    headers=headers,
-                    json=payload,
-                    stream=True,
-                    timeout=timeout,
-                ) as resp:
-                    if resp.status_code == 200:
-                        has_chunks = False
-                        for line in resp.iter_lines(decode_unicode=False):
-                            if not line:
-                                continue
-                            line_str = line.decode('utf-8', errors='replace').strip()
-                            if line_str.startswith("data:"):
-                                chunk_payload = line_str[5:].strip()
-                                if chunk_payload == "[DONE]":
-                                    break
-                                try:
-                                    data = json.loads(chunk_payload)
-                                    choices = data.get("choices", [])
-                                    if choices:
-                                        delta = choices[0].get("delta", {})
-                                        content = delta.get("content")
-                                        if content:
-                                            has_chunks = True
-                                            yield content
-                                except Exception:
-                                    continue
-
-                        # Fallback for server returning non-SSE JSON despite stream=True
-                        if not has_chunks:
-                            try:
-                                json_resp = resp.json()
-                                choices = json_resp.get("choices", [])
-                                if choices:
-                                    msg = choices[0].get("message", {})
-                                    content = msg.get("content")
-                                    if content:
-                                        yield content
-                            except Exception as exc:
-                                logger.debug("Operation error suppressed: %s", exc)
-                        return
-
-                    self._handle_http_error_status(resp, target_model, attempt, max_retries)
-
-            except (BrainBadRequestError, BrainNotFoundError):
-                raise
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, BrainRateLimitError, BrainServerError) as exc:
-                last_error = exc
-                if attempt <= max_retries:
-                    backoff = 0.5 * (2 ** (attempt - 1))
-                    time.sleep(backoff)
-                    continue
-                break
-            except Exception as exc:
-                last_error = exc
-                break
-
-        if isinstance(last_error, requests.exceptions.ConnectionError):
-            raise BrainConnectionError(
-                f"Brain LLM is not running on {self.endpoint_url} (connection refused). "
-                f"Please ensure Brain gateway is running."
-            ) from last_error
-        elif isinstance(last_error, requests.exceptions.Timeout):
-            raise BrainTimeoutError(
-                f"Brain request timed out after {timeout}s at {self.endpoint_url}."
-            ) from last_error
-        elif isinstance(last_error, BrainError):
-            raise last_error
-        elif last_error:
-            raise BrainError(f"Brain stream failed: {last_error}") from last_error
-        raise BrainError(f"Brain gateway unreachable at {self.endpoint_url}.")
-
-    def _handle_http_error_status(self, resp: requests.Response, model: str, attempt: int, max_retries: int) -> None:
-        """Translates HTTP error codes into clean, descriptive Brain exceptions."""
-        try:
-            body = resp.json()
-            detail = body.get("error", {}).get("message") or resp.text[:300]
-        except Exception:
-            detail = resp.text[:300] if resp.text else ""
-
-        if resp.status_code == 400:
-            raise BrainBadRequestError(f"Invalid model request to Brain: {detail}")
-        elif resp.status_code == 404:
-            raise BrainNotFoundError(f"Brain endpoint or model '{model}' not found: {detail}")
-        elif resp.status_code == 429:
-            raise BrainRateLimitError(f"Brain rate limit reached (HTTP 429): {detail}")
-        elif resp.status_code in (401, 403):
-            raise BrainError(f"Brain access error (HTTP {resp.status_code}): {detail}")
-        elif resp.status_code >= 500:
-            lowered = detail.lower()
-            auth_markers = (
-                "invalid token",
-                "authorization failed",
-                "unauthorized",
-                "invalid api key",
-                "authentication failed",
-            )
-            if any(marker in lowered for marker in auth_markers):
-                # Some gateways wrap upstream 401/403 responses as HTTP 502.
-                # Retrying bad credentials only wastes minutes and obscures the
-                # actionable error; treat these as non-retryable access errors.
-                raise BrainError(
-                    f"Brain upstream authentication failed (HTTP {resp.status_code}): {detail}"
-                )
-            raise BrainServerError(f"Brain server error (HTTP {resp.status_code}): {detail}")
-        else:
-            raise BrainError(f"Brain returned HTTP {resp.status_code}: {detail}")
-
-
-# Backward compatibility alias
-OmnirouteClient = BrainClient
+    def stream_chat(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        system_instruction: str | None = None,
+        timeout: float | None = None,
+    ) -> Iterator[dict[str, str]]:
+        for chunk in self.stream(model, messages, system_instruction, timeout=timeout):
+            yield {"content": chunk}

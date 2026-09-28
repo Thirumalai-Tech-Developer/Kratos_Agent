@@ -9,9 +9,6 @@ from kratos_agent.computer.state import ActionResult
 class CoordinateBackend(GUIBackend):
     """Compatibility shell for the disabled coordinate-input backend."""
 
-    def __init__(self) -> None:
-        pass
-
     @property
     def name(self) -> str:
         return "coordinate"
@@ -31,7 +28,7 @@ class CoordinateBackend(GUIBackend):
         max_nodes: int = 400,
         visible_only: bool = True,
     ) -> list[GUIElement]:
-        # Coordinate backend does not expose an object tree
+        # Coordinate backend does not expose an object tree.
         return []
 
     def find_elements(
@@ -65,7 +62,11 @@ class CoordinateBackend(GUIBackend):
         button: str = "left",
         clicks: int = 1,
     ) -> ActionResult:
-        return ActionResult(ok=False, action="coordinate_click", detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.")
+        return ActionResult(
+            ok=False,
+            action="coordinate_click",
+            detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.",
+        )
 
     def type_element(
         self,
@@ -73,4 +74,8 @@ class CoordinateBackend(GUIBackend):
         text: str,
         clear_first: bool = False,
     ) -> ActionResult:
-        return ActionResult(ok=False, action="coordinate_type", detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.")
+        return ActionResult(
+            ok=False,
+            action="coordinate_type",
+            detail="Coordinate input is disabled; resolve an accessible control or use keyboard navigation.",
+        )

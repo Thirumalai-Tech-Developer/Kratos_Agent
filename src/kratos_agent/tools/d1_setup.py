@@ -94,7 +94,7 @@ def migrate_local_sessions() -> int:
             data = json.loads(f.read_text(encoding="utf-8"))
             sid = data.get("session_id", f.stem)
             title = data.get("title", sid)
-            model = data.get("model", "antigravity/gemini-3.7-flash-high")
+            model = data.get("model") or ""
             created_at = data.get("created_at", "")
             updated_at = data.get("updated_at", created_at)
             status = data.get("last_status", "idle")

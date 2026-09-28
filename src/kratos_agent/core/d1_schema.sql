@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
-    model TEXT NOT NULL DEFAULT 'antigravity/gemini-3.7-flash-high',
+    model TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_status TEXT NOT NULL DEFAULT 'idle',

@@ -53,6 +53,16 @@ Chat payloads accept `prompt`, `message`, or `query`, optional `session_id`, `mo
 
 The edge implementation is not a shell sandbox. `run_terminal_command` and other execution tools are subject to the Worker implementation and environment bindings; do not assume local Python subprocess semantics on the edge.
 
+The Worker uses only `KRATOS_MODEL` with `KRATOS_BASE_URL` or `KRATOS_CHAT_ENDPOINT`, plus optional `KRATOS_API_KEY`. These values are not populated with a model default in `wrangler.json`. For local development, put them in `.dev.vars`:
+
+```dotenv
+KRATOS_BASE_URL=http://127.0.0.1:20128/v1
+KRATOS_MODEL=<exact ID served by the gateway>
+KRATOS_API_KEY=<optional gateway credential>
+```
+
+For deployment, configure the same values in Cloudflare variables/secrets and use a gateway URL the Worker can reach; `127.0.0.1` works only for local development. Gateway failures return visibly and do not select another model.
+
 ## Cloudflare Pages adapter
 
 `functions/api/[[path]].js` exports `onRequest(context)`. It handles CORS and schema initialization, then delegates all API behavior to the Worker exports. This keeps Pages and Worker deployments on the same route implementation.

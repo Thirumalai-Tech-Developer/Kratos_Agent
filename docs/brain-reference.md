@@ -1,53 +1,33 @@
-# Brain and Model Gateway Reference
+# Kratos gateway and SDK reference
 
-## Configuration module: `src/kratos_agent/brain/config.py`
+## Configuration
 
-Constants:
+The first-party client posts to the existing local gateway's OpenAI-compatible chat-completions endpoint. Defaults and environment resolution live in `src/kratos_agent/brain/config.py`.
 
-- `DEFAULT_BASE_URL`, `DEFAULT_CHAT_ENDPOINT`, `DEFAULT_MODEL_ENDPOINT`: local gateway defaults at port 20128.
-- `DEFAULT_MODEL`: `antigravity/gemini-3.7-flash-high`.
-- `DEFAULT_TIMEOUT_SECONDS`: `60.0`.
-- `DEFAULT_MAX_RETRIES`: `2`.
-- `DEFAULT_PUBLIC_MODELS`: fallback model list (empty by default; models are dynamically fetched).
-- `PUBLIC_MODELS`: dynamic model list populated by `get_model()`.
-- `get_model(endpoint=None, timeout=3.0, refresh=False) -> list[str]`: dynamically queries the model endpoint (resolving via `get_model_endpoint_url()`), parses standard OpenAI `{data: [{id}]}`, Ollama/gateway `{models: [{name}]}`, or list schemas, with 30s TTL caching and fallback to configured default model.
-- `fetch_models(endpoint=None, timeout=3.0, refresh=False)`: compatibility alias for `get_model`.
-- `get_available_models(refresh=False, timeout=3.0)`: helper to retrieve live models dynamically.
-- `get_base_url() -> str`: resolves `BRAIN_BASE_URL`, `CHAT_BASE_URL`, `OMNIROUTE_BASE_URL`, then the local default.
-- `get_endpoint_url() -> str`: resolves a direct chat endpoint or appends `/chat/completions` to the base URL.
-- `get_model_endpoint_url() -> str`: resolves a direct model endpoint or appends `/models`.
-- `get_default_model() -> str`: resolves `BRAIN_MODEL`, `OMNIROUTE_MODEL`, `KRATOS_MODEL`, then the default.
-- `get_normal_mode_model() -> str`: resolves `NORMAL_MODE_MODEL`, otherwise `deepseek-web/deepseek-v4-pro`.
-- `get_request_timeout() -> float`: parses timeout environment variables, clamps valid values to at least one second, and falls back to 60 seconds.
-- `get_max_retries() -> int`: parses retry variables, clamps to zero or greater, and falls back to two.
+| Variable | Behavior |
+| --- | --- |
+| `KRATOS_BASE_URL` | Gateway API root; defaults to `http://127.0.0.1:20128/v1`. |
+| `KRATOS_MODEL` | Required exact reasoning model ID. No alternate model is selected. |
+| `KRATOS_API_KEY` | Optional gateway credential when authentication is enabled. |
+| `KRATOS_TIMEOUT` | Request timeout in seconds; defaults to 60. |
+| `KRATOS_MAX_RETRIES` | Retries for eligible transient failures; defaults to 2. Retries keep the same endpoint and model. |
 
-Exception hierarchy: `BrainError` is the base class; `BrainConnectionError`, `BrainTimeoutError`, `BrainRateLimitError`, `BrainBadRequestError`, `BrainNotFoundError`, and `BrainServerError` classify transport/status failures. `Omniroute*` names are compatibility aliases.
+The model catalog is consulted only to confirm that the configured model ID is available. It is never used to choose another model. If `KRATOS_MODEL` is empty, completion fails before a request is sent.
 
-## HTTP client: `client.py`
+## Public SDK
 
-`BrainClient(endpoint_url=None)` lazily creates a `requests.Session` with `trust_env=False`, connection pooling, and no requests-level retry policy.
+Import the first-party API from `kratos_agent.sdk`:
 
-- `build_envelope(model, messages, system_instruction=None, stream=True, tools=None) -> dict`: converts internal messages to an OpenAI-compatible payload. It normalizes system/developer roles, assistant tool metadata, tool results, list content, and tool schemas.
-- `complete(model, messages, system_instruction=None, tools=None, max_retries=None, timeout=None, task_id="", stream=True, on_chunk=None) -> tuple[str, list[dict]]`: sends a request, handles streaming/non-streaming responses, reports chunks through `on_chunk`, tracks latency/TTFT, retries transient failures, and returns text plus normalized tool calls.
-- `generate(model=None, messages=None, system_instruction=None, tools=None, stream=False, on_chunk=None, **kwargs)`: compatibility wrapper around completion behavior.
-- `session` property: creates the configured HTTP session once.
+```python
+from kratos_agent.sdk import KratosAgent, KratosClient
+```
 
-`OmnirouteClient` preserves the older client name and behavior for callers that still import it.
+`KratosClient.complete(payload, stream=None, on_chunk=None, ...)` returns a `KratosCompletion`. A completion contains text, `KratosToolCall` objects, finish reason, and usage. The streaming parser reads server-sent events and assembles fragmented tool-call IDs, names, and JSON arguments. Malformed tool arguments fail as a visible protocol error.
 
-## LangChain adapter: `brain.py` and `chat_model.py`
+`KratosAgent.run(prompt)` sends a task through the application execution loop. `run_chat(prompt)` uses restricted chat. `register_tool(...)` adds a schema and handler to the same permission-controlled registry used by the application.
 
-- `get_http_client() -> httpx.Client`: returns an `httpx.Client(trust_env=False)`.
-- `create_brain_llm(model=None, base_url=None, api_key=None) -> ChatOpenAI`: creates a LangChain OpenAI-compatible chat model, using `kratos-brain-key` only when no key is configured.
-- `get_agent_response(query, model=None, endpoint_url=None) -> str`: performs one non-streaming user query through `BrainClient`.
+## Gateway failure behavior
 
-`BrainChatModel(model=None, endpoint_url=None, **kwargs)` implements LangChain's `BaseChatModel` boundary and delegates to `BrainClient`. It supports `_generate` and `_stream` plus `invoke`-compatible message handling. `OmnirouteChatModel` is the compatibility subclass/name.
+HTTP errors are mapped to typed `BrainError` subclasses for existing app diagnostics. Transient connection, timeout, rate-limit, and server errors may be retried with backoff. Authentication, invalid request, missing endpoint/model, malformed response, or exhausted retries fail to the caller. The SDK never changes the model or endpoint to recover.
 
-Tool-call parsing helpers:
-
-- `clean_file_path(fp_str) -> str`: strips raw-string prefixes, quote/hash artifacts, and whitespace.
-- `_clean_command_payload(cmd_str) -> str`: removes markdown fences, labels, JSON-like prefixes, and trailing artifacts from commands.
-- `_extract_json_object(text, start_idx)`: balances braces while respecting quoted strings and attempts strict JSON, normalized keys, then a tool-specific fallback.
-- `_fallback_extract_tool_call(text)`: recovers `edit_file`, `write_file`, and `run_terminal_command` calls when model JSON is malformed.
-- `extract_tool_calls_from_text(text) -> tuple[str, list[dict]]`: recognizes Harmony/ChatML, `<tool_call>` XML, `call:name{json}`, and markdown/JSON forms; removes recognized call spans from visible text and returns calls as `{name, args}`.
-
-The valid parser tool names include workspace tools, browser/search tools, memory tools, diagnostics, and Python execution names. The actual local registry is authoritative for executable tools.
+The `BrainClient` class remains as a compatibility facade for application modules. All transport and parsing are delegated to `KratosClient`.

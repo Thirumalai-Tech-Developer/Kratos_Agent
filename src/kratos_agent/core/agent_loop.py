@@ -39,6 +39,7 @@ from .runtime_contracts import (
 from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
+from kratos_agent.output.speech_directives import DirectiveStreamFilter, extract_speech_directives
 
 # Tools that are read-only and have zero side effects on filesystem or workspace state.
 # These can always execute concurrently with other read-only tools.
@@ -431,6 +432,7 @@ class AgentLoop:
         self.last_verification: VerificationResult | None = None
         self.current_run: AgentRunState | None = None
         self._current_turn_id: str = ""
+        self.on_speech: Callable[[str], None] | None = None
 
         # Wire dynamic todo_write and exit_plan_mode tool handlers
         try:
@@ -512,6 +514,37 @@ class AgentLoop:
                     turn_id,
                 ))
             return False, None
+
+    def _collect_browser_evidence(self) -> list[Any]:
+        """Re-run declared browser assertions against live state before turn completion."""
+        if not self.current_plan:
+            return []
+        browser_tasks = [
+            task for task in self.current_plan.tasks
+            if "browser" in str(getattr(task, "verification", "")).lower()
+        ]
+        if not browser_tasks:
+            return []
+        ccs = getattr(self.tools, "ccs", None) or getattr(self.tools, "_ccs", None)
+        if not ccs:
+            try:
+                from kratos_agent.ccs import get_controller
+                ccs = get_controller()
+            except Exception:
+                ccs = None
+        evidence: list[Any] = []
+        for task in browser_tasks:
+            assertion = getattr(task, "assertion", None)
+            if assertion is None:
+                continue
+            try:
+                observed = self.verification_manager.verify_observable_outcome(assertion, ccs)
+            except Exception as exc:
+                logger.debug("Browser assertion failed for %s: %s", task.title, type(exc).__name__)
+                continue
+            task.observed_evidence = observed
+            evidence.append(observed)
+        return evidence
 
     def _on_todo_update(self, todos: list) -> None:
         """Handles whole-list todo updates from todo_write tool call."""
@@ -831,8 +864,12 @@ class AgentLoop:
             self.emit(RuntimeEvent(EventKind.REQUEST_ASSEMBLED, _redacted_request(request), turn_id))
 
             # Complete Model Request
+            stream_filter = DirectiveStreamFilter()
+
             def _handle_chunk(chunk: str) -> None:
-                self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {"chunk": chunk}, turn_id))
+                visible_chunk = stream_filter.push(chunk)
+                if visible_chunk:
+                    self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {"chunk": visible_chunk}, turn_id))
 
             try:
                 with profiler.measure("llm"):
@@ -843,7 +880,9 @@ class AgentLoop:
                             response = self.model.complete(request)
                         else:
                             raise
+                stream_filter.flush()
             except Exception as exc:
+                stream_filter.flush()
                 if self.current_plan:
                     active = self.current_plan.get_active_task()
                     if active:
@@ -863,8 +902,9 @@ class AgentLoop:
             ))
 
             # Handle Case Where Model Produced No Tool Calls
+            directive = extract_speech_directives(response.text)
             if not response.tool_calls:
-                final_text = response.text.strip()
+                final_text = directive.display_text.strip()
 
                 # 1. Anti-Hallucination Guard: Intercept "no task in your message" responses
                 if _is_no_task_hallucination(final_text) and self.current_run and (self.current_run.completed_tools or self.current_run.target_deliverables or intent != IntentKind.CHAT) and conversational_nudge_count < 5:
@@ -915,18 +955,18 @@ class AgentLoop:
 
                     verif_types = [t.verification for t in self.current_plan.tasks if getattr(t, "verification", "none") != "none"]
                     verif_type = "+".join(sorted(set(verif_types))) if verif_types else "auto"
-                    
+
                     goal_lower = str(self.current_plan.goal or user_query).lower()
                     has_mutation_verbs = any(kw in goal_lower for kw in ("create", "build", "scaffold", "website", "webapp", "app", "implement", "make", "develop", "write", "generate", "code"))
                     is_read_only_goal = any(kw in goal_lower for kw in ("read", "check", "inspect", "what is", "tell me", "explain", "find", "show", "search", "version")) and not has_mutation_verbs
                     is_mutation_task = has_mutation_verbs or any(any(kw in t.title.lower() for kw in ("create", "write", "edit", "modify", "scaffold", "html", "webapp", "build", "implement", "develop", "setup", "install", "add", "make", "generate", "code")) for t in self.current_plan.tasks)
                     require_files = not is_read_only_goal and (is_mutation_task or len(self.workspace_tracker.created_files) > 0 or len(self.workspace_tracker.modified_files) > 0)
-                    browser_done = any("browser" in e.get("kind", "").lower() for t in self.current_plan.tasks for e in t.evidence)
+                    browser_evidence = self._collect_browser_evidence()
                     self.last_verification = self.verification_manager.verify_workspace(
                         changed,
                         verification_type=verif_type,
                         require_files=require_files,
-                        browser_performed=browser_done,
+                        browser_evidence=browser_evidence,
                         turn_id=turn_id,
                     )
 
@@ -1057,9 +1097,32 @@ class AgentLoop:
                     if all_exist:
                         self.current_run.status = "completed"
 
-                final = final_text or "Task execution finished."
+                if self.current_plan and self.current_plan.state == AgentState.FAILED:
+                    failed_titles = [task.title for task in self.current_plan.get_failed_tasks()]
+                    details = []
+                    if failed_titles:
+                        details.append("blocked at: " + ", ".join(failed_titles[:3]))
+                    if self.last_verification and not self.last_verification.passed:
+                        details.append("verification: " + self.last_verification.summary)
+                    detail = "; " + "; ".join(details) if details else ""
+                    final = (
+                        f"Task incomplete: {self.current_plan.completed_count}/{self.current_plan.total_count} "
+                        f"plan steps completed{detail}."
+                    )
+                elif final_text:
+                    final = final_text
+                elif self.current_plan and self.current_plan.state == AgentState.COMPLETED:
+                    final = "Task completed and verified, but no summary text was returned."
+                else:
+                    final = "No final response was produced; task completion is unconfirmed."
                 history.append(ChatMessage(role="assistant", content=final))
                 self.emit(RuntimeEvent(EventKind.TURN_COMPLETED, {"steps": step + 1, "final": final}, turn_id))
+                plan_allows_speech = not self.current_plan or self.current_plan.state == AgentState.COMPLETED
+                if directive.speech_text and plan_allows_speech and self.on_speech:
+                    try:
+                        self.on_speech(directive.speech_text)
+                    except Exception as exc:
+                        logger.debug("Marked speech delivery failed: %s", exc)
                 profiler.finish()
                 try:
                     from kratos_agent.memory import get_memory_manager
@@ -1069,7 +1132,7 @@ class AgentLoop:
                 return final, history
 
             # Assistant Message with Tool Calls
-            assistant_content = response.text or ""
+            assistant_content = directive.display_text or ""
             if not assistant_content and response.tool_calls:
                 call_strs = [f"call:{c.name}{json.dumps(c.arguments)}" for c in response.tool_calls]
                 assistant_content = "\n".join(call_strs)

@@ -8,9 +8,7 @@ from kratos_agent.output.user_output import (
 )
 from kratos_agent.output.voice import (
     TTSQueue,
-    VoiceBuffer,
     get_tts_queue,
-    get_voice_buffer,
 )
 
 __all__ = [
@@ -19,9 +17,7 @@ __all__ = [
     "TTSQueue",
     "TerminalRenderer",
     "UserOutputFilter",
-    "VoiceBuffer",
     "get_terminal_renderer",
     "get_tts_queue",
     "get_user_output_filter",
-    "get_voice_buffer",
 ]

@@ -1,202 +1,147 @@
-import unittest
-from unittest.mock import patch, MagicMock
+from __future__ import annotations
+
+import json
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
 import requests
 
+from kratos_agent.brain.brain import get_agent_response
+from kratos_agent.brain.tool_calls import extract_tool_calls_from_text
+from kratos_agent.brain.client import BrainClient
 from kratos_agent.brain.config import (
     DEFAULT_CHAT_ENDPOINT,
-    BrainConnectionError,
     BrainBadRequestError,
+    BrainConnectionError,
     BrainError,
+    get_model,
 )
-from kratos_agent.brain.client import BrainClient
-from kratos_agent.brain.chat_model import extract_tool_calls_from_text
-from kratos_agent.brain.fetch_model import get_model
-from kratos_agent.brain.brain import get_agent_response
 
 
-class BrainTransportTests(unittest.TestCase):
-    def setUp(self):
-        self.client = BrainClient(endpoint_url=DEFAULT_CHAT_ENDPOINT)
+@pytest.fixture(autouse=True)
+def kratos_model_env(monkeypatch):
+    monkeypatch.setenv("KRATOS_MODEL", "kratos-reasoning-v1")
 
-    def test_build_envelope_format(self):
-        envelope = self.client.build_envelope(
-            "antigravity/gemini-3.7-flash-high",
-            [{"role": "user", "content": "hello"}],
-            system_instruction="system test",
-            stream=True,
-        )
-        self.assertEqual(envelope["model"], "antigravity/gemini-3.7-flash-high")
-        self.assertTrue(envelope["stream"])
-        self.assertEqual(envelope["messages"][0]["role"], "system")
-        self.assertEqual(envelope["messages"][0]["content"], "system test")
-        self.assertEqual(envelope["messages"][1]["role"], "user")
-        self.assertEqual(envelope["messages"][1]["content"], "hello")
 
-    def test_session_trust_env_disabled(self):
-        session = self.client.session
-        self.assertFalse(session.trust_env)
+def _response(body: dict, status: int = 200) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status
+    response.json.return_value = body
+    response.text = json.dumps(body)
+    response.iter_lines.return_value = []
+    response.__enter__.return_value = response
+    return response
 
-    @patch("requests.Session.post")
-    def test_streaming_sse_success(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = [
-            'data: {"choices": [{"delta": {"content": "Hello "}}]}',
-            'data: {"choices": [{"delta": {"content": "Brain!"}}]}',
-            'data: [DONE]'
-        ]
-        mock_post.return_value.__enter__.return_value = mock_resp
 
-        result = self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}])
-        self.assertEqual(result, "Hello Brain!")
-
-    @patch("requests.Session.post")
-    def test_non_streaming_json_fallback(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = []
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Non-streaming answer"}}]
-        }
-        mock_post.return_value.__enter__.return_value = mock_resp
-
-        result = self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}])
-        self.assertEqual(result, "Non-streaming answer")
-
-    @patch.object(BrainClient, "request_non_streaming_full", return_value=("Recovered answer", []))
-    @patch("requests.Session.post")
-    def test_empty_stream_recovers_with_non_streaming_completion(self, mock_post, mock_fallback):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = []
-        mock_resp.json.side_effect = ValueError("response was an empty SSE body")
-        mock_post.return_value.__enter__.return_value = mock_resp
-
-        result = self.client.generate(
-            "ds-web/deepseek-v4-pro-think",
-            [{"role": "user", "content": "create a small file"}],
-            max_retries=0,
-        )
-
-        self.assertEqual(result, "Recovered answer")
-        mock_fallback.assert_called_once()
-
-    @patch.object(
-        BrainClient,
-        "request_non_streaming_full",
-        return_value=("", [{"id": "call-1", "name": "run_terminal_command", "args": {"command": "pwd"}}]),
+def test_build_request_contains_configured_kratos_model_and_messages():
+    client = BrainClient(endpoint_url=DEFAULT_CHAT_ENDPOINT)
+    envelope = client.build_envelope(
+        "kratos-reasoning-v1",
+        [{"role": "user", "content": "hello"}],
+        system_instruction="system test",
+        stream=True,
     )
-    @patch("requests.Session.post")
-    def test_empty_stream_recovers_native_tool_call(self, mock_post, mock_fallback):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = []
-        mock_resp.json.side_effect = ValueError("response was an empty SSE body")
-        mock_post.return_value.__enter__.return_value = mock_resp
 
-        result = self.client.generate(
-            "ds-web/deepseek-v4-pro-think",
-            [{"role": "user", "content": "inspect the workspace"}],
-            max_retries=0,
-        )
-
-        self.assertIn("call:run_terminal_command", result)
-        self.assertIn("pwd", result)
-        mock_fallback.assert_called_once()
-
-    @patch("requests.Session.post")
-    def test_direct_non_streaming_mode(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "Direct response"}}]
-        }
-        mock_post.return_value = mock_resp
-
-        result = self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}], stream=False)
-        self.assertEqual(result, "Direct response")
-
-    @patch("requests.Session.post")
-    def test_connection_error_raises_friendly_error(self, mock_post):
-        mock_post.side_effect = requests.exceptions.ConnectionError("Connection refused")
-
-        with self.assertRaises(BrainConnectionError) as ctx:
-            self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}], max_retries=1)
-        self.assertIn("Brain LLM is not running on", str(ctx.exception))
-        self.assertIn("connection refused", str(ctx.exception))
-
-    @patch("requests.Session.post")
-    def test_bad_request_error_raises_without_retry(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 400
-        mock_resp.json.return_value = {"error": {"message": "Invalid model parameter"}}
-        mock_resp.text = "Invalid model parameter"
-        mock_post.return_value.__enter__.return_value = mock_resp
-
-        with self.assertRaises(BrainBadRequestError) as ctx:
-            self.client.generate("antigravity/gemini-3.7-flash-high", [{"role": "user", "content": "hi"}], max_retries=2)
-        self.assertIn("Invalid model request to Brain", str(ctx.exception))
-        self.assertEqual(mock_post.call_count, 1)  # No retry on 400
-
-    @patch("requests.Session.post")
-    def test_wrapped_upstream_auth_error_is_not_retried(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 502
-        mock_resp.json.return_value = {
-            "error": {"message": "Provider rejected token: Authorization Failed (invalid token)"}
-        }
-        mock_resp.text = "upstream authentication failure"
-        mock_post.return_value.__enter__.return_value = mock_resp
-
-        with self.assertRaises(BrainError) as ctx:
-            self.client.generate(
-                "ds-web/deepseek-v4-pro-think",
-                [{"role": "user", "content": "hello"}],
-                max_retries=2,
-            )
-        self.assertIn("upstream authentication failed", str(ctx.exception))
-        self.assertEqual(mock_post.call_count, 1)
-
-    def test_tool_calling_extraction_from_coding_output(self):
-        raw_text = 'call:write_file{file_path: "index.html", content: "<h1>Ben 10 WebApp</h1>"}'
-        text, tool_calls = extract_tool_calls_from_text(raw_text)
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0]["name"], "write_file")
-        self.assertEqual(tool_calls[0]["args"]["file_path"], "index.html")
-        self.assertIn("Ben 10", tool_calls[0]["args"]["content"])
-
-    def test_tool_calling_extraction_with_nested_css_and_js(self):
-        raw_text = 'I will create the HTML file.\ncall:write_file{"file_path": "ben10.html", "content": "<style>body { background: #000; } .card { border: 1px solid red; }</style><script>function test() { return { ok: true }; }</script>"}\nDone!'
-        text, tool_calls = extract_tool_calls_from_text(raw_text)
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0]["name"], "write_file")
-        self.assertEqual(tool_calls[0]["args"]["file_path"], "ben10.html")
-        self.assertIn("function test() { return { ok: true }; }", tool_calls[0]["args"]["content"])
-        self.assertIn("I will create the HTML file.", text)
-        self.assertIn("Done!", text)
-        self.assertNotIn("call:write_file", text)
-
-    @patch("requests.Session.get")
-    def test_fetch_model_endpoint(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "data": [
-                {"id": "custom-brain-model-1"},
-                {"id": "custom-brain-model-2"}
-            ]
-        }
-        mock_get.return_value = mock_resp
-
-        models = get_model(endpoint="http://127.0.0.1:20128/v1/models")
-        self.assertEqual(models, ["custom-brain-model-1", "custom-brain-model-2"])
-
-    @patch.object(BrainClient, "generate")
-    def test_get_agent_response_function(self, mock_generate):
-        mock_generate.return_value = "Hello from Brain Agent!"
-        resp = get_agent_response("Hi there")
-        self.assertEqual(resp, "Hello from Brain Agent!")
+    assert envelope["model"] == "kratos-reasoning-v1"
+    assert envelope["stream"] is True
+    assert envelope["messages"] == [
+        {"role": "system", "content": "system test"},
+        {"role": "user", "content": "hello"},
+    ]
+    assert client.session.trust_env is False
 
 
-if __name__ == "__main__":
-    unittest.main()
+@patch("requests.Session.post")
+def test_streaming_sse_success(mock_post):
+    response = _response({})
+    response.iter_lines.return_value = [
+        'data: {"choices": [{"delta": {"content": "Hello "}}]}',
+        'data: {"choices": [{"delta": {"content": "Kratos!"}}]}',
+        "data: [DONE]",
+    ]
+    mock_post.return_value = response
+
+    result = BrainClient().generate("kratos-reasoning-v1", [{"role": "user", "content": "hi"}])
+    assert result == "Hello Kratos!"
+
+
+@patch("requests.Session.post")
+def test_empty_stream_retries_same_model_as_json(mock_post):
+    empty_sse = _response({})
+    empty_sse.iter_lines.return_value = []
+    json_response = _response({"choices": [{"message": {"content": "Recovered answer"}}]})
+    mock_post.side_effect = [empty_sse, json_response]
+
+    result = BrainClient().generate(
+        "kratos-reasoning-v1", [{"role": "user", "content": "inspect the workspace"}], max_retries=0
+    )
+
+    assert result == "Recovered answer"
+    assert mock_post.call_count == 2
+    assert {call.kwargs["json"]["model"] for call in mock_post.call_args_list} == {"kratos-reasoning-v1"}
+
+
+@patch("requests.Session.post")
+def test_structured_tool_calls_are_preserved_by_compatibility_client(mock_post):
+    mock_post.return_value = _response({
+        "choices": [{
+            "message": {
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "run_terminal_command", "arguments": '{"command":"pwd"}'},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }]
+    })
+
+    result = BrainClient().generate(
+        "kratos-reasoning-v1", [{"role": "user", "content": "inspect the workspace"}], stream=False
+    )
+
+    assert result.startswith("call:run_terminal_command")
+    assert '"pwd"' in result
+
+
+@patch("requests.Session.post")
+def test_gateway_errors_are_visible_and_not_retried(mock_post):
+    response = _response({"error": {"message": "invalid model parameter"}}, status=400)
+    mock_post.return_value = response
+
+    with pytest.raises(BrainBadRequestError, match="Invalid Kratos model request"):
+        BrainClient().generate("kratos-reasoning-v1", [{"role": "user", "content": "hi"}], max_retries=2)
+    assert mock_post.call_count == 1
+
+
+@patch("requests.Session.post", side_effect=requests.exceptions.ConnectionError("Connection refused"))
+def test_gateway_outage_is_reported_without_fallback(mock_post):
+    with pytest.raises(BrainConnectionError, match="Kratos model gateway is unreachable"):
+        BrainClient().generate("kratos-reasoning-v1", [{"role": "user", "content": "hi"}], max_retries=0)
+    assert mock_post.call_count == 1
+
+
+@patch("requests.Session.get")
+def test_model_catalog_filters_everything_except_configured_kratos_id(mock_get):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"data": [{"id": "kratos-reasoning-v1"}, {"id": "claude-model"}]}
+    mock_get.return_value = response
+
+    assert get_model(endpoint="http://127.0.0.1:20128/v1/models", refresh=True) == ["kratos-reasoning-v1"]
+
+
+def test_get_agent_response_uses_compatibility_client(monkeypatch):
+    monkeypatch.setattr(BrainClient, "generate", lambda _self, **_kwargs: "Hello from Kratos")
+    assert get_agent_response("Hi there") == "Hello from Kratos"
+
+
+def test_tool_calling_extraction_from_coding_output():
+    raw_text = 'call:write_file{file_path: "index.html", content: "<h1>Kratos</h1>"}'
+    text, tool_calls = extract_tool_calls_from_text(raw_text)
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["name"] == "write_file"
+    assert tool_calls[0]["args"]["file_path"] == "index.html"
+    assert "Kratos" in tool_calls[0]["args"]["content"]

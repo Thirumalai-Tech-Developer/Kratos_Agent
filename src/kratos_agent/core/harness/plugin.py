@@ -1,4 +1,4 @@
-"""DeepSeek Harness - Plugin abstraction and lifecycle management."""
+"""Kratos Harness plugin abstraction and lifecycle management."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class PluginMetadata:
 
 
 class HarnessPlugin:
-    """Base class for all DeepSeek Harness plugins following the Cordis paradigm."""
+    """Base class for Kratos Harness plugins following the Cordis paradigm."""
 
     metadata: PluginMetadata
 

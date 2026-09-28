@@ -1401,48 +1401,6 @@
             }
         },
         {
-            "name": "external_agent_discover",
-            "description": "Discover installed coding/agent CLIs available for delegation.",
-            "func_name": "external_agent_discover",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "external_agent_run",
-            "description": "Run an installed external coding agent through a non-interactive CLI interface.",
-            "func_name": "external_agent_run",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "agent": {
-                        "type": "string",
-                        "description": "External agent name such as claude, codex, or gemini"
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "description": "Task to delegate"
-                    },
-                    "cwd": {
-                        "type": "string",
-                        "description": "Optional working directory"
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Maximum execution time in seconds"
-                    }
-                },
-                "required": [
-                    "agent",
-                    "prompt"
-                ],
-                "additionalProperties": false
-            }
-        },
-        {
             "name": "fetch_url",
             "description": "Fetches and extracts clean readable text from a URL (useful for real-time library documentation, API specs, and online guides).",
             "func_name": "fetch_url",

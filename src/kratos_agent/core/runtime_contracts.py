@@ -181,6 +181,7 @@ class ToolSpec:
     permission: ToolPermission
     timeout_seconds: int = 300
     source: str = "builtin"
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

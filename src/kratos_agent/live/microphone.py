@@ -425,7 +425,7 @@ class MicrophoneListener:
 
         use_sounddevice = False
         try:
-            import sounddevice as sd
+            import sounddevice as sd  # noqa: F401 - successful import selects this backend.
             use_sounddevice = True
         except ImportError:
             pass

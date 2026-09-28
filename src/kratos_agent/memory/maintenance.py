@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,7 @@ from kratos_agent.core.cognitive_memory import cognitive_memory
 from kratos_agent.core.compactor import ConversationCompactor
 from kratos_agent.core.d1_client import d1_db
 from kratos_agent.memory.consolidation import consolidate_memories
-from kratos_agent.memory.decay import DECAY_RATES, apply_decay
+from kratos_agent.memory.decay import apply_decay
 from kratos_agent.memory.models import MemoryLayer, MemoryRecord, MemoryScope
 from kratos_agent.memory.store import MemoryStore
 

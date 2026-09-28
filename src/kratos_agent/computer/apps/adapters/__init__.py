@@ -1,8 +1,6 @@
 """Built-in application adapters for major desktop applications."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 from kratos_agent.computer.apps.adapters.base import ApplicationAdapter
 
 

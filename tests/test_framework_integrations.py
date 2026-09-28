@@ -1,14 +1,8 @@
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-
-from kratos_agent.core.framework_runtime import ExternalAgentFrameworks
 from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.runtime_contracts import ToolCall, ToolPermission, ToolSpec
-from kratos_agent.core.skills import SkillManager
 from kratos_agent.core.tool_runtime import ToolRegistry
 
 
@@ -17,7 +11,9 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def test_mcp_stdio_server_discovery_and_tool_call(tmp_path):
+def test_mcp_stdio_server_discovery_and_tool_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRATOS_COMPUTER_USE_MCP", "false")
+    monkeypatch.setenv("KRATOS_OPENPETS_MCP", "false")
     server_file = tmp_path / "mcp_server.py"
     server_file.write_text(
         "from mcp.server import MCPServer\n"
@@ -46,7 +42,7 @@ def test_mcp_stdio_server_discovery_and_tool_call(tmp_path):
     assert "echo:hello" in result.content
 
 
-def test_importing_claude_mcp_config_references_file_without_copying_secrets(tmp_path):
+def test_importing_user_mcp_config_references_file_without_copying_secrets(tmp_path):
     workspace = tmp_path / "repo"
     workspace.mkdir()
     config_path = tmp_path / ".claude.json"
@@ -62,11 +58,11 @@ def test_importing_claude_mcp_config_references_file_without_copying_secrets(tmp
     assert "private" not in local_config["mcpServers"]
 
 
-def test_openclaw_json5_config_is_imported(tmp_path):
-    config_path = tmp_path / ".openclaw" / "openclaw.json"
-    config_path.parent.mkdir(parents=True)
+def test_user_selected_json5_mcp_config_is_imported(tmp_path):
+    config_path = tmp_path / "mcp-config.json5"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        "{ // OpenClaw supports JSON5\n mcp: { servers: { docs: { type: 'http', url: 'https://example.invalid/mcp' } } } }",
+        "{ // JSON5 MCP configuration\n mcp: { servers: { docs: { type: 'http', url: 'https://example.invalid/mcp' } } } }",
         encoding="utf-8",
     )
     manager = McpManager(tmp_path / ".kratos" / "mcp.json", tmp_path)
@@ -96,56 +92,6 @@ def test_openclaw_plugin_placeholders_are_expanded_without_mutating_bundle(tmp_p
     assert server.args == [str(bundle / "server.py"), str(tmp_path / ".kratos" / "plugin-data" / "plugin")]
     assert server.cwd == str(bundle)
     assert json.loads((bundle / "mcp.json").read_text(encoding="utf-8")) == original
-
-
-def test_framework_bundle_import_loads_skills_and_mcp_declarations(tmp_path):
-    bundle = tmp_path / "claude-plugin"
-    write_json(bundle / ".mcp.json", {"mcpServers": {"bundle": {"command": "server"}}})
-    (bundle / "skills" / "review").mkdir(parents=True)
-    (bundle / "skills" / "review" / "SKILL.md").write_text(
-        "---\nname: review\ndescription: Review changes\n---\nUse a concise checklist.\n", encoding="utf-8"
-    )
-    (bundle / "commands").mkdir(parents=True)
-    (bundle / "commands" / "security-review.md").write_text(
-        "---\ndescription: Review security-sensitive changes\n---\nCheck validation and secret handling.\n", encoding="utf-8"
-    )
-    mcp = McpManager(tmp_path / ".kratos" / "mcp.json", tmp_path)
-    skills = SkillManager(tmp_path / ".kratos" / "skills")
-    bridge = ExternalAgentFrameworks(tmp_path)
-
-    result = bridge.import_integration(str(bundle), mcp, skills)
-
-    assert result["mcp_configs"] == [str((bundle / ".mcp.json").resolve())]
-    assert "bundle" in mcp.servers
-    assert skills.skills["review"].path == bundle / "skills" / "review"
-    assert "security-review" in skills.skills
-    assert "secret handling" in skills.skills["security-review"].content
-
-
-def test_delegate_uses_existing_framework_cli_without_a_shell(monkeypatch, tmp_path):
-    bridge = ExternalAgentFrameworks(tmp_path)
-    monkeypatch.setattr("kratos_agent.core.framework_runtime.shutil.which", lambda name: "openclaw.cmd" if name == "openclaw" else None)
-    captured = {}
-
-    def fake_run(command, **kwargs):
-        captured["command"] = command
-        captured.update(kwargs)
-        return SimpleNamespace(returncode=0, stdout='{"ok":true,"result":"finished"}', stderr="")
-
-    monkeypatch.setattr("kratos_agent.core.framework_runtime.subprocess.run", fake_run)
-    result = bridge.delegate("openclaw", "make a tiny static page", timeout_seconds=90)
-
-    assert json.loads(result)["ok"] is True
-    assert captured["command"][:3] == ["openclaw.cmd", "agent", "exec"]
-    assert captured["shell"] is False
-    assert captured["cwd"] == tmp_path.resolve()
-
-
-def test_delegate_reports_missing_framework_without_installing_it(monkeypatch, tmp_path):
-    bridge = ExternalAgentFrameworks(tmp_path)
-    monkeypatch.setattr("kratos_agent.core.framework_runtime.shutil.which", lambda _name: None)
-    with pytest.raises(RuntimeError, match="not installed"):
-        bridge.delegate("claude-code", "review this project")
 
 
 def test_runtime_discovery_includes_relevant_mcp_tools_not_in_static_index():

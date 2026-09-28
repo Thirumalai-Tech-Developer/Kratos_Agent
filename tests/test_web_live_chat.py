@@ -32,7 +32,7 @@ class TestWebLiveChatAndTelemetry(unittest.TestCase):
 
         # Mock runtime
         self.mock_runtime = MagicMock()
-        self.mock_runtime.model_name = "antigravity/gemini-3.7-flash-high"
+        self.mock_runtime.model_name = "kratos-test-model"
         self.mock_runtime.workspace = self.base_path
         self.mock_runtime.memory = self.memory
         mock_tool = MagicMock()
@@ -81,7 +81,7 @@ class TestWebLiveChatAndTelemetry(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base_url}/api/telemetry") as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode())
-            self.assertEqual(data["model"], "antigravity/gemini-3.7-flash-high")
+            self.assertEqual(data["model"], "kratos-test-model")
             self.assertEqual(data["tools_count"], 1)
 
     def test_chat_sync_endpoint(self):

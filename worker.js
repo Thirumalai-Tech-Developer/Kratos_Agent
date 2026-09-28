@@ -142,7 +142,7 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
-    model TEXT NOT NULL DEFAULT 'antigravity/gemini-3.7-flash-high',
+    model TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_status TEXT NOT NULL DEFAULT 'idle',
@@ -321,6 +321,19 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function getKratosConfig(env) {
+  const configuredUrl = (env.KRATOS_CHAT_ENDPOINT || env.KRATOS_BASE_URL || "").trim().replace(/\/+$/, "");
+  let endpoint = configuredUrl;
+  if (endpoint && !endpoint.endsWith("/chat/completions")) {
+    endpoint += endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions";
+  }
+  return {
+    endpoint,
+    model: (env.KRATOS_MODEL || "").trim(),
+    apiKey: (env.KRATOS_API_KEY || "").trim()
+  };
+}
+
 function formatToolActionLabel(name, args = {}) {
   if (name === "read_file") {
     const fp = (args.file_path || args.path || "").trim();
@@ -399,8 +412,8 @@ async function handleApi(request, env, url) {
   // 2. GET /api/telemetry
   if (path === "/api/telemetry" && method === "GET") {
     return jsonResponse({
-      model: env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2",
-      normal_mode_model: env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2",
+      model: env.KRATOS_MODEL || null,
+      normal_mode_model: env.KRATOS_MODEL || null,
       workspace: "Cloudflare Edge Workers",
       tools_count: TOOLS_LIST.length,
       active_session: null,
@@ -577,9 +590,7 @@ async function handleApi(request, env, url) {
     }
 
     const defaultTitle = prompt.length > 40 ? prompt.slice(0, 40) + "..." : prompt;
-    const activeModel = isAgentMode
-      ? (env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
-      : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2");
+    const activeModel = env.KRATOS_MODEL || "";
 
     // Ensure session row exists in D1
     if (env.DB) {
@@ -675,31 +686,20 @@ async function handleApi(request, env, url) {
     return jsonResponse({
       response: reply,
       session_id: sessionId,
-      model: isAgentMode ? (env.AGENT_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2") : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
+      model: env.KRATOS_MODEL || null
     });
   }
 
   // 13. GET /api/diag (Live Edge Diagnostics & LLM Health Probe)
   if (path === "/api/diag" && method === "GET") {
-    let endpoint = (env.CHAT_ENDPOINT || env.DEEPSEEK_BASE_URL || env.OPENAI_BASE_URL || env.MODEL_ENDPOINT || "").trim();
-    const apiKey = (env.DEEPSEEK_API_KEY || env.OMNI_KEY || env.OPENAI_API_KEY || env.API_KEY || "").trim();
-    let model = (env.NORMAL_MODE_MODEL || env.DEEPSEEK_MODEL || "deepseek-chat").trim();
-
-    if (env.DEEPSEEK_API_KEY && !endpoint) {
-      endpoint = "https://api.deepseek.com/chat/completions";
-      model = "deepseek-chat";
-    }
-
-    if (endpoint && !endpoint.endsWith("/chat/completions")) {
-      endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
-    }
+    const { endpoint, model, apiKey } = getKratosConfig(env);
 
     let testResult = "pending";
     let latencyMs = 0;
     const start = Date.now();
 
-    if (!endpoint) {
-      testResult = "No CHAT_ENDPOINT or DEEPSEEK_API_KEY configured in .env / Cloudflare secrets";
+    if (!endpoint || !model) {
+      testResult = "Set KRATOS_BASE_URL (or KRATOS_CHAT_ENDPOINT) and KRATOS_MODEL in Cloudflare configuration";
     } else {
       try {
         let isNonStandardPort = false;
@@ -717,10 +717,8 @@ async function handleApi(request, env, url) {
           messages: [{ role: "user", content: "ping" }],
           max_tokens: 5
         });
-        const requestHeaders = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        };
+        const requestHeaders = { "Content-Type": "application/json" };
+        if (apiKey) requestHeaders.Authorization = `Bearer ${apiKey}`;
 
         if (isNonStandardPort) {
           res = await fetchOverSocket(endpoint, {
@@ -753,15 +751,13 @@ async function handleApi(request, env, url) {
     }
 
     return jsonResponse({
-      status: endpoint ? "online" : "pending_configuration",
+      status: endpoint && model ? "online" : "pending_configuration",
       edge_runtime: "Cloudflare Workers",
       resolved_config: {
-        endpoint: endpoint || "(none - configure in .env / Cloudflare Dashboard)",
+        endpoint: endpoint || "(not configured)",
         model,
         api_key_masked: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "none",
-        has_gemini_key: Boolean(env.GEMINI_API_KEY),
-        has_workers_ai: Boolean(env.AI),
-        has_deepseek_key: Boolean(env.DEEPSEEK_API_KEY || env.OMNI_KEY),
+        has_kratos_api_key: Boolean(apiKey),
         has_d1_db: Boolean(env.DB),
         runner_url: env.RUNNER_URL || env.AGENT_ENDPOINT || "none (standalone edge)"
       },
@@ -1323,7 +1319,7 @@ async function fetchOverSocket(urlStr, options) {
   };
 }
 
-// Incremental TCP socket streaming for non-standard ports (e.g. OmniRoute port 20128)
+// Incremental TCP socket streaming for non-standard ports (e.g. a local Kratos gateway)
 function appendBytes(a, b) {
   const c = new Uint8Array(a.length + b.length);
   c.set(a, 0);
@@ -1402,7 +1398,7 @@ async function streamOverSocket(urlStr, options, onToken, onReasoning) {
           const data = JSON.parse(payload);
           const delta = data.choices?.[0]?.delta;
           if (delta) {
-            // Check reasoning deltas (DeepSeek / Gemini / Claude / OpenRouter)
+            // Read optional reasoning metadata from the gateway's compatible stream.
             const reasoning = delta.reasoning_content || delta.reasoning || delta.thought || delta.thinking;
             if (reasoning && onReasoning) {
               onReasoning(reasoning);
@@ -1580,24 +1576,16 @@ async function streamOverFetch(endpoint, options, onToken, onReasoning) {
   return accumulatedText;
 }
 
-// High-level streaming responder that dispatches to socket or fetch and falls back to generateAgentResponse
+// Stream from the configured Kratos model, using a non-streaming request if streaming fails.
 async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = null, onReasoning = null, historyMessages = []) {
   const systemInstruction = isAgentMode
     ? KRATOS_AGENT_MODE_SYSTEM_PROMPT
     : "You are Kratos, an elite autonomous AI coding assistant. Answer questions directly, explain concepts clearly, write clean production code, and solve technical challenges with Spartan precision.";
 
-  let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();
-  const apiKey = (env.OMNI_KEY || env.API_KEY || env.OPENAI_API_KEY || "").trim();
-  let model = isAgentMode
-    ? (env.AGENT_MODEL || env.BRAIN_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
-    : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || env.MODEL || "ds-web/DeepSeek-V3.2").trim();
+  const { endpoint, model, apiKey } = getKratosConfig(env);
 
-  if (endpoint && !endpoint.endsWith("/chat/completions")) {
-    endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
-  }
-
-  if (!endpoint) {
-    const errorMsg = "⚠️ [Configuration Alert]: No CHAT_ENDPOINT configured in .env or Cloudflare secrets.";
+  if (!endpoint || !model) {
+    const errorMsg = "⚠️ [Configuration Alert]: Set KRATOS_BASE_URL (or KRATOS_CHAT_ENDPOINT) and KRATOS_MODEL in the Worker configuration.";
     if (onToken) onToken(errorMsg);
     return errorMsg;
   }
@@ -1616,10 +1604,8 @@ async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = n
     stream: true
   });
 
-  const requestHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey}`
-  };
+  const requestHeaders = { "Content-Type": "application/json" };
+  if (apiKey) requestHeaders.Authorization = `Bearer ${apiKey}`;
 
   let isNonStandardPort = false;
   try {
@@ -1652,10 +1638,10 @@ async function streamAgentResponse(prompt, env, isAgentMode = false, onToken = n
       }
     }
   } catch (streamErr) {
-    console.warn("Live stream attempt encountered error, falling back to standard generation:", streamErr.message || streamErr);
+    console.warn("Kratos stream failed; retrying the same model with a non-streaming request:", streamErr.message || streamErr);
   }
 
-  // Fallback to non-streaming generateAgentResponse if streaming produced no content or failed
+  // Retry the same configured model without streaming if the stream returned no content.
   const fallback = await generateAgentResponse(prompt, env, isAgentMode);
   if (onToken) onToken(fallback);
   return fallback;
@@ -1668,23 +1654,13 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
     ? KRATOS_AGENT_MODE_SYSTEM_PROMPT
     : "You are Kratos, an elite autonomous AI coding assistant. Answer questions directly, explain concepts clearly, write clean production code, and solve technical challenges with Spartan precision.";
 
-  // 1. Resolve OmniRoute credentials strictly from .env / Cloudflare secrets
-  let endpoint = (env.CHAT_ENDPOINT || env.BRAIN_BASE_URL || env.OMNIROUTE_BASE_URL || env.OPENAI_BASE_URL || "").trim();
-  const apiKey = (env.OMNI_KEY || env.API_KEY || env.OPENAI_API_KEY || "").trim();
-  let model = isAgentMode
-    ? (env.AGENT_MODEL || env.BRAIN_MODEL || env.OMNIROUTE_MODEL || "ds-web/DeepSeek-V3.2")
-    : (env.NORMAL_MODE_MODEL || env.OMNIROUTE_MODEL || env.MODEL || "ds-web/DeepSeek-V3.2").trim();
+  const { endpoint, model, apiKey } = getKratosConfig(env);
 
-  // If endpoint is a base URL without /chat/completions, append it
-  if (endpoint && !endpoint.endsWith("/chat/completions")) {
-    endpoint = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/v1") ? "/chat/completions" : "/v1/chat/completions");
+  if (!endpoint || !model) {
+    errors.push("Set KRATOS_BASE_URL (or KRATOS_CHAT_ENDPOINT) and KRATOS_MODEL in the Worker configuration.");
   }
 
-  if (!endpoint) {
-    errors.push("No CHAT_ENDPOINT configured in .env or Cloudflare secrets. Set CHAT_ENDPOINT to your OmniRoute endpoint.");
-  }
-
-  if (endpoint) {
+  if (endpoint && model) {
     const requestBody = JSON.stringify({
       model,
       messages: [
@@ -1695,10 +1671,8 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
       max_tokens: 4096
     });
 
-    const requestHeaders = {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
-    };
+    const requestHeaders = { "Content-Type": "application/json" };
+    if (apiKey) requestHeaders.Authorization = `Bearer ${apiKey}`;
 
     // Detect non-standard port (Cloudflare fetch() proxy blocks ports like 20128 with 403)
     let isNonStandardPort = false;
@@ -1724,13 +1698,13 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
           if (content && content.trim()) {
             return content.trim();
           }
-          errors.push(`OmniRoute (socket) returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
+          errors.push(`Kratos gateway (socket) returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
         } else {
           const sockText = await sockRes.text().catch(() => "");
-          errors.push(`OmniRoute (socket) HTTP ${sockRes.status}: ${sockText.slice(0, 150)}`);
+          errors.push(`Kratos gateway (socket) HTTP ${sockRes.status}: ${sockText.slice(0, 150)}`);
         }
       } catch (sockErr) {
-        errors.push(`OmniRoute socket connect: ${sockErr.message || String(sockErr)}`);
+        errors.push(`Kratos gateway socket connection: ${sockErr.message || String(sockErr)}`);
       }
     } else {
       // 2B. For standard ports (80/443): use normal fetch()
@@ -1751,13 +1725,13 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
           if (content && content.trim()) {
             return content.trim();
           }
-          errors.push(`OmniRoute returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
+          errors.push(`Kratos gateway returned empty content: ${JSON.stringify(data).slice(0, 120)}`);
         } else {
           const errText = await res.text().catch(() => "");
-          errors.push(`OmniRoute HTTP ${res.status}: ${errText.slice(0, 150)}`);
+          errors.push(`Kratos gateway HTTP ${res.status}: ${errText.slice(0, 150)}`);
         }
       } catch (err) {
-        errors.push(`OmniRoute fetch: ${err.message || String(err)}`);
+        errors.push(`Kratos gateway request: ${err.message || String(err)}`);
       }
     }
   }
@@ -1766,5 +1740,5 @@ async function generateAgentResponse(prompt, env, isAgentMode = false) {
   const errorBullets = errors.map(e => `• ${e}`).join("\n");
   const maskedKey = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "(none)";
 
-  return `⚠️ **[Kratos Edge // OmniRoute Connection Alert]**\n\nCould not receive a completion from OmniRoute on Cloudflare Edge.\n\n**Current Configuration:**\n• **Endpoint:** \`${endpoint || "(not configured)"}\`\n• **Model:** \`${model}\`\n• **API Key:** \`${maskedKey}\`\n• **Mode:** ${isAgentMode ? "Autonomous Agent" : "Normal Chat"}\n\n**Diagnostics:**\n${errorBullets}\n\n**How to Fix:**\n1. In your \`.env\` file (local) or Cloudflare Dashboard (Settings → Variables & Secrets), ensure:\n   - \`CHAT_ENDPOINT\` = your OmniRoute endpoint URL\n   - \`OMNI_KEY\` = your OmniRoute API key\n   - \`NORMAL_MODE_MODEL\` = your preferred model name\n2. For non-standard ports (e.g. 20128), this worker uses raw TCP sockets (\`cloudflare:sockets\`) to bypass Cloudflare's HTTP proxy restriction.\n3. Test connectivity at \`/api/diag\` in your browser.`;
+  return `⚠️ **[Kratos Edge // Gateway Connection Alert]**\n\nCould not receive a completion from the configured Kratos model on Cloudflare Edge.\n\n**Current Configuration:**\n• **Endpoint:** \`${endpoint || "(not configured)"}\`\n• **Model:** \`${model || "(not configured)"}\`\n• **API Key:** \`${maskedKey}\`\n• **Mode:** ${isAgentMode ? "Autonomous Agent" : "Normal Chat"}\n\n**Diagnostics:**\n${errorBullets}\n\n**How to Fix:**\n1. Configure \`KRATOS_BASE_URL\` (or \`KRATOS_CHAT_ENDPOINT\`), the exact \`KRATOS_MODEL\` ID, and optional \`KRATOS_API_KEY\` in Cloudflare variables and secrets.\n2. Cloudflare Workers must be able to reach the configured gateway URL. A localhost URL is available only to local development.\n3. Test connectivity at \`/api/diag\` in your browser.`;
 }

@@ -34,7 +34,7 @@ class VisionManager:
         self.out_queue = out_queue
         self.mode = mode.lower()
         self.status_hub = status_hub
-        # Gemini Live accepts video at up to one frame per second.
+        # Capture remains local; images are sent only with explicit Kratos requests.
         self.fps = min(1.0, max(0.1, float(fps)))
 
         self.camera = CameraCapture(
@@ -66,7 +66,7 @@ class VisionManager:
             "capture_online": health.available,
             "backend": health.backend or "MSS",
             "resolution": f"{health.width}x{health.height}" if health.available else "0x0",
-            "gemini_stream": "CONNECTED" if gemini_connected else "OFFLINE",
+            "gemini_stream": "SPEECH ONLY" if gemini_connected else "OFFLINE",
             "error": health.error,
         }
 
@@ -140,7 +140,7 @@ class VisionManager:
         return await self.screen.capture_now_and_queue()
 
     async def capture_camera_now(self) -> dict[str, Any] | None:
-        """Trigger an on-demand camera capture immediately and send to Gemini."""
+        """Trigger an on-demand camera capture and keep the frame local."""
         return await self.camera.capture_now_and_queue()
 
     async def capture_vision_now(self, preferred_source: str = "screen") -> Any | None:
@@ -150,11 +150,11 @@ class VisionManager:
         return await self.capture_screen_now()
 
     async def describe_screen_fallback(self, prompt: str = "Describe what you see on the screen in detail.") -> str:
-        """Local vision analysis using OmniRoute vision models without Gemini Live."""
+        """Analyze a locally captured screen image with the configured Kratos model."""
         return await self.analyze_vision(prompt=prompt, source="screen")
 
     async def analyze_vision(self, prompt: str = "Describe what you see in detail.", source: str = "screen") -> str:
-        """Captures screen or camera frame and analyzes it using the active/best OmniRoute vision model."""
+        """Capture locally and analyze with the one configured Kratos model."""
         jpeg_bytes = None
         width = 0
         height = 0
@@ -174,16 +174,11 @@ class VisionManager:
 
         try:
             from kratos_agent.brain.client import BrainClient
-            from kratos_agent.brain.config import get_default_model, is_vision_model, get_vision_models
+            from kratos_agent.brain.config import get_default_model
 
-            # Determine vision model
-            active_model = get_default_model()
-            if is_vision_model(active_model):
-                target_model = active_model
-            else:
-                # If active model is text-only (e.g. ds-web/deepseek-v4-pro), choose an OmniRoute vision model
-                vision_models = get_vision_models()
-                target_model = vision_models[0] if vision_models else "antigravity/gemini-3.7-flash-high"
+            target_model = get_default_model()
+            if not target_model:
+                return "Vision analysis unavailable: configure KRATOS_MODEL with an image-capable model on the Kratos gateway."
 
             b64_img = base64.b64encode(jpeg_bytes).decode("utf-8")
             client = BrainClient()
@@ -207,7 +202,7 @@ class VisionManager:
                 timeout=45.0,
                 stream=True,
             )
-            return text or f"Vision model {target_model} returned empty response."
+            return text or "The configured Kratos model returned an empty vision response."
         except Exception as e:
             logger.warning(f"[VisionManager] Vision model analysis error: {e}")
             return f"Captured {width}x{height} frame, but vision analysis failed: {e}"

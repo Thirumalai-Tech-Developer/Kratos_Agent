@@ -147,10 +147,10 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
 
         exec_argv = render_command_argv(command)
 
-    # Codex-style approval gate + safety blocklist
+    # Approval gate and dangerous-command blocklist.
     if not approval_gate.check_shell(command):
         return f"Shell command blocked by approval mode ({approval_gate.mode.value}): {command}"
-    # Claude Code-style pre-tool hook
+    # Run configured pre-tool hooks.
     hook_registry.fire("pre_tool_call", tool="run_terminal_command", input_str=command)
     step_tracker.start(f"Running: {command}")
     
@@ -227,7 +227,7 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
         full_output = (cmd_result.stdout or cmd_result.stderr).strip()
         lines = full_output.splitlines()
 
-        # Token-conscious output truncation (Kimi-Code / FCC / Codex pattern)
+        # Keep terminal output bounded while preserving useful details.
         output_parts = []
         if len(lines) > 40:
             head = "\n".join(lines[:15])
@@ -274,7 +274,7 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
         # Record in memory
         memory.record_command(command, proc.returncode, full_output)
         final_output = "\n\n".join(output_parts)
-        # Claude Code-style post-tool hook
+        # Run configured post-tool hooks.
         hook_registry.fire("post_tool_call", tool="run_terminal_command", input_str=command, output_str=final_output[:300])
         return final_output
 
@@ -454,13 +454,13 @@ def _missing_script_target(command: str) -> str | None:
     return str(target_path) if not target_path.exists() else None
 
 
-def write_file(file_path: str, content: str) -> str:
+def write_file(file_path: str = "", content: str = "", path: str = "", target_file: str = "") -> str:
     """
     Writes text or code directly to a file on disk in the workspace with UTF-8 encoding.
     Tracks lines added/removed with visual git-stat feedback and token-optimized return values.
     """
-    file_path = clean_file_path(file_path)
-    # Codex SUGGEST mode blocks all file writes
+    file_path = clean_file_path(file_path or path or target_file)
+    # Suggest mode blocks all file writes.
     if not approval_gate.check_write(file_path):
         return f"File write blocked by approval mode ({approval_gate.mode.value}): {file_path}"
     hook_registry.fire("pre_tool_call", tool="write_file", input_str=file_path)
@@ -513,11 +513,11 @@ def write_file(file_path: str, content: str) -> str:
         step_tracker.fail(f"[bold red]Failed writing[/bold red] [cyan]{file_path}[/cyan]", str(e))
         return f"Error writing file '{file_path}': {e}"
 
-def read_file(file_path: str) -> str:
+def read_file(file_path: str = "", path: str = "", target_file: str = "") -> str:
     """
     Reads the content of a file from the workspace.
     """
-    file_path = clean_file_path(file_path)
+    file_path = clean_file_path(file_path or path or target_file)
     step_tracker.start(f"Reading {file_path}...")
     try:
         p = Path(file_path)
@@ -532,14 +532,14 @@ def read_file(file_path: str) -> str:
         step_tracker.fail(f"[bold red]Failed reading[/bold red] [cyan]{file_path}[/cyan]", str(e))
         return f"Error reading file '{file_path}': {e}"
 
-def edit_file(file_path: str, target_text: str, replacement_text: str) -> str:
+def edit_file(file_path: str = "", target_text: str = "", replacement_text: str = "", path: str = "", target_file: str = "") -> str:
     """
     Surgical search-and-replace editor: Replaces exact target text with replacement text in a file.
     Preserves all other code, comments, and structure without rewriting entire files.
     Calculates unified diffstat and renders visual change feedback.
     """
-    file_path = clean_file_path(file_path)
-    # Codex SUGGEST mode blocks all file writes
+    file_path = clean_file_path(file_path or path or target_file)
+    # Suggest mode blocks all file writes.
     if not approval_gate.check_write(file_path):
         return f"File edit blocked by approval mode ({approval_gate.mode.value}): {file_path}"
     hook_registry.fire("pre_tool_call", tool="edit_file", input_str=file_path)
@@ -717,7 +717,6 @@ def google_search(query: str) -> str:
     """
     step_tracker.start(f"Searching web for '{query}'...")
     try:
-        import asyncio
 
         from kratos_agent.search import (
             format_search_results_with_citations,
@@ -774,7 +773,7 @@ def calculate_expression(expression: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────
-# Git Tool Wrappers (Claude Code / Codex / Kimi git integration)
+# Git tool wrappers.
 # ──────────────────────────────────────────────────────────
 
 def git_status() -> str:
@@ -1110,7 +1109,7 @@ def read_skill(skill_name: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────
-# Dynamic Todo & Plan Mode Tools (DeepSeek Harness / Claude Code)
+# Dynamic todo and plan-mode tools.
 # ──────────────────────────────────────────────────────────
 
 _todo_handler = None

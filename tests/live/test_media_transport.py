@@ -1,71 +1,59 @@
-"""Gemini Live media transport contract, exercised with a local fake session."""
+"""Gemini Live is a speech-output device; Kratos owns all user-facing reasoning."""
 import asyncio
 from types import SimpleNamespace
 import unittest
 
 from kratos_agent.live.config import LiveConfig
 from kratos_agent.live.events import LiveStatusHub
-from kratos_agent.live.session import LiveSession
+from kratos_agent.live.session import LiveSession, SPEECH_SYSTEM_PROMPT
 from kratos_agent.live.vision import VisionManager
 
 
-def _session(model: str = "gemini-3.8-live-extended-thinking", **callbacks) -> LiveSession:
+def _session(model: str = "gemini-3.8-live") -> LiveSession:
     return LiveSession(
         config=LiveConfig(api_key="test-key", model=model),
         out_queue=asyncio.Queue(),
         audio_manager=SimpleNamespace(audio_in_queue=asyncio.Queue()),
-        router=SimpleNamespace(get_tool_declarations=lambda: []),
         status_hub=LiveStatusHub(),
-        **callbacks,
     )
 
 
 class LiveMediaTransportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_audio_and_jpeg_frames_are_sent_as_distinct_live_modalities(self):
+    async def test_speech_request_is_the_only_text_sent_to_gemini(self):
         session = _session()
         session.is_running = True
 
         class FakeTransport:
             def __init__(self):
-                self.calls = []
+                self.sent = []
 
-            async def send_realtime_input(self, **kwargs):
-                self.calls.append(kwargs)
-                if len(self.calls) == 2:
-                    session.is_running = False
+            async def send(self, **kwargs):
+                self.sent.append(kwargs)
 
         transport = FakeTransport()
         session.session = transport
-        await session.out_queue.put({"mime_type": "audio/pcm;rate=16000", "data": b"pcm"})
-        await session.out_queue.put({"mime_type": "image/jpeg", "data": b"jpeg"})
-        await session.out_queue.put({})
+        await session.speak_text("Hello from Kratos.")
 
-        await session.send_realtime()
+        self.assertEqual(len(transport.sent), 1)
+        sent = transport.sent[0]["input"]
+        self.assertIn("Render only the following approved phrase", sent)
+        self.assertIn("Hello from Kratos.", sent)
 
-        self.assertEqual(len(transport.calls), 2)
-        self.assertEqual(transport.calls[0]["audio"].mime_type, "audio/pcm;rate=16000")
-        self.assertEqual(transport.calls[1]["video"].mime_type, "image/jpeg")
-
-    async def test_audio_reply_and_transcript_reach_speaker_and_callback(self):
+    async def test_audio_output_reaches_speaker_and_input_or_tools_are_ignored(self):
         transcripts = []
-        user_transcripts = []
-        session = _session(
-            on_model_transcript=transcripts.append,
-            on_user_transcript=user_transcripts.append,
-        )
+        session = _session()
+        session.on_model_transcript = transcripts.append
         session.is_running = True
 
         class FakeTransport:
             async def receive(self):
                 yield SimpleNamespace(
-                    tool_call=None,
+                    tool_call=SimpleNamespace(function_calls=[SimpleNamespace(name="execute_mission")]),
                     server_content=SimpleNamespace(
-                        interrupted=False,
                         model_turn=SimpleNamespace(parts=[SimpleNamespace(inline_data=SimpleNamespace(data=b"audio-out"))]),
                         output_transcription=SimpleNamespace(text="Hello there."),
-                        input_transcription=SimpleNamespace(text="Can you hear me?"),
+                        input_transcription=SimpleNamespace(text="run a task"),
                         turn_complete=False,
-                        interaction_status="IN_PROGRESS",
                     ),
                 )
                 session.is_running = False
@@ -75,16 +63,20 @@ class LiveMediaTransportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.audio_manager.audio_in_queue.get_nowait(), b"audio-out")
         self.assertEqual(transcripts, ["Hello there."])
-        self.assertEqual(user_transcripts, ["Can you hear me?"])
+        self.assertNotIn("input_transcription", session.get_diagnostics())
 
-    def test_standard_live_model_omits_extended_thinking_level(self):
-        standard = _session("gemini-3.8-live")._build_connect_config()
-        extended = _session("gemini-3.8-live-extended-thinking")._build_connect_config()
+    def test_connection_config_has_no_tool_or_input_audio_surface(self):
+        config = _session()._build_connect_config()
+        self.assertIn("only job is to speak", SPEECH_SYSTEM_PROMPT)
+        self.assertEqual(config.response_modalities, ["AUDIO"])
+        self.assertFalse(getattr(config, "tools", None))
+        self.assertIsNone(getattr(config, "input_audio_transcription", None))
 
-        self.assertIsNone(standard.thinking_config)
-        self.assertIsNotNone(extended.thinking_config)
+    def test_media_queue_is_not_a_gemini_input_transport(self):
+        session = _session()
+        self.assertFalse(hasattr(session, "send_realtime"))
 
-    def test_video_capture_rate_is_capped_to_live_api_limit(self):
+    def test_video_capture_rate_is_capped_for_local_capture(self):
         vision = VisionManager(out_queue=asyncio.Queue(), mode="none", fps=30)
         self.assertEqual(vision.fps, 1.0)
 

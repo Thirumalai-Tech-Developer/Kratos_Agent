@@ -1,4 +1,4 @@
-"""MCP client bridge for Claude Code, OpenClaw, and standard MCP configs.
+"""MCP client bridge for configured servers and Kratos's computer-use MCP.
 
 Kratos uses the upstream MCP SDK for protocol and transport handling. External
 framework configs are not auto-scanned. Users explicitly import a config (or
@@ -7,12 +7,10 @@ startup.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,7 +79,7 @@ class McpServerConfig:
 
 
 def _expand_env(value: str) -> str:
-    """Expand Claude-style ${NAME} and ${NAME:-default} references at use time."""
+    """Expand ${NAME} and ${NAME:-default} environment references at use time."""
     pattern = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
     def replace(match: re.Match[str]) -> str:
@@ -103,6 +101,39 @@ def _safe_name(value: str) -> str:
     return cleaned[:80]
 
 
+def _computer_use_mcp_default() -> McpServerConfig | None:
+    """Return Kratos's default desktop MCP unless the user disables it."""
+    enabled = os.getenv("KRATOS_COMPUTER_USE_MCP", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return None
+
+    profile = os.getenv("COMPUTER_USE_PROFILE", "core").strip() or "core"
+    return McpServerConfig.from_mapping(
+        "computer-use",
+        {
+            "command": "npx",
+            "args": ["-y", "@zavora-ai/computer-use-mcp@7.4.0"],
+            "env": {"COMPUTER_USE_PROFILE": profile},
+            "timeout": 90,
+        },
+    )
+
+
+def _openpets_mcp_default() -> McpServerConfig | None:
+    """Return the pinned OpenPets MCP integration unless the user disables it."""
+    enabled = os.getenv("KRATOS_OPENPETS_MCP", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return None
+    return McpServerConfig.from_mapping(
+        "openpets",
+        {
+            "command": "npx",
+            "args": ["-y", "@open-pets/mcp@4.0.0"],
+            "timeout": 20,
+        },
+    )
+
+
 class McpManager:
     """Loads MCP configs, connects with the official SDK, and registers tools."""
 
@@ -116,7 +147,7 @@ class McpManager:
         self.load()
 
     def load(self) -> None:
-        """Load local config and explicitly imported Claude/OpenClaw config files."""
+        """Load Kratos MCP config and add the default computer-use and OpenPets servers."""
         self.servers = {}
         self.import_paths = []
         self._local_names = set()
@@ -134,6 +165,13 @@ class McpManager:
             local_servers = self._extract_servers(data)
             self._merge_server_map(local_servers)
             self._local_names = set(local_servers)
+
+        # Keep the published computer-use server on the standard Kratos SDK
+        # path. An explicit local or imported entry always wins, including an
+        # explicit `enabled: false` override.
+        for default_server in (_computer_use_mcp_default(), _openpets_mcp_default()):
+            if default_server and default_server.name not in self.servers:
+                self.servers[default_server.name] = default_server
 
     def save(self) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +196,7 @@ class McpManager:
 
     @staticmethod
     def _extract_servers(data: Mapping[str, Any], project: str | None = None) -> Mapping[str, Any]:
-        """Read common MCP locations used by MCP, Claude Code, and OpenClaw."""
+        """Read standard MCP server maps from a Kratos or user-selected config."""
         servers = data.get("mcpServers")
         if isinstance(servers, dict):
             return servers
@@ -191,15 +229,14 @@ class McpManager:
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
-                # OpenClaw stores its main config as JSON5; Claude's .mcp.json
-                # and ~/.claude.json remain ordinary JSON.
+                # User-selected MCP config files may use JSON5 syntax.
                 import json5
                 data = json5.loads(raw)
         except (OSError, ValueError) as exc:
             self.status[str(path)] = {"state": "invalid", "error": type(exc).__name__}
             return
         servers = dict(self._extract_servers(data))
-        # Claude Code stores project-scoped MCP entries in ~/.claude.json.
+        # Some MCP configurations organize their server maps by project.
         projects = data.get("projects")
         project_data = projects.get(str(self.workspace), {}) if isinstance(projects, dict) else {}
         if isinstance(project_data, dict) and isinstance(project_data.get("mcpServers"), dict):
@@ -241,22 +278,6 @@ class McpManager:
         self.load()
         return len(self.servers)
 
-    def import_framework_config(self, framework: str) -> int:
-        name = framework.lower()
-        if name in ("claude", "claude-code", "claude_code"):
-            candidates = [
-                self.workspace / ".mcp.json",
-                Path.home() / ".claude.json",
-            ]
-        elif name in ("openclaw", "open-claw"):
-            candidates = [Path.home() / ".openclaw" / "openclaw.json"]
-        else:
-            return self.add_import(framework)
-        existing = next((path for path in candidates if path.is_file()), None)
-        if existing is None:
-            raise FileNotFoundError(f"No {framework} MCP config was found in its standard location")
-        return self.add_import(existing)
-
     def discover(self, server_name: str, discoverer: Callable[[McpServerConfig], list[tuple[ToolSpec, Callable[..., str]]]], registry: Any) -> int:
         """Register discovered tools under stable MCP namespaced tool ids."""
         server = self.servers.get(server_name)
@@ -266,7 +287,15 @@ class McpManager:
         for spec, handler in discovered:
             prefix = f"mcp__{_safe_name(server_name)}__"
             name = spec.name if spec.name.startswith(prefix) else prefix + _safe_name(spec.name)
-            registered = ToolSpec(name, spec.description, spec.parameters, spec.permission, spec.timeout_seconds, source=f"mcp:{server_name}")
+            registered = ToolSpec(
+                name,
+                spec.description,
+                spec.parameters,
+                spec.permission,
+                spec.timeout_seconds,
+                source=f"mcp:{server_name}",
+                annotations=dict(spec.annotations or {}),
+            )
             registry.register(registered, handler)
         return len(discovered)
 
@@ -382,9 +411,20 @@ class McpManager:
         for tool in self._sync_sdk(server, "list_tools"):
             annotations = getattr(tool, "annotations", None)
             if isinstance(annotations, Mapping):
-                read_only = annotations.get("readOnlyHint", annotations.get("read_only_hint")) is True
+                annotation_data = dict(annotations)
             else:
-                read_only = getattr(annotations, "readOnlyHint", getattr(annotations, "read_only_hint", False)) is True
+                annotation_data = {
+                    key: getattr(annotations, key, None)
+                    for key in (
+                        "readOnlyHint", "destructiveHint", "openWorldHint", "idempotentHint",
+                        "read_only_hint", "destructive_hint", "open_world_hint", "idempotent_hint",
+                    )
+                    if annotations is not None
+                }
+            read_only = (
+                annotation_data.get("readOnlyHint") is True
+                or annotation_data.get("read_only_hint") is True
+            )
             permission = ToolPermission.READ if read_only else ToolPermission.EXECUTE
             raw_schema = getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", None) or {}
             if not isinstance(raw_schema, dict):
@@ -396,6 +436,7 @@ class McpManager:
                 permission=permission,
                 timeout_seconds=server.timeout_seconds,
                 source=f"mcp:{server.name}",
+                annotations=annotation_data,
             )
             original_name = tool.name
             handler = lambda _tool_name=original_name, **kwargs: self._sync_sdk(server, "call_tool", _tool_name, kwargs)

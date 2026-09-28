@@ -1,4 +1,4 @@
-"""DeepSeek Harness - 4 Signature Presets and Declarative Configuration."""
+"""Kratos Harness presets and declarative configuration."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class HarnessPreset:
 StandardPreset = HarnessPreset(
     name="standard",
     description="Full autonomous software engineering agent with cognitive memory, web search, git, and audit logging.",
-    enabled_plugins=["tools", "memory", "deepseek_model", "audit", "creator"],
+    enabled_plugins=["tools", "memory", "audit", "creator"],
     allowed_tools=None,  # All registered tools
     model_config={
         "temperature": 0.5,
@@ -53,7 +53,7 @@ StandardPreset = HarnessPreset(
         "thinking_enabled": True,
     },
     directives=[
-        "You are operating in DeepSeek Harness Standard Mode.",
+        "You are operating in Kratos Harness Standard Mode.",
         "Balance comprehensive reasoning with autonomous tool execution.",
         "Utilize cognitive memory for long-term knowledge retention and task context.",
         "Parallel tool execution is enabled: emit multiple independent read/inspect/subagent tool calls concurrently in a single turn to save time.",
@@ -63,7 +63,7 @@ StandardPreset = HarnessPreset(
 CodePreset = HarnessPreset(
     name="code",
     description="Precision coding & refactoring loop with surgical file modifications and strict verification.",
-    enabled_plugins=["tools", "memory", "deepseek_model", "audit"],
+    enabled_plugins=["tools", "memory", "audit"],
     allowed_tools=[
         "read_file",
         "write_file",
@@ -94,7 +94,7 @@ CodePreset = HarnessPreset(
         "thinking_enabled": True,
     },
     directives=[
-        "You are operating in DeepSeek Harness Code Mode (Precision Refactoring Loop).",
+        "You are operating in Kratos Harness Code Mode (Precision Refactoring Loop).",
         "Focus exclusively on surgical code editing, syntactic correctness, and automated testing.",
         "Prefer surgical replacements over rewriting entire files.",
         "Always execute verification commands (tests, linter, builds) after modifying code.",
@@ -105,7 +105,7 @@ CodePreset = HarnessPreset(
 MinimalPreset = HarnessPreset(
     name="minimal",
     description="Bare-metal benchmark and evaluation environment with minimal overhead.",
-    enabled_plugins=["tools", "deepseek_model"],
+    enabled_plugins=["tools"],
     allowed_tools=[
         "read_file",
         "write_file",
@@ -117,7 +117,7 @@ MinimalPreset = HarnessPreset(
         "thinking_enabled": False,
     },
     directives=[
-        "You are operating in DeepSeek Harness Minimal Mode (Benchmark / Evaluation).",
+        "You are operating in Kratos Harness Minimal Mode (Benchmark / Evaluation).",
         "Provide direct, concise responses with zero conversational filler.",
         "Execute commands directly and report exact outcomes.",
     ],
@@ -126,7 +126,7 @@ MinimalPreset = HarnessPreset(
 CreatorPreset = HarnessPreset(
     name="creator",
     description="Meta-programming runtime for authoring, hot-reloading, and inspecting agent plugins and tools.",
-    enabled_plugins=["tools", "memory", "deepseek_model", "audit", "creator"],
+    enabled_plugins=["tools", "memory", "audit", "creator"],
     allowed_tools=None,  # All tools plus creator meta-tools
     model_config={
         "temperature": 0.3,
@@ -134,7 +134,7 @@ CreatorPreset = HarnessPreset(
         "thinking_enabled": True,
     },
     directives=[
-        "You are operating in DeepSeek Harness Creator Mode (Meta-programming & Plugin Authoring).",
+        "You are operating in Kratos Harness Creator Mode (Meta-programming & Plugin Authoring).",
         "Design modular, self-contained plugins adhering to the HarnessPlugin lifecycle.",
         "Ensure all authored components have comprehensive tests and clear type signatures.",
         "Utilize runtime introspection to inspect kernel state and plugin health.",

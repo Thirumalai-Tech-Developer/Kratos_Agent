@@ -59,18 +59,25 @@ class ToolSearch:
             score += overlap * 0.4
 
             # 4. Contextual Category Affinity
-            if any(w in q_clean for w in ("browser", "youtube", "url", "web", "chrome", "website", "navigate")):
+            is_dev_creation = any(w in q_clean for w in (
+                "make", "create", "build", "develop", "implement", "code", "scaffold", "setup",
+                "react", "tailwind", "vite", "npm", "node", "folder", "project", "script",
+                "install", "html", "css", "js", "ts", "python", "site", "website", "app",
+                "server", "api", "component", "ui", "game", "file", "edit", "write", "read",
+                "grep", "search_symbol"
+            ))
+
+            if is_dev_creation:
+                if cat in ("FILES", "CODE", "SYSTEM"):
+                    score += 4.0
+                if meta.name in ("read_file", "write_file", "edit_file", "run_terminal_command", "list_directory", "grep_search"):
+                    score += 5.0
+            elif any(w in q_clean for w in ("browser", "youtube", "url", "chrome", "navigate", "browse")):
                 if cat == "BROWSER":
                     score += 3.0
                 elif cat == "COMPUTER":
                     score += 1.0
                 elif cat in ("MEMORY", "SYSTEM", "FILES"):
-                    score -= 1.0
-
-            if any(w in q_clean for w in ("file", "code", "edit", "write", "read", "grep", "search_symbol", "script")):
-                if cat in ("FILES", "CODE"):
-                    score += 3.0
-                elif cat == "BROWSER":
                     score -= 1.0
 
             if any(w in q_clean for w in ("search", "find", "who is", "what is", "latest", "lookup")):
@@ -79,7 +86,7 @@ class ToolSearch:
 
             # 5. Core essential tools guarantee baseline presence
             if meta.name in ("read_file", "write_file", "edit_file", "run_terminal_command", "list_directory", "grep_search"):
-                score += 0.5
+                score += 1.5
 
             if score > 0:
                 scored_tools.append((score, meta))
@@ -90,15 +97,12 @@ class ToolSearch:
         # Select top candidates (bounded between min_results and max_results)
         candidates = [item[1] for item in scored_tools[:max_results]]
 
-        # Fallback to essential general tools if nothing matched
-        if len(candidates) < min_results:
-            essential = ["read_file", "write_file", "edit_file", "run_terminal_command", "list_directory"]
-            for name in essential:
-                m = self.index.get(name)
-                if m and m not in candidates:
-                    candidates.append(m)
-                if len(candidates) >= max_results:
-                    break
+        # Ensure essential general tools are always present if development/creation was detected or nothing matched
+        essential = ["read_file", "write_file", "edit_file", "run_terminal_command", "list_directory", "grep_search"]
+        for name in essential:
+            m = self.index.get(name)
+            if m and m not in candidates:
+                candidates.append(m)
 
         return candidates[:max_results]
 
@@ -106,7 +110,7 @@ class ToolSearch:
         self,
         query: str,
         context: dict[str, Any] | None = None,
-        max_results: int = 15,
+        max_results: int = 30,
     ) -> list[dict[str, Any]]:
         """Returns JSON schema definitions for the top discovered tools."""
         tools = self.search(query, context=context, max_results=max_results)

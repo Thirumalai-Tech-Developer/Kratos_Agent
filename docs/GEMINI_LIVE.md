@@ -1,103 +1,27 @@
-# GEMINI LIVE // REALTIME MULTIMODAL PERCEPTION & VOICE NARRATION
+# Gemini Live speech output
 
-## Realtime Multimodal I/O Bridge for Kratos Omni
+Gemini Live is an optional text-to-speech transport. Kratos is the only reasoning model and the only component allowed to choose or execute tools.
 
----
-
-## 1. Role & Identity
-
-Gemini Live is **strictly optional realtime multimodal senses (ears, eyes) and voice narration**.
+## Data boundary
 
 ```text
-                  ┌───────────────────────┐
-                  │      USER INPUT       │
-                  │ (Audio, Screen, Web)  │
-                  └──────────┬────────────┘
-                             │
-                             ▼
-                  ┌───────────────────────┐
-                  │      GEMINI LIVE      │
-                  │   Realtime Senses     │
-                  └──────────┬────────────┘
-                             │
-                       LiveIntent
-                             │
-                             ▼
-                  ┌───────────────────────┐
-                  │      KRATOS OMNI      │
-                  │       ONE BRAIN       │
-                  └──────────┬────────────┘
-                             │
-                      Execution Tasks
-                             │
-                             ▼
-                  ┌───────────────────────┐
-                  │   EXECUTION FABRIC    │
-                  │     (SDK Adapters)    │
-                  └──────────┬────────────┘
-                             │
-                       AgentEvents
-                             │
-                             ▼
-                  ┌───────────────────────┐
-                  │    VOICE NARRATION    │
-                  │  (Spoken Summaries)   │
-                  └───────────────────────┘
+Local System.Speech -> text -> Kratos agent -> screen response
+                                      `-> [[speak]] phrase [[/speak]] -> Gemini audio
 ```
 
-Gemini Live is **NOT**:
-- A competing intelligence or alternative code planner.
-- Directly orchestrating tasks or bypassing the Kratos `TaskManager`.
-- Allowed to persist memories or bypass the `VerificationManager`.
+The Live connection is configured for audio output only. It declares no tools, accepts no microphone transcription, and has no send path for audio or video frames. Unexpected tool-call events are ignored. Screen/camera captures stay local until an explicit Kratos vision request sends the image through the configured Kratos model.
 
----
+Only a valid paired `[[speak]]...[[/speak]]` segment may be voiced. Markers are removed from visible text, malformed directives fail closed, and speech text is sanitized before delivery. The same approved phrase is sent to the OpenPets speech bubble when available. Event narration and unmarked final replies are disabled.
 
-## 2. Realtime Intent Delegation
+## Configuration
 
-User speech is transcribed and structured into typed `LiveIntent` records:
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`: optional Live speech credentials.
+- `KRATOS_LIVE_MODEL`: Gemini Live speech model ID.
+- `KRATOS_LIVE_VOICE`: voice preset; defaults to `Zephyr`.
+- `KRATOS_LIVE_ENABLED`: set to `false` to disable speech input/output integration.
 
-```python
-@dataclass
-class LiveIntent:
-    intent_type: str  # "delegate_task", "interrupt", "steer", "query"
-    raw_prompt: str
-    visual_context: VisualSnapshot | None = None
-    priority: int = 1
-```
+Speech recognition runs locally with Windows System.Speech. If Gemini is disconnected or not configured, Kratos keeps its response on screen and can speak marked phrases with Windows SAPI. This failure does not change the Kratos task result.
 
-The bridge dispatches `LiveIntent` directly into Kratos's `ProviderRouter`, where OMNI decomposes the request into task graph nodes.
+## Runtime health
 
----
-
-## 3. Visual Context Sampling & Filtering
-
-To prevent context bloat and rate-limit exhaustion, visual frames are sampled with adaptive gating:
-- **Rate-limited sampling**: Max 1 snapshot per 2.0 seconds by default.
-- **Hash deduplication**: If the screen hasn't changed (identical hash), frames are dropped.
-- **Scoped injection**: Visual snapshots are attached only to tasks explicitly demanding vision or UI debugging.
-
----
-
-## 4. Voice Narration & Speech Sanitization
-
-Narration operates over canonical `AgentEvent` streams:
-- Only events with `narratable=True` or `voice_narratable=True` are spoken.
-- High-frequency token deltas (`TOKEN_DELTA`) are silenced.
-- Meaningful state milestones are narrated:
-  - `"Starting the task."`
-  - `"Inspecting the repository."`
-  - `"Editing authentication module."`
-  - `"Running test suite."`
-  - `"Verification passed."`
-  - `"Task complete."`
-- **Secret Redaction**: Every spoken phrase is processed by `sanitize_speech_text()`, stripping API keys, OAuth Bearer tokens, private keys, and passwords.
-
----
-
-## 5. Fault Isolation & Disconnection Resilience
-
-If Gemini Live disconnects:
-- Core Kratos execution continues uninterrupted.
-- Tasks proceed through their task graph nodes.
-- Filesystem edits, tests, and verification execute normally.
-- Results remain fully accessible via Web UI, CLI, and event stores.
+`LiveRuntime` starts the local recognizer and speaker output. It starts a Gemini connection only when credentials are available. The connection retries in the background with bounded backoff. The CLI `/live status` shows connection and component health; `/live reconnect` restarts the output session.

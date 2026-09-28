@@ -159,7 +159,7 @@ class ContextBuilder:
 
         checkpoint_messages: list[ChatMessage] = []
         if facts:
-            # Use role="user" so web proxies and OpenAI adapters do not discard system messages inside the message array
+            # Keep gateway compatibility by avoiding system roles inside the message array.
             checkpoint_messages.append(ChatMessage(
                 role="user",
                 content="[COMPACTION CHECKPOINT]\nOlder execution steps were compacted. Retain these findings and constraints:\n" + "\n".join(facts),

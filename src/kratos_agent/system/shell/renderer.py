@@ -15,7 +15,7 @@ def render_powershell_script(command: str, supports_and: bool = False) -> str:
     # CMD uses `cd /d <path>` to switch drive and directory. PowerShell
     # does not accept /d, so translate it at the shell boundary.
     pattern = re.compile(
-        r"(?P<prefix>(?:^|[;&])\\s*)cd\\s+/d\\s+(?P<path>\"[^\"]*\"|'[^']*'|[^;&]+)",
+        r"(?P<prefix>(?:^|[;&])\s*)cd\s+/d\s+(?P<path>\"[^\"]*\"|'[^']*'|[^;&]+)",
         re.IGNORECASE,
     )
 

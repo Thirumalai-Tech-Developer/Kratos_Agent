@@ -46,6 +46,8 @@ def categorize_tool(name: str) -> ToolCategory:
         return ToolCategory.BROWSER
     if any(k in n for k in ("gui_", "mouse_", "window_", "computer_click", "computer_type", "computer_press", "computer_find", "computer_observe", "computer_inspect", "computer_launch_app")):
         return ToolCategory.COMPUTER
+    if n.startswith(("mcp__computer-use__", "mcp__computer_use__")):
+        return ToolCategory.COMPUTER
     if any(k in n for k in ("file", "directory", "grep", "read_file", "write_file", "edit_file")):
         return ToolCategory.FILES
     if any(k in n for k in ("terminal", "command", "git_", "test", "pytest", "code", "python", "compile")):
@@ -57,12 +59,99 @@ def categorize_tool(name: str) -> ToolCategory:
     return ToolCategory.GENERAL
 
 
+TOOL_ALIASES: dict[str, str] = {
+    # Terminal & Command execution
+    "terminal": "run_terminal_command",
+    "terminal_run_command": "run_terminal_command",
+    "run_terminal_cmd": "run_terminal_command",
+    "run_command": "run_terminal_command",
+    "run_cmd": "run_terminal_command",
+    "terminal_command": "run_terminal_command",
+    "exec_command": "run_terminal_command",
+    "execute_command": "run_terminal_command",
+    "execute_terminal_command": "run_terminal_command",
+    "terminal_exec": "run_terminal_command",
+    "shell": "run_terminal_command",
+    "bash": "run_terminal_command",
+    "sh": "run_terminal_command",
+    "cmd": "run_terminal_command",
+    "powershell": "run_terminal_command",
+    "run_shell": "run_terminal_command",
+    "exec": "run_terminal_command",
+
+    # File Writing & Creation
+    "create_file": "write_file",
+    "save_file": "write_file",
+    "new_file": "write_file",
+    "write_to_file": "write_file",
+    "file_write": "write_file",
+
+    # File Reading & Viewing
+    "read_file": "read_file",
+    "view_file": "read_file",
+    "open_file": "read_file",
+    "cat": "read_file",
+    "file_read": "read_file",
+
+    # File Editing
+    "edit_file": "edit_file",
+    "modify_file": "edit_file",
+    "update_file": "edit_file",
+    "patch_file": "edit_file",
+    "replace_file_content": "edit_file",
+    "multi_replace_file_content": "edit_file",
+
+    # Directory Listing
+    "list_directory": "list_directory",
+    "list_dir": "list_directory",
+    "list_files": "list_directory",
+    "ls": "list_directory",
+    "dir": "list_directory",
+
+    # Search & Grep
+    "grep": "grep_search",
+    "grep_search": "grep_search",
+    "search_files": "grep_search",
+    "find_in_files": "grep_search",
+    "find_files": "grep_search",
+
+    # Browser Navigation & Reading
+    "browser_navigate": "browser_navigate",
+    "navigate_browser": "browser_navigate",
+    "browser_goto": "browser_navigate",
+    "goto_url": "browser_navigate",
+    "open_url": "browser_navigate",
+    "browser_read": "browser_read",
+    "read_browser": "browser_read",
+    "read_page": "browser_read",
+    "browser_download": "browser_download",
+    "download_file": "browser_download",
+}
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
 
     def register(self, spec: ToolSpec, handler: Callable[..., str]) -> None:
         self._tools[spec.name] = RegisteredTool(spec=spec, handler=handler)
+
+    def get(self, name: str) -> RegisteredTool | None:
+        if not name:
+            return None
+        raw = name.strip()
+        if raw in self._tools:
+            return self._tools[raw]
+        canonical = TOOL_ALIASES.get(raw.lower())
+        if canonical and canonical in self._tools:
+            return self._tools[canonical]
+        for k, v in self._tools.items():
+            if k.lower() in (raw.lower(), (canonical or "").lower()):
+                return v
+        return None
+
+    def __contains__(self, name: str) -> bool:
+        return self.get(name) is not None
 
     def search(self, query: str, context: Any | None = None, max_results: int = 15) -> list[dict[str, Any]]:
         """Performs semantic search across the tool catalog and returns top 5-15 candidate tool schemas."""
@@ -104,8 +193,8 @@ class ToolRegistry:
                 })
         return results[:max_results]
 
-    def get_tools(self, context: Any | None = None, categories: list[str] | None = None, max_tools: int = 15) -> list[dict[str, Any]]:
-        """Dynamically loads and returns only relevant tool schemas (5-15 tools) for the given context."""
+    def get_tools(self, context: Any | None = None, categories: list[str] | None = None, max_tools: int = 35) -> list[dict[str, Any]]:
+        """Dynamically loads and returns only relevant tool schemas for the given context."""
         searched: list[dict[str, Any]] = []
         if context:
             ctx_str = str(context)
@@ -132,6 +221,15 @@ class ToolRegistry:
                 selected_cats.add(ToolCategory.SYSTEM.value)
             if any(w in ctx_str for w in ("memory", "recall", "remember", "preference", "workflow")):
                 selected_cats.add(ToolCategory.MEMORY.value)
+            if any(w in ctx_str for w in (
+                "make", "create", "build", "develop", "code", "scaffold", "setup",
+                "react", "tailwind", "vite", "npm", "node", "folder", "project",
+                "script", "install", "html", "css", "js", "ts", "python", "site",
+                "website", "app", "server", "api", "component", "ui", "game"
+            )):
+                selected_cats.add(ToolCategory.CODE.value)
+                selected_cats.add(ToolCategory.FILES.value)
+                selected_cats.add(ToolCategory.SYSTEM.value)
 
         # Always include GENERAL category
         selected_cats.add(ToolCategory.GENERAL.value)
@@ -150,23 +248,56 @@ class ToolRegistry:
         if not categories and not context:
             return [schema(item) for item in self._tools.values()]
 
-        # Semantic search ranks the best matches but may omit tools required for
-        # the inferred task (for example, file writers for a pytest repair).
-        # Merge its ranked results with all tools in the relevant categories.
         results: list[dict[str, Any]] = []
         seen: set[str] = set()
+
+        # Core developer tools are available for coding, file, and system tasks.
+        # General tools (such as todo_write) must not pull file and shell tools
+        # into unrelated browser or conversation requests.
+        core_essential_names = [
+            "run_terminal_command",
+            "write_file",
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "grep_search",
+        ]
+        if any(cat in selected_cats for cat in (ToolCategory.CODE.value, ToolCategory.FILES.value, ToolCategory.SYSTEM.value)):
+            for core_name in core_essential_names:
+                item = self._tools.get(core_name)
+                if item and core_name not in seen:
+                    results.append(schema(item))
+                    seen.add(core_name)
+
+        # Semantic search ranked matches
         for result in searched:
             name = result.get("function", {}).get("name")
             item = self._tools.get(name)
             if item and categorize_tool(name).value in selected_cats and name not in seen:
                 results.append(schema(item))
                 seen.add(name)
+
+        # Category tools
         for item in self._tools.values():
             name = item.spec.name
             if categorize_tool(name).value in selected_cats and name not in seen:
                 results.append(schema(item))
                 seen.add(name)
-        return results[:max_tools] if (categories or context) else results
+
+        if not (categories or context):
+            return results
+
+        # Ensure core essential tools are never truncated if results exceed max_tools
+        if len(results) > max_tools:
+            capped = results[:max_tools]
+            capped_names = {r.get("function", {}).get("name") for r in capped}
+            for core_name in core_essential_names:
+                if core_name in seen and core_name not in capped_names:
+                    item = self._tools.get(core_name)
+                    if item:
+                        capped.append(schema(item))
+            return capped
+        return results
 
     def schemas(self, categories: list[str] | None = None, context: Any | None = None) -> list[dict[str, Any]]:
         if categories or context:
@@ -182,13 +313,69 @@ class ToolRegistry:
 
     def execute(self, call: ToolCall, allow: Callable[[ToolSpec, dict[str, Any]], tuple[bool, str]]) -> ToolResult:
         started = time.monotonic()
-        registered = self._tools.get(call.name)
+        raw_name = (call.name or "").strip()
+        canonical_name = TOOL_ALIASES.get(raw_name.lower(), raw_name)
+        registered = self._tools.get(raw_name) or self._tools.get(canonical_name)
+        if registered is None:
+            # Case-insensitive scan fallback
+            for name, tool in self._tools.items():
+                if name.lower() in (raw_name.lower(), canonical_name.lower()):
+                    registered = tool
+                    break
         if registered is None:
             return ToolResult(call.call_id, call.name, f"Unknown tool: {call.name}", is_error=True)
+
+        # Standardize call.name to registered canonical tool name for consistent logging & lifecycle tracking
+        call.name = registered.spec.name
+
+        # Normalize common parameter aliases across diverse LLM outputs
+        schema = registered.spec.parameters or {}
+        props = schema.get("properties", {})
+        if "file_path" in props and "file_path" not in call.arguments:
+            for alt in ("path", "target_file", "filepath", "filename", "file", "dest", "destination"):
+                if alt in call.arguments:
+                    call.arguments["file_path"] = call.arguments.pop(alt)
+                    break
+        if "command" in props and "command" not in call.arguments:
+            for alt in ("cmd", "script", "terminal_command", "terminal", "code", "input", "action"):
+                if alt in call.arguments:
+                    call.arguments["command"] = call.arguments.pop(alt)
+                    break
+        if "content" in props and "content" not in call.arguments:
+            for alt in ("text", "data", "code", "body", "value"):
+                if alt in call.arguments:
+                    call.arguments["content"] = call.arguments.pop(alt)
+                    break
+        if "target_text" in props and "target_text" not in call.arguments:
+            for alt in ("old_text", "find", "search", "target", "original"):
+                if alt in call.arguments:
+                    call.arguments["target_text"] = call.arguments.pop(alt)
+                    break
+        if "replacement_text" in props and "replacement_text" not in call.arguments:
+            for alt in ("new_text", "replace", "replacement", "content", "text"):
+                if alt in call.arguments:
+                    call.arguments["replacement_text"] = call.arguments.pop(alt)
+                    break
+        if "directory_path" in props and "directory_path" not in call.arguments:
+            for alt in ("path", "dir_path", "dir", "directory", "folder"):
+                if alt in call.arguments:
+                    call.arguments["directory_path"] = call.arguments.pop(alt)
+                    break
+        if "query" in props and "query" not in call.arguments:
+            for alt in ("search", "q", "pattern", "text"):
+                if alt in call.arguments:
+                    call.arguments["query"] = call.arguments.pop(alt)
+                    break
+        if "pattern" in props and "pattern" not in call.arguments:
+            for alt in ("query", "search", "regex"):
+                if alt in call.arguments:
+                    call.arguments["pattern"] = call.arguments.pop(alt)
+                    break
+
         valid, reason = self._validate(registered.spec, call.arguments)
         if not valid:
             return ToolResult(call.call_id, call.name, reason, is_error=True)
-            
+
         forbidden, forbid_reason = self._forbidden_target(call)
         if forbidden:
             try:
@@ -310,7 +497,6 @@ def _permission_for(name: str) -> ToolPermission:
     if name in {
         "read_file", "list_directory", "grep_search", "git_status", "git_diff",
         "read_skill", "list_skills", "read_memory", "todo_write", "exit_plan_mode",
-        "external_agent_discover",
         "computer_observe", "computer_inspect", "computer_find", "computer_screenshot",
         "computer_clipboard_read", "computer_window_list", "computer_browser_read",
         "computer_file_list", "computer_file_read", "computer_process_list", "gui_find"

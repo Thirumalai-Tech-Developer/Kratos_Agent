@@ -1,5 +1,5 @@
 """
-Hooks System for Kratos Agent — Claude Code-style pre/post tool hooks.
+Pre-tool and post-tool hooks for the Kratos Agent runtime.
 
 Hooks are configured in .kratos/hooks.json:
 {

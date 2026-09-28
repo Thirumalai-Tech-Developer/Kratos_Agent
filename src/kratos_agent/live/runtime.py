@@ -8,60 +8,16 @@ from collections.abc import Callable
 from typing import Any
 
 from .audio import AudioManager
-from .avatar import FloatingAvatar
-from .bridge import KratosBridge
 from .config import LiveConfig
 from .events import LiveState, LiveStatus, LiveStatusHub
-from .narration import NarrationManager
-from .router import LiveRouter
 from .session import LiveSession
 from .vision import VisionManager
 
 logger = logging.getLogger(__name__)
 
 
-def _is_generic_live_failure(reply: str) -> bool:
-    """Detect Live's non-diagnostic apology so the CLI can use Kratos' real result."""
-    normalized = " ".join(str(reply or "").casefold().split())
-    return any(marker in normalized for marker in (
-        "system error occurred",
-        "couldn't process your request",
-        "could not process your request",
-        "i didn't catch your request",
-        "i did not catch your request",
-    ))
-
-
-def _resolve_live_chat_reply(reply: str, before_task_id: str | None, status: dict[str, Any]) -> str:
-    """Use a correlated structured Kratos result instead of generic Live apology text."""
-    if reply and not _is_generic_live_failure(reply):
-        return reply
-
-    result = status.get("last_result") or {}
-    result_task_id = result.get("task_id")
-    if result_task_id and result_task_id != before_task_id:
-        if str(result.get("status") or "").lower() == "success" and result.get("verified"):
-            evidence = result.get("evidence") or {}
-            detail = evidence.get("message") or "Task completed and verified by Kratos."
-            return f"Kratos completed and verified the task. {detail}"
-        error = result.get("error") or status.get("last_error") or {}
-        if isinstance(error, dict):
-            component = error.get("component") or status.get("last_error_component") or "Kratos"
-            stage = error.get("stage") or status.get("current_stage") or "execution"
-            message = error.get("user_message") or error.get("message") or "No error detail was returned."
-            recovery = error.get("recovery_action")
-            detail = f"Kratos task failed in {component} during {stage}: {message}"
-            if recovery:
-                detail += f" Recovery: {recovery}"
-            return detail
-        return str(error or "Kratos task failed without a structured diagnostic.")
-
-    # None signals the CLI to route the original request through Kratos Agent.
-    return ""
-
-
 class LiveRuntime:
-    """Orchestrates audio, vision, Gemini Live session, Kratos bridge, and narration."""
+    """Orchestrates local speech recognition, optional Gemini TTS, and vision capture."""
 
     def __init__(
         self,
@@ -100,48 +56,13 @@ class LiveRuntime:
             fps=self.config.video_fps,
         )
 
-        self.bridge = KratosBridge(
-            runtime=runtime,
-            status_hub=self.status_hub,
-        )
-
-        # On-demand screen capture callback for LiveRouter
-        async def _capture_screen() -> bytes:
-            return await self.vision.capture_screen_now()
-
-        self.router = LiveRouter(
-            bridge=self.bridge,
-            capture_screen_handler=_capture_screen,
-        )
-
         self.session = LiveSession(
             config=self.config,
             out_queue=self.out_queue,
             audio_manager=self.audio,
-            router=self.router,
             status_hub=self.status_hub,
-            on_user_transcript=on_user_transcript,
             on_model_transcript=on_model_transcript,
         )
-        self.router.set_diagnostics_handler(self.session.get_diagnostics)
-
-        # Narration sends spoken updates via the Native Voice engine or LiveSession
-        def _send_narration_speech(text: str) -> None:
-            if not self.config.is_gemini_backend:
-                try:
-                    from kratos_agent.output.native_voice import get_native_voice
-                    get_native_voice().speak(text)
-                except Exception as e:
-                    logger.debug("[LiveRuntime] Native voice narration error: %s", e)
-            elif self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self.session.send_narration(text),
-                    self._loop,
-                )
-
-        self.narration = NarrationManager(send_speech_fn=_send_narration_speech)
-
-        self.avatar: FloatingAvatar | None = None
 
         self.on_user_transcript = on_user_transcript
         self.on_model_transcript = on_model_transcript
@@ -175,19 +96,18 @@ class LiveRuntime:
 
     def mute(self) -> None:
         self.audio.mute()
+        listener = getattr(self, "native_hearing", None)
+        if listener:
+            listener.mute()
 
     def unmute(self) -> None:
         self.audio.unmute()
+        listener = getattr(self, "native_hearing", None)
+        if listener:
+            listener.unmute()
 
-    def toggle_mute(self) -> None:
-        """Toggles audio input mute state."""
-        if self.audio.is_muted:
-            self.audio.unmute()
-        else:
-            self.audio.mute()
-
-    def speak(self, text: str) -> None:
-        """Speaks text using Gemini Live natural voice when connected, or falls back to native voice."""
+    def speak_marked(self, text: str) -> None:
+        """Speak a phrase extracted from a valid ``[[speak]]`` directive."""
         if not text or not text.strip():
             return
         if self.config.is_gemini_backend and self._loop and self._loop.is_running() and self.session and self.status_hub.get_status().gemini_connected:
@@ -202,84 +122,21 @@ class LiveRuntime:
             except Exception as e:
                 logger.debug("[LiveRuntime] Fallback voice error: %s", e)
 
-    def send_text_input_sync(self, text: str) -> None:
-        """Safely dispatches text input to the LiveSession from non-async threads."""
-        if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self.session.send_text_input(text),
-                self._loop,
-            )
+    def speak(self, text: str) -> None:
+        """Speak only text enclosed by the explicit model speech directive."""
+        from kratos_agent.output.speech_directives import extract_speech_directives
 
-    def send_chat_turn_sync(self, text: str, timeout: float = 600.0) -> str | None:
-        """Sends user text to Gemini Live synchronously, waits for turn completion, and returns the spoken text."""
-        if not self._loop or not self._loop.is_running() or not self.session:
-            return None
-        if not self.status_hub.get_status().gemini_connected:
-            return None
-        try:
-            before_task_id = self.bridge.get_status().get("task_id")
-            from kratos_agent.interfaces.cli import build_cli_input
-            envelope = build_cli_input(text)
-            fut = asyncio.run_coroutine_threadsafe(
-                self.session.send_text_turn(envelope.text, timeout=timeout),
-                self._loop,
-            )
-            result = fut.result(timeout=timeout + 3.0)
-            status = self.bridge.get_status()
-            resolved = _resolve_live_chat_reply(result or "", before_task_id, status)
-            if resolved:
-                return resolved
-            logger.warning(
-                "[LiveRuntime] Gemini Live returned no usable response and no correlated Kratos task result; falling back to Kratos Agent."
-            )
-            return None
-        except Exception as e:
-            logger.exception("[LiveRuntime] Error in send_chat_turn_sync")
-            message = str(e).strip() or type(e).__name__
-            self.status_hub.report_error("live_runtime", message)
-            return f"Gemini Live turn failed: {type(e).__name__}: {message}"
-
-    def capture_screen_now_sync(self) -> None:
-        """Safely triggers an on-demand screen capture from non-async threads."""
-        if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self.vision.capture_screen_now(),
-                self._loop,
-            )
-
-    def start_floating_avatar(self, pet_breed: str | None = None) -> None:
-        """Launches the Windows floating assistant AI pet avatar."""
-        if self.avatar is not None:
-            if pet_breed:
-                self.avatar.set_pet_breed(pet_breed)
-            return
-        try:
-            breed = pet_breed or getattr(self.config, "pet_breed", "kitty")
-            self.avatar = FloatingAvatar(
-                image_path=self.config.avatar_image_path,
-                status_hub=self.status_hub,
-                on_text_submit=self.send_text_input_sync,
-                on_screen_capture=self.capture_screen_now_sync,
-                on_mute_toggle=self.toggle_mute,
-                on_interrupt=self.audio.handle_interruption,
-                avatar_size=self.config.avatar_size,
-                pet_breed=breed,
-            )
-            self.avatar.start()
-        except Exception as e:
-            logger.warning(f"[LiveRuntime] Failed to start floating avatar: {e}")
-
-    def stop_floating_avatar(self) -> None:
-        """Stops the floating assistant avatar."""
-        if self.avatar:
-            try:
-                self.avatar.stop()
-            except Exception as exc:
-                logger.debug("Operation error suppressed: %s", exc)
-            self.avatar = None
+        directive = extract_speech_directives(text)
+        if directive.valid and directive.speech_text:
+            self.speak_marked(directive.speech_text)
 
     async def set_vision_mode(self, mode: str) -> dict[str, Any]:
-        return await self.vision.set_mode(mode)
+        normalized = "none" if mode.lower().strip() == "off" else mode.lower().strip()
+        if normalized not in ("camera", "screen", "both", "none"):
+            raise ValueError("Unsupported vision mode: choose camera, screen, both, or off.")
+        self.vision.mode = normalized
+        self.status_hub.update(video_mode=normalized, camera_active=False, screen_active=False)
+        return self.vision.get_capture_status()
 
 
     async def start(self) -> None:
@@ -289,50 +146,46 @@ class LiveRuntime:
 
         self._loop = asyncio.get_running_loop()
         self._is_running = True
-        if not self.config.is_valid():
-            if not self.config.enabled:
-                err = "Gemini Live is disabled by KRATOS_LIVE_ENABLED."
-            else:
-                err = "Gemini Live needs GEMINI_API_KEY or GOOGLE_API_KEY before audio can stream."
-            logger.warning(f"[LiveRuntime] {err}")
-            self.status_hub.report_error("gemini", err)
+        if not self.config.enabled:
+            err = "Live speech is disabled by KRATOS_LIVE_ENABLED."
+            logger.info("[LiveRuntime] %s", err)
+            self.status_hub.report_error("live_speech", err)
             return
 
-        logger.info("[LiveRuntime] Starting audio and vision subsystems...")
-        await self.audio.start()
-        await self.vision.start()
-        self.narration.start()
+        logger.info("[LiveRuntime] Starting local speech recognition and speaker output...")
+        if self.config.is_gemini_backend:
+            await self.audio.start_output_only()
 
-        if self.config.floating_avatar_enabled:
-            self.start_floating_avatar()
+        try:
+            from .native_listener import get_native_hearing
+
+            def _on_heard(text: str) -> None:
+                if self.on_user_transcript:
+                    try:
+                        self.on_user_transcript(text)
+                    except Exception:
+                        logger.exception("[LiveRuntime] Kratos voice-input handler failed")
+
+            self.native_hearing = get_native_hearing(on_transcription=_on_heard)
+            self.native_hearing.start()
+            self.status_hub.update(microphone_active=True, microphone_health="online")
+        except Exception as exc:
+            logger.warning("[LiveRuntime] Local speech recognition unavailable: %s", exc)
+            self.status_hub.report_error("speech_recognition", str(exc) or type(exc).__name__)
 
         if self.config.is_gemini_backend:
             self._session_task = asyncio.create_task(
                 self.session.run_connection_loop(),
                 name="kratos-live-session-loop",
             )
-            logger.info("[LiveRuntime] Gemini Live session running.")
+            logger.info("[LiveRuntime] Gemini speech-output session running; Kratos remains the only agent.")
         else:
-            # Native sovereign Kratos multimodal runtime (Voice TTS + Hearing STT + OmniRoute Vision)
-            try:
-                from .native_listener import get_native_hearing
-                def _on_heard(text: str):
-                    if self.on_user_transcript:
-                        try:
-                            self.on_user_transcript(text)
-                        except Exception:
-                            pass
-                self.native_hearing = get_native_hearing(on_transcription=_on_heard)
-                self.native_hearing.start()
-            except Exception as e:
-                logger.debug("[LiveRuntime] Native hearing init: %s", e)
-
             self.status_hub.update(
                 gemini_connected=False,
                 live_health="native",
                 current_state=LiveState.IDLE,
             )
-            logger.info("[LiveRuntime] Sovereign Native Kratos Multimodal runtime running.")
+            logger.info("[LiveRuntime] Native TTS fallback and local speech recognition running.")
 
     async def stop(self) -> None:
         """Stops all Live subsystems cleanly."""
@@ -341,9 +194,6 @@ class LiveRuntime:
         self._is_running = False
 
         logger.info("[LiveRuntime] Stopping Live subsystems...")
-        self.stop_floating_avatar()
-        self.narration.stop()
-
         if hasattr(self, "native_hearing") and self.native_hearing:
             try:
                 self.native_hearing.stop()

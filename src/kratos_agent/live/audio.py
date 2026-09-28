@@ -151,6 +151,19 @@ class AudioManager:
                 speaker_active=self.speaker.is_running,
             )
 
+    async def start_output_only(self) -> None:
+        """Start speaker playback without opening a microphone capture stream."""
+        async def _run_speaker():
+            await self.speaker.run()
+            if self.status_hub:
+                self.status_hub.update(speaker_active=self.speaker.is_running)
+
+        task = asyncio.create_task(_run_speaker(), name="kratos-live-speaker")
+        self._tasks = [task]
+        await asyncio.sleep(0.05)
+        if self.status_hub:
+            self.status_hub.update(microphone_active=False, speaker_active=self.speaker.is_running)
+
     async def stop(self) -> None:
         """Stop microphone and speaker tasks and close streams."""
         self.mic.stop()

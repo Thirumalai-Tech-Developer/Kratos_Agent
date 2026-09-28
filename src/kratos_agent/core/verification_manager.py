@@ -206,7 +206,7 @@ class VerificationManager:
         changed_files: list[str],
         verification_type: str = "auto",
         require_files: bool = True,
-        browser_performed: bool = False,
+        browser_evidence: list[Evidence] | None = None,
         turn_id: str = "",
     ) -> VerificationResult:
         """Run file integrity checks plus any discoverable authoritative project tests."""
@@ -282,12 +282,21 @@ class VerificationManager:
                 passed = False
 
         if "browser" in verification_type:
-            if browser_performed:
+            passing_browser_evidence = [
+                evidence
+                for evidence in (browser_evidence or [])
+                if isinstance(evidence, Evidence) and evidence.trustworthy
+            ]
+            if passing_browser_evidence:
                 browser_passed = True
-                details.append("Browser preview verification passed.")
+                details.append(
+                    "Browser outcome verified from live evidence: "
+                    + "; ".join(item.detail or item.claim for item in passing_browser_evidence)
+                )
             else:
-                browser_passed = None
-                details.append("Browser verification not performed.")
+                browser_passed = False
+                passed = False
+                details.append("Browser verification failed: no passing live assertion evidence was collected.")
 
         if passed and files_checked > 0:
             summary = f"Verified {files_checked} changed file(s) successfully."

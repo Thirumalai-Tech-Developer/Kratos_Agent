@@ -6,10 +6,8 @@ file metadata, and monokai/dracula themes.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console, Group
 from rich.panel import Panel

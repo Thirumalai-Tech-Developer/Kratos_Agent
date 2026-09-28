@@ -1,6 +1,5 @@
 """
-Background Async Agent Loop for Kratos Agent.
-Implements Kimi Code "Agent Swarm" + Claude Code background task concepts.
+Background async task runner for the Kratos Agent.
 
 Usage (CLI commands added to cli.py):
   /bg-run <prompt>   — Launch a prompt in a background daemon thread

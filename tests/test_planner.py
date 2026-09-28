@@ -177,7 +177,7 @@ class PlannerTests(unittest.TestCase):
         self.assertFalse(any("design architecture" in t for t in task_titles))
 
     def test_natural_language_I_is_not_extracted_as_tool(self):
-        from kratos_agent.brain.chat_model import extract_tool_calls_from_text
+        from kratos_agent.brain.tool_calls import extract_tool_calls_from_text
         text = "I {thought: 'need to download the game'} will now search for it."
         clean, calls = extract_tool_calls_from_text(text)
         tool_names = [c["name"] for c in calls]

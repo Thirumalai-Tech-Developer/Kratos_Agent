@@ -1,5 +1,5 @@
 """
-KRATOS.md Project Memory — Claude Code CLAUDE.md equivalent.
+KRATOS.md project-memory loading and interpolation.
 
 On every session start, Kratos:
   1. Searches workspace root (and parents) for KRATOS.md or CLAUDE.md

@@ -17,9 +17,13 @@ def _try_headroom_compress(text: str) -> str:
             is_headroom_available,
         )
         if is_headroom_available():
+            from kratos_agent.brain.config import get_default_model
             from headroom import compress
+            model = get_default_model()
+            if not model:
+                return text
             msgs = [{"role": "user", "content": text}]
-            result = compress(msgs, model="gpt-4o")
+            result = compress(msgs, model=model)
             compressed_msgs = getattr(result, "messages", msgs)
             if compressed_msgs:
                 return compressed_msgs[0].get("content", text)
@@ -28,7 +32,7 @@ def _try_headroom_compress(text: str) -> str:
     return text
 
 
-COMPACTION_SYSTEM_PROMPT = """You are an expert AI context compactor. 
+COMPACTION_SYSTEM_PROMPT = """You are an expert AI context compactor.
 Summarize the previous conversation turns into a dense, high-fidelity context memory checkpoint.
 Preserve all:
 1. User goals and requirements
@@ -53,7 +57,7 @@ class ConversationCompactor:
         content_str = str(content).strip()
         if len(content_str) <= max_chars:
             return content_str
-        
+
         # Keep first 3 lines and last 2 lines
         lines = content_str.splitlines()
         if len(lines) > 6:
@@ -79,8 +83,8 @@ class ConversationCompactor:
         return "\n".join(summary_lines)
 
     def compress_messages(
-        self, 
-        messages: list[dict[str, str]], 
+        self,
+        messages: list[dict[str, str]],
         brain: Any | None = None,
         force: bool = False
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
@@ -125,14 +129,17 @@ class ConversationCompactor:
         # 1. Try LLM compression if brain is provided
         if brain:
             try:
-                from langchain_core.messages import HumanMessage
+                from kratos_agent.brain.config import get_default_model
                 history_str = "\n\n".join(
                     f"{m.get('role', 'user').upper()}: {self.prune_tool_output(m.get('content', ''))}"
                     for m in older_messages
                 )
                 prompt = f"{COMPACTION_SYSTEM_PROMPT}\n\nCONVERSATION TO SUMMARIZE:\n{history_str}"
-                res = brain.invoke([HumanMessage(content=prompt)])
-                summary_text = getattr(res, "content", str(res)).strip()
+                summary_text = brain.generate(
+                    model=get_default_model(),
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=False,
+                ).strip()
             except Exception:
                 summary_text = self.compress_heuristic(older_messages)
         else:

@@ -41,17 +41,6 @@ class LiveConfig:
     enabled: bool = field(
         default_factory=lambda: os.getenv("KRATOS_LIVE_ENABLED", "true").lower() not in ("0", "false", "no")
     )
-    floating_avatar_enabled: bool = field(
-        default_factory=lambda: os.getenv("KRATOS_FLOATING_AVATAR", "true").lower() not in ("0", "false", "no")
-    )
-    avatar_image_path: str = field(
-        default_factory=lambda: os.getenv("KRATOS_AVATAR_IMAGE", "kratos-illu.png")
-    )
-    avatar_size: int = 120
-    pet_breed: str = field(
-        default_factory=lambda: os.getenv("KRATOS_PET_BREED", "kitty").lower()
-    )
-
     # Audio stream settings
     microphone_device: int | str | None = field(
         default_factory=lambda: os.getenv("KRATOS_MIC_DEVICE")

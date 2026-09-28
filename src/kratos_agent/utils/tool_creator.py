@@ -1,4 +1,3 @@
-import ast
 import importlib
 import json
 import logging
@@ -8,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from kratos_agent.utils.tool_sandbox import (
-    execute_sandboxed_tool,
     log_forged_tool_audit,
     validate_tool_ast,
     verify_tool_in_sandbox,
@@ -212,9 +210,12 @@ RULES:
 5. Return JSON ONLY without markdown backticks or commentary."""
 
     try:
-        from langchain_core.messages import HumanMessage
-        response = brain.invoke([HumanMessage(content=prompt)])
-        raw_text = getattr(response, "content", str(response)).strip()
+        from kratos_agent.brain.config import get_default_model
+        raw_text = brain.generate(
+            model=get_default_model(),
+            messages=[{"role": "user", "content": prompt}],
+            stream=False,
+        ).strip()
 
         # Clean JSON markdown
         json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
@@ -235,7 +236,7 @@ RULES:
             description=t_desc,
             python_code=t_code,
             parameters_schema=t_params,
-            author_model=getattr(brain, "model_name", "kratos"),
+            author_model=get_default_model() or "kratos",
             trigger_prompt=requirement,
         )
     except Exception as e:

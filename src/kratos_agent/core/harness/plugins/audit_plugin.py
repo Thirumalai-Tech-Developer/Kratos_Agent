@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuditPlugin(HarnessPlugin):
-    """Provides append-only session event tracing and replay for the DeepSeek Harness."""
+    """Provides append-only session event tracing and replay for the Kratos Harness."""
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(

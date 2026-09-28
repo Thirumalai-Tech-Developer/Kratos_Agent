@@ -22,19 +22,12 @@ class TestCliStatus(unittest.TestCase):
             last_error="Microphone is muted",
             active_session_id=None,
         )
-        supervisor = MagicMock()
-        supervisor.get_status.return_value = {
-            "status": "idle",
-            "active_task_id": None,
-            "last_error": None,
-        }
         output = io.StringIO()
 
         with (
             patch("kratos_agent.ccs.get_capability_map", return_value={"os": "Windows", "gui": True, "admin": False}),
             patch("kratos_agent.ccs.get_computer_controller", side_effect=RuntimeError("not initialized")),
             patch("kratos_agent.live.get_live_runtime", return_value=live),
-            patch("kratos_agent.master.supervisor.get_master_supervisor", return_value=supervisor),
             patch.object(latency_tracker, "get_last_metrics", return_value=None),
             patch.object(latency_tracker, "get_all_metrics", return_value=[]),
             patch.object(cli, "console", Console(file=output, force_terminal=False)),

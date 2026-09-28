@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from kratos_agent.brain.config import get_default_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,19 +38,13 @@ def main() -> int:
     args = parser.parse_args()
     tasks = tuple(args.task) if args.task else TASKS
     load_dotenv(ROOT / ".env", override=False)
-    if not os.getenv("OMNI_KEY"):
-        print("No OMNI_KEY is configured; cannot run Kratos through OmniRoute.", file=sys.stderr)
+    model = get_default_model()
+    if not model:
+        print("Set KRATOS_MODEL to the exact model ID served by the Kratos gateway.", file=sys.stderr)
         return 2
-    model = (
-        os.getenv("KRATOS_BENCH_MODEL")
-        or os.getenv("OMNIROUTE_MODEL")
-        or os.getenv("BRAIN_MODEL")
-        or os.getenv("KRATOS_MODEL")
-        or "ds-web/deepseek-v4-pro-think"
-    )
 
     if args.dry_run:
-        print("Harbor dry-run validates the selected task metadata and custom agent without calling OmniRoute.")
+        print("Harbor dry-run validates the selected task metadata and custom agent without a model request.")
     else:
         # The environment runner requires Docker; fail before starting Harbor if it
         # is unavailable, rather than recording setup failures as agent failures.
@@ -66,7 +61,6 @@ def main() -> int:
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
-    env["KRATOS_BENCH_MODEL"] = model
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

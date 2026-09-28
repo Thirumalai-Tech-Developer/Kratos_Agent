@@ -1,4 +1,4 @@
-"""DeepSeek Harness Kernel - Plugin container, service hub, and event bus."""
+"""Kratos Harness kernel: plugin container, service hub, and event bus."""
 
 from __future__ import annotations
 

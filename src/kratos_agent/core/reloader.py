@@ -14,7 +14,7 @@ MODULES_IN_ORDER = [
     "kratos_agent.brain.config",
     "kratos_agent.brain.fetch_model",
     "kratos_agent.brain.client",
-    "kratos_agent.brain.chat_model",
+    "kratos_agent.brain.tool_calls",
     "kratos_agent.brain.brain",
     "kratos_agent.brain",
     "kratos_agent.utils.tools",

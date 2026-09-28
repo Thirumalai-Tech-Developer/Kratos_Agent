@@ -12,8 +12,6 @@ import json
 import mimetypes
 import os
 import re
-import shutil
-import subprocess
 import sys
 import time
 import urllib.parse
@@ -1148,47 +1146,6 @@ def browser_whatsapp_send_message(contact: str, message: str, verify: bool = Tru
         return json.dumps({"ok":verified or not verify,"verified":verified,"evidence":evidence},indent=2,ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"ok":False,"verified":False,"error":f"{type(exc).__name__}: {exc}","native_error":native_error},indent=2,ensure_ascii=False)
-
-def external_agent_discover() -> str:
-    """Discover installed coding/agent CLIs available for delegation."""
-    candidates={"claude":"Claude Code","codex":"OpenAI Codex CLI","gemini":"Gemini CLI","aider":"Aider","opencode":"OpenCode","goose":"Goose","openhands":"OpenHands CLI","cursor-agent":"Cursor Agent"}
-    found=[]
-    for exe,label in candidates.items():
-        path=shutil.which(exe)
-        if path:
-            version=""
-            try:
-                p=subprocess.run([path,"--version"],capture_output=True,text=True,timeout=4,check=False)
-                version=((p.stdout or p.stderr).strip().splitlines() or [""])[0]
-            except Exception: pass
-            found.append({"name":exe,"label":label,"path":path,"version":version})
-    return json.dumps({"ok":True,"agents":found},indent=2,ensure_ascii=False)
-
-
-def external_agent_run(agent: str, prompt: str, cwd: str | None = None, timeout: int = 900) -> str:
-    """Run an installed external coding agent through a non-interactive CLI interface."""
-    agent=str(agent).strip().lower(); prompt=str(prompt)
-    if not agent or not prompt: return json.dumps({"ok":False,"error":"agent and prompt are required."},indent=2)
-    exe=shutil.which(agent)
-    if not exe: return json.dumps({"ok":False,"error":f"External agent '{agent}' is not installed."},indent=2)
-    commands={
-        "claude":[exe,"-p",prompt,"--output-format","json"],
-        "codex":[exe,"exec","--full-auto","--json",prompt],
-        "gemini":[exe,"-p",prompt,"--output-format","json","--yolo"],
-    }
-    custom=os.getenv(f"KRATOS_EXTERNAL_AGENT_COMMAND_{agent.upper().replace('-','_')}")
-    if custom:
-        import shlex; argv=shlex.split(custom)+[prompt]
-    elif agent in commands: argv=commands[agent]
-    else: return json.dumps({"ok":False,"error":f"'{agent}' is installed but its non-interactive command is not configured."},indent=2)
-    try:
-        p=subprocess.run(argv,cwd=str(Path(cwd).expanduser()) if cwd else None,capture_output=True,text=True,timeout=max(5,int(timeout)),check=False)
-        return json.dumps({"ok":p.returncode==0,"agent":agent,"returncode":p.returncode,"stdout":(p.stdout or "")[-20000:],"stderr":(p.stderr or "")[-12000:]},indent=2,ensure_ascii=False)
-    except subprocess.TimeoutExpired as exc:
-        return json.dumps({"ok":False,"agent":agent,"error":f"Timed out after {timeout}s.","stdout":str(exc.stdout or "")[-12000:]},indent=2,ensure_ascii=False)
-    except Exception as exc:
-        return json.dumps({"ok":False,"agent":agent,"error":f"{type(exc).__name__}: {exc}"},indent=2,ensure_ascii=False)
-
 
 def browser_wait_for(condition: str, mode: str = "load", timeout: float = 20.0) -> str:
     """Wait for a real browser condition instead of returning a synthetic success."""

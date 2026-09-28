@@ -19,7 +19,7 @@ from kratos_agent.core.runtime_contracts import (
     ModelResponse,
     ToolCall,
 )
-from kratos_agent.brain.chat_model import extract_tool_calls_from_text
+from kratos_agent.brain.tool_calls import extract_tool_calls_from_text
 
 
 class MockInstruction:

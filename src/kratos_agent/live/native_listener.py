@@ -9,7 +9,6 @@ import logging
 import subprocess
 import threading
 from collections.abc import Callable
-from typing import Any
 
 logger = logging.getLogger("kratos.hearing")
 
@@ -93,6 +92,12 @@ while ($true) {
                     if line_str.startswith("[HEARD]:"):
                         text = line_str[8:].strip()
                         if text and not self.is_muted:
+                            try:
+                                from .echo_guard import get_echo_guard
+                                if get_echo_guard().should_suppress_mic():
+                                    continue
+                            except Exception:
+                                pass
                             logger.info(f"[NativeHearing] Heard: {text}")
                             if self.on_transcription:
                                 try:

@@ -42,7 +42,7 @@ class RecoveryEngine:
             return FailureType.VERIFICATION_FAILED
         return FailureType.UNKNOWN_ERROR
 
-    MAX_RECOVERY_ATTEMPTS: int = 2
+    MAX_RECOVERY_ATTEMPTS: int = 3
 
     def recover_screen_capture(self) -> bool:
         """Attempts recovery of the screen capture stream (§41)."""
@@ -122,7 +122,7 @@ class RecoveryEngine:
         self,
         action: ComputerAction,
         executor_func: Callable[[ComputerAction, int], ActionResult],
-        max_attempts: int = 2,
+        max_attempts: int = 3,
     ) -> ActionResult:
         """Executes action through bounded recovery (default MAX_RECOVERY_ATTEMPTS = 2) (§42)."""
         last_result: ActionResult | None = None

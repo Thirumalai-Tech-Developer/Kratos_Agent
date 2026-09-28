@@ -8,11 +8,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from kratos_agent.brain.config import (
-    get_headroom_model,
-    get_headroom_proxy_port,
-    is_headroom_enabled,
-)
 from kratos_agent.core.compactor import ConversationCompactor, _try_headroom_compress
 from kratos_agent.core.context_pipeline import (
     ContextBudget,
@@ -179,7 +174,7 @@ class TestContextPipelineHeadroom(unittest.TestCase):
         long_text = "\n".join(f"Line {i}" for i in range(100))
         result, compressed = builder.prune_tool_result(long_text)
         self.assertTrue(compressed)
-        self.assertIn("lines omitted", result)
+        self.assertIn("characters omitted", result)
 
 
 class TestCompactorHeadroom(unittest.TestCase):
@@ -199,34 +194,6 @@ class TestCompactorHeadroom(unittest.TestCase):
         summary = compactor.compress_heuristic(older)
         self.assertIn("[COMPACTED CONVERSATION CHECKPOINT]", summary)
         self.assertIn("Please implement the new feature.", summary)
-
-
-class TestBrainConfigHeadroom(unittest.TestCase):
-    """Test Headroom config helper functions."""
-
-    def test_is_headroom_enabled_default(self):
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertTrue(is_headroom_enabled())
-
-    def test_is_headroom_enabled_custom(self):
-        with patch.dict("os.environ", {"HEADROOM_ENABLED": "false"}):
-            self.assertFalse(is_headroom_enabled())
-        with patch.dict("os.environ", {"HEADROOM_ENABLED": "true"}):
-            self.assertTrue(is_headroom_enabled())
-        with patch.dict("os.environ", {"HEADROOM_ENABLED": "0"}):
-            self.assertFalse(is_headroom_enabled())
-
-    def test_get_headroom_model(self):
-        with patch.dict("os.environ", {"HEADROOM_MODEL": "claude-3-5-sonnet"}):
-            self.assertEqual(get_headroom_model(), "claude-3-5-sonnet")
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(get_headroom_model(), "gpt-4o")
-
-    def test_get_headroom_proxy_port(self):
-        with patch.dict("os.environ", {"HEADROOM_PROXY_PORT": "8787"}):
-            self.assertEqual(get_headroom_proxy_port(), 8787)
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertIsNone(get_headroom_proxy_port())
 
 
 if __name__ == "__main__":

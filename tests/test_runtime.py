@@ -9,7 +9,6 @@ from kratos_agent.core.context_pipeline import ContextBuilder, ContextBudget
 from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
 from kratos_agent.core.runtime_contracts import ChatMessage, ModelResponse, ToolCall, ToolPermission, ToolSpec
 from kratos_agent.core.tool_runtime import ToolRegistry
-from kratos_agent.live.runtime import _resolve_live_chat_reply
 
 
 class ScriptedModel:
@@ -20,50 +19,6 @@ class ScriptedModel:
 
 
 class RuntimeLoopTests(unittest.TestCase):
-    def test_live_generic_error_uses_correlated_verified_task_result(self):
-        status = {
-            "last_result": {
-                "task_id": "TASK-new",
-                "status": "success",
-                "verified": True,
-                "evidence": {"message": "calculator and tests are in place"},
-            }
-        }
-        reply = _resolve_live_chat_reply("Sorry, a system error occurred.", "TASK-old", status)
-        self.assertIn("completed and verified", reply)
-        self.assertIn("calculator and tests are in place", reply)
-
-    def test_live_generic_error_uses_correlated_task_diagnostic(self):
-        status = {
-            "last_result": {
-                "task_id": "TASK-new",
-                "status": "failed",
-                "error": {
-                    "component": "brain",
-                    "stage": "model_request",
-                    "user_message": "Provider returned HTTP 429",
-                    "recovery_action": "Retry later",
-                },
-            }
-        }
-        reply = _resolve_live_chat_reply("I'm sorry, but a system error occurred.", "TASK-old", status)
-        self.assertIn("brain during model_request", reply)
-        self.assertIn("HTTP 429", reply)
-        self.assertIn("Retry later", reply)
-
-    def test_live_generic_error_without_new_task_signals_agent_fallback(self):
-        status = {"last_result": {"task_id": "TASK-old", "status": "success", "verified": True}}
-        self.assertEqual(
-            _resolve_live_chat_reply("I couldn't process your request.", "TASK-old", status),
-            "",
-        )
-
-    def test_live_normal_reply_is_preserved(self):
-        self.assertEqual(
-            _resolve_live_chat_reply("I created and tested the calculator.", None, {}),
-            "I created and tested the calculator.",
-        )
-
     def test_nonzero_terminal_exit_is_a_tool_error(self):
         tools = ToolRegistry()
         tools.register(

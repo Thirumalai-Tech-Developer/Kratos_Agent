@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 
 from kratos_agent.brain.client import BrainClient
-from kratos_agent.core.provider_runtime import BrainAdapter
+from kratos_agent.core.model_adapter import KratosModelAdapter
 from kratos_agent.core.runtime_contracts import EventKind, ModelResponse, RuntimeEvent
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.context_pipeline import ContextBuilder, ContextBudget
@@ -16,6 +16,13 @@ from kratos_agent.tui.live_renderer import KratosLiveRenderer
 
 
 class StreamResponseTests(unittest.TestCase):
+    def setUp(self):
+        self.model_env = patch.dict("os.environ", {"KRATOS_MODEL": "test-model"})
+        self.model_env.start()
+
+    def tearDown(self):
+        self.model_env.stop()
+
     def test_brain_client_on_chunk_invoked(self):
         client = BrainClient(endpoint_url="http://mock-brain/v1/chat/completions")
         mock_response = MagicMock()
@@ -44,14 +51,14 @@ class StreamResponseTests(unittest.TestCase):
         # Simulate chunks that form a tool call
         chunks = ["call:write_file", '{"file_path": ', '"app.py", "content": "hi"}']
         
-        def fake_generate(model, messages, system_instruction, on_chunk=None):
+        def fake_generate(model, messages, system_instruction, tools=None, on_chunk=None):
             if on_chunk:
                 for c in chunks:
                     on_chunk(c)
             return "".join(chunks)
 
         mock_client.generate.side_effect = fake_generate
-        adapter = BrainAdapter("test-model", mock_client)
+        adapter = KratosModelAdapter("test-model", mock_client)
 
         streamed = []
         resp = adapter.complete(
@@ -68,14 +75,14 @@ class StreamResponseTests(unittest.TestCase):
         mock_client = MagicMock()
         chunks = ["Hello! ", "I am ", "Kratos, ", "ready to help."]
         
-        def fake_generate(model, messages, system_instruction, on_chunk=None):
+        def fake_generate(model, messages, system_instruction, tools=None, on_chunk=None):
             if on_chunk:
                 for c in chunks:
                     on_chunk(c)
             return "".join(chunks)
 
         mock_client.generate.side_effect = fake_generate
-        adapter = BrainAdapter("test-model", mock_client)
+        adapter = KratosModelAdapter("test-model", mock_client)
 
         streamed = []
         resp = adapter.complete(

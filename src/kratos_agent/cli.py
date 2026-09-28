@@ -3,8 +3,10 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from kratos_agent.core.memory import AgenticSession
 
@@ -20,13 +22,8 @@ if sys.platform == "win32":
         logger.debug("Failed to reconfigure stdio encoding: %s", e)
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.application import Application
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import HTML, FormattedText
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import HSplit, Window
-from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.markdown import Markdown
@@ -83,17 +80,16 @@ def get_kratos_banner():
 
 HELP_TEXT = """
 [bold gold1]Available CLI Commands:[/bold gold1]
-  [bold cyan]/doctor[/bold cyan]                  - Run Brain connection & transport diagnostics (alias: /health)
-  [bold cyan]/model[/bold cyan] [dim][name][/dim]           - Switch LLM with [bold gold1]↑ / ↓ arrow keys[/bold gold1] or direct name
-  [bold cyan]/gateway[/bold cyan]                - View Brain Gateway status & configuration (alias: /accounts)
+  [bold cyan]/doctor[/bold cyan]                  - Run Kratos model connection & transport diagnostics (alias: /health)
+  [bold cyan]/model[/bold cyan]                  - View the one configured Kratos model
+  [bold cyan]/gateway[/bold cyan]                - View Kratos Gateway status & configuration (alias: /accounts)
   [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
-  [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set approval mode (Codex-style)
-  [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Plan Mode (DeepSeek Harness & Claude Code)
-  [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - DeepSeek Harness presets & plugins manager
-  [bold cyan]/integrations[/bold cyan] [dim][status|import <framework-or-bundle>][/dim] - Connect OpenClaw/Claude Code MCP tools and skills
-  [bold cyan]/mcp[/bold cyan] [dim][status|reload|import <framework-or-config>][/dim] - Manage MCP server connections
+  [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set Kratos approval mode
+  [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Kratos Plan Mode
+  [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - Kratos Harness presets & plugins manager
+  [bold cyan]/mcp[/bold cyan] [dim][status|reload|import <config>][/dim] - Manage local MCP server connections
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
-  [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse or search 500+ Claude Code system prompts
+  [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse the project's engineering prompt library
   [bold cyan]/review[/bold cyan] [dim][target][/dim]         - Run multi-angle senior code review (alias: /code-review)
   [bold cyan]/simplify[/bold cyan] [dim][target][/dim]       - Run 4-angle code cleanup & refactoring sweep
   [bold cyan]/security[/bold cyan] [dim][target][/dim]       - Run high-confidence vulnerability & exploit audit
@@ -110,8 +106,6 @@ HELP_TEXT = """
   [bold cyan]/d1[/bold cyan]                     - Inspect Cloudflare D1 connection, database stats & diagnostics
   [bold cyan]/voice[/bold cyan] [dim][on|off][/dim]             - Toggle microphone voice input / mute
   [bold cyan]/vision[/bold cyan] [dim][camera|screen|both|off][/dim] - Control camera & screen capture vision
-  [bold cyan]/avatar[/bold cyan] [dim][on|off|dock|kitty|bot|shiba|dragon][/dim] - Control OpenPets desktop AI companion
-  [bold cyan]/pet[/bold cyan] [dim][kitty|bot|shiba|dragon|react][/dim]    - Switch AI Pet breed or trigger petting reaction
   [bold cyan]/live[/bold cyan] [dim][status|reconnect][/dim]        - Inspect or manage Gemini Live multimodal session
   [bold cyan]/search[/bold cyan] [dim][web|tools|memory|github] <q>[/dim] - Query unified search & retrieval fabric
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
@@ -123,7 +117,7 @@ HELP_TEXT = """
   [bold cyan]/help[/bold cyan]                    - Display this commands overview
   [bold cyan]/exit[/bold cyan]                    - Exit Kratos Agent (alias: /quit, Ctrl+C)
 
-[bold gold1]Background Agent (Kimi Swarm / Claude Code):[/bold gold1]
+[bold gold1]Background Agent (Kratos):[/bold gold1]
   [bold cyan]/bg-run[/bold cyan] [dim]<prompt>[/dim]         - Launch a prompt as a background task (non-blocking)
   [bold cyan]/bg-status[/bold cyan]               - Show all background tasks and their status
   [bold cyan]/bg-result[/bold cyan] [dim]<id>[/dim]          - Show output of a completed background task
@@ -146,16 +140,6 @@ prompt_style = Style.from_dict({
     "scrollbar.button": "bg:#FF4FA3",
 })
 
-# Models sourced dynamically from Brain Gateway
-from kratos_agent.brain.config import (
-    PUBLIC_MODELS as _PUBLIC_MODELS,
-)
-from kratos_agent.brain.config import (
-    get_available_models,
-)
-
-AVAILABLE_MODELS: list[str] = list(_PUBLIC_MODELS)
-
 def normalize_command(cmd_str: str) -> str:
     """Automatically detects and removes duplicate leading slashes (e.g. //help -> /help, ///review -> /review)."""
     cleaned = cmd_str.strip()
@@ -164,14 +148,14 @@ def normalize_command(cmd_str: str) -> str:
     return cleaned
 
 class KratosCompleter(Completer):
-    """Provides live autocomplete for /commands, @files, and /model names with auto-deduplication."""
+    """Provides live autocomplete for commands and workspace files."""
     SLASH_COMMANDS = [
         ("/doctor", "Run Brain connection & transport diagnostics (alias: /health)"),
         ("/gateway", "View Brain Gateway status & configuration (alias: /accounts)"),
         ("/bypass", "View / confirm autonomous bypass permissions mode"),
         ("/session", "Manage isolated agentic memory sessions (new, load, list, show, rm)"),
-        ("/model", "Switch active LLM (use ↑/↓ arrow keys or name)"),
-        ("/prompts", "Browse or search 500+ Claude Code system prompts"),
+        ("/model", "View the one configured Kratos model"),
+        ("/prompts", "Browse the project's engineering prompt library"),
         ("/review", "Run senior multi-angle code review on changes"),
         ("/simplify", "Run 4-angle code cleanup and refactoring sweep"),
         ("/security", "Run security vulnerability & exploit audit"),
@@ -192,15 +176,13 @@ class KratosCompleter(Completer):
         ("/parallel", "Toggle or view parallel tool execution status (/parallel on|off)"),
         ("/parallel on", "Enable concurrent tool & subagent execution"),
         ("/parallel off", "Disable concurrent tool execution (sequential mode)"),
-        ("/harness", "DeepSeek Harness status, preset mode, plugins & trace"),
+        ("/harness", "Kratos Harness status, preset mode, plugins & trace"),
         ("/harness status", "Inspect active preset, loaded plugins and health"),
         ("/harness mode", "Switch harness preset (standard, code, minimal, creator)"),
         ("/harness plugins", "List all registered and active harness plugins"),
         ("/harness trace", "View recent execution trace and audit replay"),
-        ("/integrations", "Inspect installed agent frameworks and imported MCP servers"),
-        ("/integrations import", "Import MCP tools and Agent Skills from OpenClaw, Claude Code, or a plugin bundle"),
         ("/mcp", "Inspect connected MCP servers and tools"),
-        ("/mcp import", "Import existing Claude Code/OpenClaw MCP config or a plugin bundle"),
+        ("/mcp import", "Import an MCP server configuration file"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
         ("/web", "Launch interactive Cloudflare D1 Web Console & Trace viewer"),
@@ -217,10 +199,6 @@ class KratosCompleter(Completer):
         ("/vision screen", "Enable screen capture vision"),
         ("/vision both", "Enable both camera and screen vision"),
         ("/vision off", "Disable vision capture"),
-        ("/avatar", "Manage floating desktop companion (/avatar on|off|dock)"),
-        ("/avatar on", "Show floating desktop avatar"),
-        ("/avatar off", "Hide floating desktop avatar"),
-        ("/avatar dock", "Dock/undock floating avatar to screen edge"),
         ("/live", "Inspect Gemini Live multimodal status (/live status|reconnect)"),
         ("/live status", "Show multimodal status, active task, and devices"),
         ("/live reconnect", "Reconnect Gemini Live session"),
@@ -237,21 +215,7 @@ class KratosCompleter(Completer):
             text_before = normalize_command(text_before)
         word_before = document.get_word_before_cursor(WORD=True)
 
-        # 1. Autocomplete for /model <model_name>
-        if text_before.startswith("/model "):
-            model_query = text_before[len("/model "):].strip().lower()
-            current_models = get_available_models(refresh=False) or AVAILABLE_MODELS
-            for mid in current_models:
-                if model_query in mid.lower():
-                    yield Completion(
-                        text=mid,
-                        start_position=-len(text_before[len("/model "):]),
-                        display=mid,
-                        display_meta="Model"
-                    )
-            return
-
-        # 2. Autocomplete for /skill subcommands and installed skill names
+        # 1. Autocomplete for /skill subcommands and installed skill names
         if text_before.startswith("/skill ") or text_before.startswith("/skills "):
             sub_parts = text_before.split(maxsplit=2)
             if len(sub_parts) == 2 and not text_before.endswith(" "):
@@ -344,12 +308,7 @@ def print_welcome():
     mem_file = project_memory.file_path
     mem_label = str(mem_file.name) if mem_file else "KRATOS.md (none)"
 
-    try:
-        from kratos_agent.brain.config import get_model_badge
-        _badge = get_model_badge(runtime.model_name)
-    except Exception:
-        _badge = ""
-    grid.add_row("⚔  Model", f"[bold cyan]{runtime.model_name}[/bold cyan]  [bold gold1]{_badge}[/bold gold1] [dim](OmniRoute Gateway)[/dim]")
+    grid.add_row("⚔  Model", f"[bold cyan]{escape(runtime.model_name or 'UNCONFIGURED')}[/bold cyan] [dim](Kratos Gateway)[/dim]")
     grid.add_row("⛓  Mode", f"{mode_badge}  [dim]| /mode suggest|auto-edit|full-auto|sovereign[/dim]")
     grid.add_row("🔧  Tools", f"[bold green]{num_tools} loaded[/bold green]  [dim]{', '.join(loaded_tool_names[:5])}{'...' if num_tools > 5 else ''}[/dim]")
     grid.add_row("🧠  Skills", f"[bold green]{num_skills} active[/bold green]  [dim]Use /skill to view or add[/dim]")
@@ -364,6 +323,7 @@ def print_welcome():
 
         _mic_badge = "[bold green]ONLINE[/bold green]" if _st.microphone_active else "[dim]OFFLINE[/dim]"
         _cam_badge = "[bold green]ONLINE[/bold green]" if _st.camera_active else "[dim]OFFLINE[/dim]"
+        _scr_badge = "[bold green]ONLINE[/bold green]" if _st.screen_active else "[dim]OFFLINE[/dim]"
         _voice_eng = get_native_voice()
         if _st.muted or (_voice_eng and _voice_eng.is_muted):
             _voice_badge = "[bold yellow]MUTED[/bold yellow]"
@@ -378,7 +338,7 @@ def print_welcome():
         logger.debug("Failed to populate live subsystem badges: %s", e)
 
 
-    grid.add_row("⚡  Quick Start", "[bold gold1]/[/bold gold1] for commands  [bold gold1]/model[/bold gold1] to switch  [bold green]@[/bold green] for files  [bold cyan]/bg-run[/bold cyan] background")
+    grid.add_row("⚡  Quick Start", "[bold gold1]/[/bold gold1] for commands  [bold gold1]/model[/bold gold1] to view the configured model  [bold green]@[/bold green] for files  [bold cyan]/bg-run[/bold cyan] background")
 
     console.print(
         Panel(
@@ -418,145 +378,25 @@ def parse_file_mentions(user_input: str) -> tuple[str, list[str]]:
     expanded_input = user_input + "".join(attachments_text)
     return expanded_input, attached_files
 
-def select_model_arrow_menu(model_ids: list[str], active_model: str) -> str | None:
-    """Interactive terminal menu allowing selection using Up/Down arrow keys."""
-    if not model_ids:
-        return None
-
-    selected_idx = model_ids.index(active_model) if active_model in model_ids else 0
-    kb = KeyBindings()
-
-    @kb.add("up")
-    @kb.add("k")
-    def _(event):
-        nonlocal selected_idx
-        selected_idx = (selected_idx - 1) % len(model_ids)
-        event.app.invalidate()
-
-    @kb.add("down")
-    @kb.add("j")
-    def _(event):
-        nonlocal selected_idx
-        selected_idx = (selected_idx + 1) % len(model_ids)
-        event.app.invalidate()
-
-    @kb.add("enter")
-    def _(event):
-        event.app.exit(result=model_ids[selected_idx])
-
-    @kb.add("escape")
-    @kb.add("c-c")
-    @kb.add("q")
-    def _(event):
-        event.app.exit(result=None)
-
-    def get_formatted_text():
-        tokens = [
-            ("bold #E63946", " ⚔️  Select Active Model\n"),
-            ("italic #D4AF37", f"    Use ↑ / ↓ arrow keys (or j/k) to navigate, Enter to select, Esc to cancel ({len(model_ids)} available)\n\n")
-        ]
-        
-        visible_count = min(len(model_ids), 12)
-        start_idx = max(0, min(selected_idx - visible_count // 2, len(model_ids) - visible_count))
-        end_idx = min(len(model_ids), start_idx + visible_count)
-
-        if start_idx > 0:
-            tokens.append(("#6C7086", "    ▲ ...\n"))
-
-        from kratos_agent.brain.config import is_vision_model, is_thinking_model
-        for i in range(start_idx, end_idx):
-            m = model_ids[i]
-            is_active = (m == active_model)
-            active_badge = " [★ ACTIVE]" if is_active else ""
-            has_vis = is_vision_model(m)
-            has_thk = is_thinking_model(m)
-            vision_mark = " [👁️ VISION]" if has_vis else " [TEXT]"
-            think_mark = " [🧠 MAX-THINK]" if has_thk else ""
-            badge_str = f"{vision_mark}{think_mark}{active_badge}"
-
-            if i == selected_idx:
-                tokens.append(("bold bg:#E63946 fg:#FFFFFF", f"  ❯ {m}{badge_str} \n"))
-            else:
-                if is_active:
-                    tokens.append(("bold #00E676", f"    {m}{badge_str}\n"))
-                elif has_vis:
-                    tokens.append(("bold #00E5FF", f"    {m}{badge_str}\n"))
-                else:
-                    tokens.append(("#CDD6F4", f"    {m}{badge_str}\n"))
-
-        if end_idx < len(model_ids):
-            tokens.append(("#6C7086", "    ▼ ...\n"))
-
-        return FormattedText(tokens)
-
-    layout = Layout(HSplit([Window(content=FormattedTextControl(get_formatted_text))]))
-    app = Application(layout=layout, key_bindings=kb, full_screen=False)
-    
-    console.print()
-    return app.run()
-
 def handle_login(arg: str = ""):
-    """Notifies user that Kratos communicates directly with local Brain gateway without Google OAuth."""
-    console.print("\n[bold green]✓ Direct Brain Gateway Active[/bold green]")
-    console.print("[dim]Kratos uses Brain Gateway as its direct OpenAI-compatible model gateway. No Google login or authentication tokens required.[/dim]\n")
+    """Show that Kratos uses its configured local model gateway."""
+    console.print("\n[bold green]✓ Kratos Gateway Active[/bold green]")
+    console.print("[dim]Reasoning requests go to the configured local Kratos gateway and model.[/dim]\n")
 
 
 def handle_model_command(arg: str = ""):
-    """Handles the /model command with live endpoint fetching, capability filtering, and arrow key navigation."""
-    from kratos_agent.brain.config import (
-        get_available_models,
-        get_model_badge,
-        is_thinking_model,
-        is_vision_model,
-    )
+    """Show the single configured model; runtime model switching is disabled."""
+    from kratos_agent.brain.config import get_default_model
 
-    # Dynamically fetch available models from the active model endpoint
-    live_models = get_available_models(refresh=True)
-    if live_models:
-        AVAILABLE_MODELS.clear()
-        AVAILABLE_MODELS.extend(live_models)
-    model_ids = list(AVAILABLE_MODELS)
-
-    if arg:
-        target = arg.strip()
-        t_lower = target.lower()
-        if t_lower in ("vision", "v", "images", "image", "img"):
-            model_ids = [m for m in model_ids if is_vision_model(m)]
-            console.print(f"\n[bold cyan]👁️ Filtered to {len(model_ids)} Vision-capable models (Image+Text input):[/bold cyan]")
-        elif t_lower in ("think", "t", "thinking", "reason", "reasoning"):
-            model_ids = [m for m in model_ids if is_thinking_model(m)]
-            console.print(f"\n[bold gold1]🧠 Filtered to {len(model_ids)} Thinking / Reasoning models (Always Max Effort):[/bold gold1]")
-        elif t_lower in ("all", "reset"):
-            console.print(f"\n[bold white]Showing all {len(model_ids)} available models:[/bold white]")
-        elif target in model_ids:
-            runtime.set_model(target)
-            badge = get_model_badge(target)
-            console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan] [gold1]{badge}[/gold1]\n")
-            return
-        else:
-            matches = [m for m in model_ids if target.lower() in m.lower()]
-            if len(matches) == 1:
-                runtime.set_model(matches[0])
-                badge = get_model_badge(matches[0])
-                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{matches[0]}[/bold cyan] [gold1]{badge}[/gold1]\n")
-                return
-            elif len(matches) > 1:
-                console.print(f"[dim]Found {len(matches)} models matching '{target}':[/dim]")
-                model_ids = matches
-            else:
-                runtime.set_model(target)
-                badge = get_model_badge(target)
-                console.print(f"\n[bold green]⚡ Model switched to:[/bold green] [bold cyan]{target}[/bold cyan] [gold1]{badge}[/gold1]\n")
-                return
-
-    # Interactive Arrow Key Selection Menu
-    selected_model = select_model_arrow_menu(model_ids, runtime.model_name)
-    if selected_model:
-        runtime.set_model(selected_model)
-        badge = get_model_badge(selected_model)
-        console.print(f"[bold green]⚡ Active model changed to:[/bold green] [bold cyan]{selected_model}[/bold cyan] [gold1]{badge}[/gold1]\n")
-    else:
-        console.print("[dim]Model selection cancelled.[/dim]\n")
+    configured = get_default_model()
+    if not configured:
+        console.print("[bold red]No Kratos model is configured.[/bold red] Set KRATOS_MODEL to the exact ID served by the local gateway.\n")
+        return
+    if arg.strip() and arg.strip() != configured:
+        console.print(f"[bold yellow]Kratos is locked to {configured}.[/bold yellow] Model switching is disabled.\n")
+        return
+    runtime.set_model(configured)
+    console.print(f"[bold cyan]Kratos reasoning model:[/bold cyan] {escape(configured)}\n")
 
 
 def handle_memory_command(arg: str = ""):
@@ -782,7 +622,7 @@ def handle_harness_command(arg: str = ""):
                     f"[bold]Enabled Plugins:[/bold] {plugins_list}\n"
                     f"[bold]Allowed Tools:[/bold] {tools_list}\n\n"
                     f"[bold gold1]Active Directives:[/bold gold1]\n{directives_list}",
-                    title="[bold gold1]⚡ DEEPSEEK HARNESS PRESET ACTIVE[/bold gold1]",
+                    title="[bold gold1]⚡ KRATOS HARNESS PRESET ACTIVE[/bold gold1]",
                     border_style="gold1",
                     padding=(1, 2)
                 )
@@ -799,7 +639,7 @@ def handle_harness_command(arg: str = ""):
             console.print("[dim]No plugins loaded in harness kernel.[/dim]\n")
             return
 
-        table = Table(title="🔌 DeepSeek Harness Plugins (Everything is a Plugin)", border_style="gold1")
+        table = Table(title="🔌 Kratos Harness Plugins", border_style="gold1")
         table.add_column("Plugin Name", style="bold gold1")
         table.add_column("Version", style="dim white")
         table.add_column("Category", style="cyan")
@@ -835,7 +675,7 @@ def handle_harness_command(arg: str = ""):
             console.print("[dim]No trace events recorded yet in harness.[/dim]\n")
             return
 
-        table = Table(title=f"📜 DeepSeek Harness Audit Trace (Last {len(events)} Events)", border_style="gold1")
+        table = Table(title=f"📜 Kratos Harness Audit Trace (Last {len(events)} Events)", border_style="gold1")
         table.add_column("Seq", style="dim", justify="right", width=5)
         table.add_column("Timestamp", style="dim white", width=20)
         table.add_column("Event Type", style="bold cyan", width=20)
@@ -871,7 +711,7 @@ def handle_harness_command(arg: str = ""):
     console.print(
         Panel(
             table,
-            title="[bold gold1]⚡ DEEPSEEK HARNESS RUNTIME KERNEL[/bold gold1]",
+            title="[bold gold1]⚡ KRATOS HARNESS RUNTIME KERNEL[/bold gold1]",
             border_style="gold1",
             padding=(1, 2)
         )
@@ -879,39 +719,29 @@ def handle_harness_command(arg: str = ""):
     console.print("[dim]Subcommands: /harness mode <standard|code|minimal|creator> | /harness plugins | /harness trace [limit][/dim]\n")
 
 
-def handle_integrations_command(arg: str = ""):
-    """Inspect or import interoperable framework extensions without executing plugin code."""
+def handle_mcp_command(arg: str = ""):
+    """Inspect and manage MCP servers configured directly for Kratos."""
     parts = arg.strip().split(maxsplit=1)
     subcmd = parts[0].lower() if parts else "status"
     target = parts[1].strip() if len(parts) > 1 else ""
     if subcmd in {"import", "add"}:
         if not target:
-            console.print("[yellow]Usage: /integrations import <openclaw|claude-code|path-to-plugin-bundle>[/yellow]\n")
+            console.print("[yellow]Usage: /mcp import <path-to-mcp-config.json>[/yellow]\n")
             return
         try:
-            result = runtime.import_integration(target)
+            count = runtime.mcp.add_import(target)
+            runtime.reload_tools()
         except Exception as exc:
             console.print(f"[bold red]Import failed:[/bold red] {type(exc).__name__}: {exc}\n")
             return
-        console.print(Panel(
-            f"[bold green]Imported integration source:[/bold green] {result['source']}\n"
-            f"MCP servers registered: {result['mcp_servers']}\n"
-            f"Plugin MCP config files: {len(result['mcp_configs'])}\n"
-            f"Skills found in bundles: {result['skills']}\n"
-            "Native plugin code and hooks remain owned by their original runtime.",
-            title="[bold gold1]Framework Bridge[/bold gold1]", border_style="gold1"))
+        console.print(f"[green]Imported MCP config. {count} server(s) are now configured for Kratos.[/green]\n")
         return
     if subcmd in {"reload", "refresh"}:
         runtime.reload_tools()
-    frameworks = runtime.frameworks.available()
-    table = Table(title="Agent Framework Integrations", border_style="gold1")
-    table.add_column("Framework", style="bold gold1")
-    table.add_column("CLI", style="white")
-    table.add_column("State", style="cyan")
-    for name, executable in frameworks.items():
-        table.add_row(name, executable or "not installed", "available" if executable else "unavailable")
+        console.print("[green]MCP server configuration reloaded.[/green]\n")
+        return
 
-    mcp_table = Table(title="Imported MCP Servers", border_style="gold1")
+    mcp_table = Table(title="Configured MCP Servers", border_style="cyan")
     mcp_table.add_column("Server", style="bold gold1")
     mcp_table.add_column("Transport", style="cyan")
     mcp_table.add_column("State", style="white")
@@ -921,19 +751,17 @@ def handle_integrations_command(arg: str = ""):
         state = runtime.mcp.status.get(name, {})
         mcp_table.add_row(name, server.transport or ("stdio" if server.command else "HTTP"), state.get("state", "not connected"), str(state.get("tools", 0)), state.get("error", ""))
     if not runtime.mcp.servers:
-        console.print("[dim]No MCP servers imported yet.[/dim]")
+        console.print("[dim]No MCP servers configured.[/dim]")
     else:
         console.print(mcp_table)
-    console.print(table)
-    unique_skills = {str(skill.path) for skill in runtime.skill_manager.skills.values()}
-    console.print(f"Agent Skills discovered: {len(unique_skills)}")
-    console.print("[dim]Use /integrations import openclaw | claude-code | <bundle path>, then /integrations reload.[/dim]\n")
+    console.print("[dim]Use /mcp import <path-to-config.json> to add a local MCP server configuration.[/dim]\n")
 
 
 def handle_accounts_command():
-    """Displays active Brain Gateway configuration."""
+    """Displays the configured Kratos gateway and reasoning model."""
     from kratos_agent.brain import (
         get_base_url,
+        get_default_model,
         get_endpoint_url,
         get_max_retries,
         get_request_timeout,
@@ -941,19 +769,17 @@ def handle_accounts_command():
     base_url = get_base_url()
     endpoint = get_endpoint_url()
 
-    table = Table(title="⚔ Brain Gateway Configuration", border_style="gold1")
+    table = Table(title="⚔ Kratos Gateway Configuration", border_style="gold1")
     table.add_column("Property", style="bold cyan", width=22)
     table.add_column("Value / Details", style="white")
 
     table.add_row("Base URL", base_url)
     table.add_row("Chat Endpoint", endpoint)
-    table.add_row("Active Model", runtime.model_name)
+    table.add_row("Kratos model", get_default_model() or "UNCONFIGURED")
     table.add_row("Request Timeout", f"{get_request_timeout()}s")
     table.add_row("Max Retries", str(get_max_retries()))
     table.add_row("Proxy Bypass", "[bold green]trust_env = False (Active)[/bold green]")
-    current_models = get_available_models(refresh=False) or AVAILABLE_MODELS
-    preview = ", ".join(current_models[:5]) + ("..." if len(current_models) > 5 else "") if current_models else "None"
-    table.add_row("Available Models", f"{preview} ({len(current_models)} total)")
+    table.add_row("Model policy", "Single configured model; no model switching or provider fallback")
 
     console.print(table)
     console.print()
@@ -964,7 +790,6 @@ def handle_system_status_command():
     from kratos_agent.ccs import get_capability_map
     from kratos_agent.core.latency_tracker import latency_tracker
     from kratos_agent.live import get_live_runtime
-    from kratos_agent.master.supervisor import get_master_supervisor
 
     table = Table(title="⚔  KRATOS STATUS", border_style="red")
     table.add_column("Subsystem", style="bold gold1", width=18)
@@ -1018,32 +843,13 @@ def handle_system_status_command():
         mic_state = "muted" if st.muted else ("active" if st.microphone_active else "inactive")
         table.add_row("Gemini Live", f"{escape(live_state)} · microphone {mic_state} · speaker {'active' if st.speaker_active else 'inactive'}")
         table.add_row("Voice", f"{'MUTED' if st.muted else 'ONLINE (Native SAPI TTS)'} · mic {mic_state}")
-        table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'} · OmniRoute vision routing")
+        table.add_row("Vision", f"screen {'ON' if st.screen_active else 'OFF'} · camera {'ON' if st.camera_active else 'OFF'} · analysis uses configured Kratos model")
         if st.last_error:
             table.add_row("Live error", escape(st.last_error))
     except Exception as exc:
         table.add_row("Gemini Live", f"Unavailable: {escape(type(exc).__name__)}")
         table.add_row("Voice", f"Unavailable: {escape(type(exc).__name__)}")
         table.add_row("Vision", "Unavailable")
-
-    # Tasks
-    task_status = get_master_supervisor().get_status()
-    active_id = task_status.get("active_task_id")
-    task_state = f"running · {task_status.get('mission') or active_id}" if active_id else "idle"
-    table.add_row("Tasks", escape(task_state))
-    diagnostic = task_status.get("last_error")
-    if diagnostic:
-        if isinstance(diagnostic, dict):
-            component = diagnostic.get("component", "agent")
-            stage = diagnostic.get("stage", "execution")
-            message = diagnostic.get("user_message") or diagnostic.get("message") or "Unknown failure"
-            recovery = diagnostic.get("recovery_action")
-            text = f"{component} / {stage}: {message}"
-            if recovery:
-                text += f" · Recovery: {recovery}"
-        else:
-            text = str(diagnostic)
-        table.add_row("Last task error", escape(text))
 
     console.print()
     console.print(table)
@@ -1132,7 +938,7 @@ def handle_doctor_command():
     else:
         advice = [
             f"• [bold red]Issue:[/bold red] {error_msg}",
-            f"• [dim]Make sure Brain gateway is running with OpenAI-compatible endpoint at {base_url}.[/dim]",
+            f"• [dim]Make sure the Kratos gateway is running at {base_url}.[/dim]",
             f"• [dim]Verify {runtime.model_name} is supported by Brain gateway.[/dim]",
         ]
         console.print(Panel("\n".join(advice), title="[bold gold1]💡 Diagnostics Advice[/bold gold1]", border_style="red", padding=(1, 2)))
@@ -1183,7 +989,7 @@ def handle_create_tool_command(user_prompt: str = ""):
     )
 
     try:
-        reply = runtime.brain.client.generate(
+        reply = runtime.brain.generate(
             model=runtime.model_name,
             messages=[{"role": "user", "content": prompt}],
             max_retries=3
@@ -1463,7 +1269,7 @@ def handle_session_command(arg: str = ""):
         console.print(f"[yellow]Unknown session action: '{subcmd}'. Use '/session list', '/session new [title]', '/session load <id>', or '/session rm <id>'.[/yellow]\n")
 
 def handle_prompts_command(arg: str = ""):
-    """Browses, searches, or views 500+ Claude Code system prompts and subagent instructions."""
+    """Browses, searches, or views reusable coding prompts and subagent instructions."""
     parts = arg.strip().split(maxsplit=1)
     subcmd = parts[0].lower() if parts else ""
     target = parts[1].strip() if len(parts) > 1 else ""
@@ -1493,7 +1299,7 @@ def handle_prompts_command(arg: str = ""):
         console.print(f"[yellow]No prompts found matching '{query}'.[/yellow]\n")
         return
 
-    table = Table(title=f"📜 Claude Code Prompts ({len(prompt_library.prompts)} Indexed)", border_style="gold1")
+    table = Table(title=f"📜 Coding Prompts ({len(prompt_library.prompts)} Indexed)", border_style="gold1")
     table.add_column("Key / Title", style="bold gold1")
     table.add_column("Category", style="cyan")
     table.add_column("Description", style="white")
@@ -1532,10 +1338,10 @@ def handle_code_review_command(arg: str = ""):
     """Executes a multi-angle senior code review workflow on recent changes or target files."""
     target = arg.strip()
     target_desc = f"target: '{target}'" if target else "current workspace diff"
-    console.print(f"\n[bold gold1]🔍 Launching Claude Code Senior Review on {target_desc}...[/bold gold1]\n")
+    console.print(f"\n[bold gold1]🔍 Launching Kratos Senior Review on {target_desc}...[/bold gold1]\n")
     
     subagent_prompt = prompt_library.get_subagent_prompt("code_review")
-    query = f"""Execute a thorough senior code review using Claude Code's 5-angle review protocol (line-by-line correctness, removed behavior, cross-file caller trace, language pitfalls, edge cases).
+    query = f"""Execute a thorough senior code review using a 5-angle review protocol (line-by-line correctness, removed behavior, cross-file caller trace, language pitfalls, edge cases).
 Target / Scope: {target if target else 'Working tree changes (git diff HEAD / git diff origin/HEAD...)'}
 
 {subagent_prompt}"""
@@ -1556,7 +1362,7 @@ def handle_simplify_command(arg: str = ""):
     """Executes a 4-angle code simplification and refactoring sweep."""
     target = arg.strip()
     target_desc = f"target: '{target}'" if target else "current workspace diff"
-    console.print(f"\n[bold gold1]✨ Launching Claude Code 4-Angle Simplification on {target_desc}...[/bold gold1]\n")
+    console.print(f"\n[bold gold1]✨ Launching Kratos 4-Angle Simplification on {target_desc}...[/bold gold1]\n")
     
     subagent_prompt = prompt_library.get_subagent_prompt("simplify")
     query = f"""Execute a 4-angle codebase simplification and cleanup sweep (Reuse, Simplification, Efficiency, Altitude).
@@ -1580,7 +1386,7 @@ def handle_security_command(arg: str = ""):
     """Executes a high-confidence application security vulnerability review."""
     target = arg.strip()
     target_desc = f"target: '{target}'" if target else "current workspace diff"
-    console.print(f"\n[bold gold1]🛡️  Launching Claude Code Security Vulnerability Review on {target_desc}...[/bold gold1]\n")
+    console.print(f"\n[bold gold1]🛡️  Launching Kratos Security Vulnerability Review on {target_desc}...[/bold gold1]\n")
     
     subagent_prompt = prompt_library.get_subagent_prompt("security")
     query = f"""Execute a senior application security audit for high-confidence, exploitable vulnerabilities (Injections, Auth/Privilege flaws, Crypto/Secrets, XSS, Data Exposure).
@@ -1780,12 +1586,22 @@ def start_interactive_cli():
     live_runtime = get_live_runtime()
 
     def _on_live_user_speech(text: str) -> None:
-        console.print(f"\n[bold green]🎤 [Voice] You:[/bold green] [white]{text}[/white]")
+        console.print(f"\n[bold green]🎤 [Voice] You:[/bold green] {escape(text)}")
+
+        def _run_voice_request() -> None:
+            try:
+                reply = runtime.run_agent(text)
+                console.print(Panel(Markdown(reply), title="[bold cyan]KRATOS · Voice Request[/bold cyan]", border_style="cyan"))
+            except Exception as exc:
+                logger.exception("Voice request failed")
+                console.print(f"[bold red]Voice request failed:[/bold red] {escape(str(exc))}")
+
+        threading.Thread(target=_run_voice_request, daemon=True, name="kratos-voice-request").start()
 
     def _on_live_model_speech(text: str) -> None:
-        console.print(f"[bold cyan]⚡ [Voice] Kratos:[/bold cyan] [white]{text}[/white]\n")
+        console.print(f"[bold cyan]⚡ [Voice] Kratos:[/bold cyan] {escape(text)}\n")
 
-    live_runtime.session.on_user_transcript = _on_live_user_speech
+    live_runtime.on_user_transcript = _on_live_user_speech
     live_runtime.session.on_model_transcript = _on_live_model_speech
     live_runtime.start_in_background()
 
@@ -1876,7 +1692,7 @@ def start_interactive_cli():
                     prompt = "Describe what is currently visible on the screen in detail and note any key elements or errors."
                     if " " in arg_raw:
                         prompt = arg_raw.split(maxsplit=1)[1].strip()
-                    with console.status("[bold cyan]👁 Analyzing screen with OmniRoute vision model...[/bold cyan]", spinner="dots"):
+                    with console.status("[bold cyan]👁 Analyzing screen with the configured Kratos model...[/bold cyan]", spinner="dots"):
                         fut = asyncio.run_coroutine_threadsafe(
                             live_runtime.vision.analyze_vision(prompt=prompt, source="screen"),
                             live_runtime._loop,
@@ -1885,13 +1701,7 @@ def start_interactive_cli():
                             v_reply = fut.result(timeout=60.0)
                         except Exception as e:
                             v_reply = f"Vision error: {e}"
-                    console.print(Panel(v_reply, title="[bold cyan]👁 OmniRoute Screen Analysis[/bold cyan]", border_style="cyan"))
-                    if live_runtime and not live_runtime.audio.is_muted and v_reply:
-                        live_runtime.speak(v_reply)
-                    else:
-                        from kratos_agent.output.native_voice import get_native_voice
-                        if not get_native_voice().is_muted:
-                            get_native_voice().speak(v_reply)
+                    console.print(Panel(v_reply, title="[bold cyan]👁 Kratos Screen Analysis[/bold cyan]", border_style="cyan"))
                     continue
 
                 if not arg_raw:
@@ -1957,65 +1767,6 @@ def start_interactive_cli():
                     console.print("\n[bold yellow]👁 Vision capture disabled.[/bold yellow]\n")
                 continue
 
-            if user_input.lower().startswith("/avatar") or user_input.lower().startswith("/pet"):
-                parts = user_input.split(maxsplit=2)
-                cmd = parts[0].lower()
-                arg1 = parts[1].strip().lower() if len(parts) > 1 else ""
-                arg2 = parts[2].strip() if len(parts) > 2 else ""
-
-                if cmd == "/pet" and arg1 in ("kitty", "bot", "shiba", "dragon", "custom"):
-                    if not live_runtime.avatar:
-                        live_runtime.start_floating_avatar(pet_breed=arg1)
-                    else:
-                        live_runtime.avatar.set_pet_breed(arg1)
-                    console.print(f"\n[bold green]🐾 Switched AI Pet companion to [bold cyan]{arg1.title()}[/bold cyan]![/bold green]\n")
-                elif arg1 in ("pet", "breed", "companion"):
-                    target_breed = arg2.lower() if arg2 else "kitty"
-                    if target_breed in ("kitty", "bot", "shiba", "dragon", "custom"):
-                        if not live_runtime.avatar:
-                            live_runtime.start_floating_avatar(pet_breed=target_breed)
-                        else:
-                            live_runtime.avatar.set_pet_breed(target_breed)
-                        console.print(f"\n[bold green]🐾 AI Pet breed changed to [bold cyan]{target_breed.title()}[/bold cyan]![/bold green]\n")
-                    else:
-                        console.print("\n[bold yellow]Available breeds: kitty, bot, shiba, dragon, custom[/bold yellow]\n")
-                elif arg1 in ("off", "hide", "close", "0"):
-                    live_runtime.stop_floating_avatar()
-                    console.print("\n[bold yellow]Floating AI Pet hidden.[/bold yellow]\n")
-                elif arg1 in ("on", "show", "open", "1"):
-                    breed = arg2.lower() if arg2 in ("kitty", "bot", "shiba", "dragon", "custom") else "kitty"
-                    live_runtime.start_floating_avatar(pet_breed=breed)
-                    console.print(f"\n[bold green]🐾 Floating AI Pet ([bold cyan]{breed.title()}[/bold cyan]) active on desktop.[/bold green]\n")
-                elif arg1 in ("dock", "undock", "toggle"):
-                    if live_runtime.avatar:
-                        live_runtime.avatar.toggle_dock()
-                        console.print("\n[bold cyan]Floating AI Pet dock toggled.[/bold cyan]\n")
-                    else:
-                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
-                elif arg1 in ("react", "pet", "love", "heart"):
-                    if live_runtime.avatar:
-                        live_runtime.avatar.trigger_pet_reaction()
-                        console.print("\n[bold pink1]❤️ ✨ AI Pet petted! Joyful reaction triggered![/bold pink1]\n")
-                    else:
-                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
-                elif arg1 in ("chat", "say", "bubble"):
-                    if live_runtime.avatar and arg2:
-                        live_runtime.avatar.show_speech_bubble(arg2)
-                        console.print("\n[bold cyan]💬 Speech bubble displayed on pet.[/bold cyan]\n")
-                    elif live_runtime.avatar:
-                        live_runtime.avatar.toggle_chat()
-                        console.print("\n[bold cyan]💬 Chat balloon opened on desktop pet.[/bold cyan]\n")
-                    else:
-                        console.print("\n[bold yellow]Floating AI Pet is not currently active.[/bold yellow]\n")
-                else:
-                    active = live_runtime.avatar is not None
-                    docked = live_runtime.avatar.is_docked if active else False
-                    breed = getattr(live_runtime.avatar, "pet_breed", "kitty") if active else "kitty"
-                    console.print(f"\n[bold gold1]🐾 Floating AI Pet:[/bold gold1] {'[bold green]ACTIVE[/bold green]' if active else '[dim]INACTIVE[/dim]'} (Breed: [bold cyan]{breed}[/bold cyan], Docked: {docked})")
-                    console.print("[dim]Usage: /avatar on [kitty|bot|shiba|dragon] | /avatar off | /avatar dock | /pet <breed>[/dim]")
-                    console.print("[dim]Hover over pet on desktop to reveal: 💬 Chat | 🎙️ Mic | 👁️ Vision | ⋯ More[/dim]\n")
-                continue
-
             if user_input.lower().startswith("/live"):
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
@@ -2067,18 +1818,6 @@ def start_interactive_cli():
                     console.print()
                     console.print(live_table)
                     console.print()
-                continue
-
-            if user_input.lower().startswith("/providers") or user_input.lower().startswith("/provider"):
-                parts = user_input.split(maxsplit=2)
-                sub = parts[1].strip().lower() if len(parts) > 1 else "doctor"
-                from kratos_agent.providers.diagnostics import inspect_provider, render_provider_doctor
-                if sub in ("doctor", "status", "health", "list"):
-                    render_provider_doctor(console=console)
-                elif sub in ("inspect", "details", "info") and len(parts) > 2:
-                    inspect_provider(parts[2].strip().lower(), console=console)
-                else:
-                    render_provider_doctor(console=console)
                 continue
 
             if user_input.lower().startswith("/search"):
@@ -2367,7 +2106,7 @@ def start_interactive_cli():
                         console.print()
                 continue
 
-            # /mode [suggest|auto-edit|full-auto] — Codex-style approval mode
+            # /mode [suggest|auto-edit|full-auto] — Kratos approval mode
             if user_input.lower().startswith("/mode"):
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
@@ -2397,7 +2136,7 @@ def start_interactive_cli():
                     console.print("\n[dim]Usage: /mode suggest | /mode auto-edit | /mode full-auto | /mode sovereign[/dim]\n")
                 continue
 
-            # /plan [on|off|<query>] — Plan Mode (DeepSeek Harness & Claude Code)
+            # /plan [on|off|<query>] — Kratos Plan Mode
             if user_input.lower().startswith("/plan"):
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1].strip() if len(parts) > 1 else ""
@@ -2434,28 +2173,21 @@ def start_interactive_cli():
                 handle_system_status_command()
                 continue
 
-            # /harness [status|mode|plugins|trace] — DeepSeek Harness manager
+            # /harness [status|mode|plugins|trace] — Kratos Harness manager
             if user_input.lower().startswith("/harness"):
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
                 handle_harness_command(arg)
                 continue
 
-            # /integrations [status|import <framework-or-bundle>|reload]
-            if user_input.lower().startswith("/integrations"):
-                parts = user_input.split(maxsplit=1)
-                arg = parts[1] if len(parts) > 1 else ""
-                handle_integrations_command(arg)
-                continue
-
-            # /mcp is a short alias for the framework bridge's server controls.
+            # /mcp manages local MCP server configuration and status.
             if user_input.lower() == "/mcp" or user_input.lower().startswith("/mcp "):
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
-                handle_integrations_command(arg)
+                handle_mcp_command(arg)
                 continue
 
-            # /bg-run <prompt> — Background agent loop (Kimi swarm / Claude Code)
+            # /bg-run <prompt> — Background Kratos agent task
             if user_input.lower().startswith("/bg-run"):
                 parts = user_input.split(maxsplit=1)
                 bg_prompt = parts[1].strip() if len(parts) > 1 else ""
@@ -2562,7 +2294,7 @@ def start_interactive_cli():
                 continue
 
             if not reply_text.strip():
-                reply_text = "Task executed successfully."
+                reply_text = "No response was produced; task completion is unconfirmed."
 
             # Prevent network/provider error messages from contaminating multi-turn conversational history
             if reply_text.startswith("Model request failed:") or reply_text.startswith("Execution error:"):
@@ -2570,17 +2302,6 @@ def start_interactive_cli():
                     messages.pop()
             else:
                 messages.append({"role": "assistant", "content": reply_text})
-                # Voice Narration (Gemini Live natural voice prioritized)
-                try:
-                    if live_runtime and not live_runtime.audio.is_muted and reply_text:
-                        live_runtime.speak(reply_text)
-                    else:
-                        from kratos_agent.output.native_voice import get_native_voice
-                        voice_eng = get_native_voice()
-                        if not voice_eng.is_muted and reply_text:
-                            voice_eng.speak(reply_text)
-                except Exception as e:
-                    logger.debug("[CLI] Voice output error: %s", e)
 
             # Styled Box Output: Completion Card for coding/project tasks, clean Markdown for chat
             last_plan = _tui.get_last_plan()
@@ -2683,17 +2404,6 @@ def main():
         code_reloader.auto_reload_if_changed()
         start_interactive_cli()
         return
-    if len(args) >= 1 and args[0] in ("providers", "--providers", "provider"):
-        from kratos_agent.providers.diagnostics import inspect_provider, render_provider_doctor
-        sub = args[1].lower() if len(args) > 1 else "doctor"
-        if sub in ("doctor", "status", "health", "list"):
-            render_provider_doctor(console=console)
-        elif sub in ("inspect", "details", "info") and len(args) > 2:
-            inspect_provider(args[2].lower(), console=console)
-        else:
-            render_provider_doctor(console=console)
-        return
-
     # If invoked with no arguments or explicitly requesting web server:
     if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1].strip() in ("--web", "web", "/web", "serve", "server")):
         port = 7860
@@ -2742,7 +2452,7 @@ def main():
         return
         
     if not reply.strip():
-        reply = "Task executed successfully."
+        reply = "No response was produced; task completion is unconfirmed."
 
     last_plan = _tui.get_last_plan()
     if last_plan and last_plan.tasks and not _tui.is_chat_mode():

@@ -1,17 +1,6 @@
 {
   "version": "1.0.0",
   "plugins": {
-    "deepseek_model": {
-      "name": "deepseek_model",
-      "version": "1.0.0",
-      "class": "DeepSeekModelPlugin",
-      "module": "kratos_agent.core.harness.plugins.deepseek_model_plugin",
-      "description": "Specialized adapter for DeepSeek reasoning and DSML format.",
-      "category": "model",
-      "required_services": [],
-      "provides_services": ["deepseek_model"],
-      "presets": ["standard", "code", "full"]
-    },
     "memory": {
       "name": "memory",
       "version": "1.0.0",

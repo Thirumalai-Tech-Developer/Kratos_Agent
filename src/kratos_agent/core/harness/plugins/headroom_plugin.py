@@ -100,7 +100,9 @@ class HeadroomPlugin(HarnessPlugin):
         super().__init__(config=config)
         self.stats = HeadroomStats()
         self._compress_fn = None
-        self._model_name: str = "gpt-4o"  # Default tokenizer model for Headroom
+        from kratos_agent.brain.config import get_default_model
+
+        self._model_name = get_default_model()
 
     def on_register(self) -> None:
         """Called when headroom plugin is registered."""
@@ -172,7 +174,7 @@ class HeadroomPlugin(HarnessPlugin):
         """Compress a list of chat messages using Headroom.
 
         Args:
-            messages: OpenAI-format message list [{role, content}, ...]
+            messages: Gateway chat message list [{role, content}, ...]
             model: Model name for tokenizer (defaults to self._model_name)
 
         Returns:
@@ -182,6 +184,8 @@ class HeadroomPlugin(HarnessPlugin):
             return messages, {"compressed": False, "reason": "headroom_unavailable" if not self.available else "empty_messages"}
 
         target_model = model or self._model_name
+        if not target_model:
+            return messages, {"compressed": False, "reason": "model_not_configured"}
         t0 = time.monotonic()
 
         try:

@@ -1,6 +1,5 @@
 """
 Approval/Permission Mode system for Kratos Agent.
-Mirrors Codex CLI (suggest / auto-edit / full-auto) and Kimi Code safe mode.
 
 Modes:
   SUGGEST    — Agent can read/analyze only. All writes/execs need user approval.
@@ -26,7 +25,7 @@ from rich.prompt import Prompt
 console = Console(highlight=False)
 
 # ──────────────────────────────────────────────────────────
-# Destructive command blocklist (Codex-style safety)
+# Destructive command blocklist for guarded shell execution.
 # ──────────────────────────────────────────────────────────
 _DANGEROUS_PATTERNS = [
     r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+/",        # rm -rf /
@@ -187,7 +186,7 @@ class ApprovalGate:
                 "Switch to auto-edit or full-auto mode to allow writes: [bold]/mode auto-edit[/bold]"
             )
             return False
-            
+
         return decision.allow
 
     def mode_badge(self) -> str:

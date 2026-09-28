@@ -49,7 +49,13 @@ class RequestRouter:
         (re.compile(r"^git\s+(status|diff|log|branch)$", re.IGNORECASE), "git_status"),
         (re.compile(r"^(list|show)\s+(files|directory|folder)$", re.IGNORECASE), "list_directory"),
     ]
-    _BROWSER_PATTERNS = re.compile(r"\b(youtube|browser|website|walk\s*through|web|url|navigate)\b", re.IGNORECASE)
+    _DEV_CREATION_PATTERNS = re.compile(
+        r"\b(make|create|build|develop|implement|code|generate|scaffold|setup|write)\b.*\b(website|web\s*site|web\s*app|app|application|page|site|project|server|api|game|frontend|backend|fullstack|component|ui|repo|dashboard|tool)\b"
+        r"|\b(react|tailwind|tailwindcss|vue|angular|svelte|nextjs|vite|node|express|flask|django|fastapi|html\+css|typescript|javascript|python)\b",
+        re.IGNORECASE,
+    )
+    _BROWSER_PATTERNS = re.compile(r"\b(youtube|browse|walk\s*through|gameplay|watch|video|trailer|url|navigate|open\s+(?:the\s+)?(?:web|website|site|url|page|youtube))\b", re.IGNORECASE)
+    _PLAY_DESKTOP_PATTERN = re.compile(r"^(?:please\s+|can you\s+|could you\s+)?play\s+.+$", re.IGNORECASE)
     _COMPUTER_PATTERNS = re.compile(r"\b(open|launch|click|type|scroll|press|window|desktop|app)\b", re.IGNORECASE)
     _MEMORY_PATTERNS = re.compile(r"\b(what do you remember|recall|my preference|saved memory|what is my name)\b", re.IGNORECASE)
 
@@ -101,15 +107,29 @@ class RequestRouter:
                 confidence=0.99,
             )
 
+        # 2. Software Development / Project Scaffolding / Code Creation Path
+        if self._DEV_CREATION_PATTERNS.search(clean_lower):
+            is_simple_snippet = bool(self._CODE_GEN_PATTERN.match(clean)) and not any(
+                w in clean_lower for w in ("website", "web site", "app", "project", "folder", "react", "tailwind", "vite", "build", "make", "create a website")
+            )
+            return RouteDecision(
+                category=RequestCategory.CODE if is_simple_snippet else RequestCategory.COMPLEX_TASK,
+                is_fast_path=is_simple_snippet,
+                target_tool_categories=["CODE", "FILES", "SYSTEM", "GENERAL", "BROWSER", "COMPUTER"],
+                requires_planning=not is_simple_snippet,
+                requires_memory=not is_simple_snippet,
+                requires_observation=True,
+                confidence=0.95,
+            )
 
-        # 2. Browser / YouTube / Web Navigation direct path (§18, §19, §22, §23)
+        # 3. Browser / YouTube / Web Navigation direct path (§18, §19, §22, §23)
         if self._BROWSER_PATTERNS.search(clean_lower):
             is_multi_step = any(word in clean_lower for word in [" and ", " then ", "after that", "workflow", "automate"])
             if is_multi_step:
                 return RouteDecision(
                     category=RequestCategory.COMPLEX_TASK,
                     is_fast_path=False,
-                    target_tool_categories=["BROWSER", "COMPUTER", "GENERAL", "SYSTEM"],
+                    target_tool_categories=["BROWSER", "COMPUTER", "GENERAL", "SYSTEM", "CODE", "FILES"],
                     requires_planning=True,
                     requires_memory=False,
                     requires_observation=True,
@@ -118,14 +138,29 @@ class RequestRouter:
             return RouteDecision(
                 category=RequestCategory.BROWSER,
                 is_fast_path=True,
-                target_tool_categories=["BROWSER", "COMPUTER", "GENERAL"],
+                target_tool_categories=["BROWSER", "COMPUTER", "GENERAL", "SYSTEM"],
                 requires_planning=False,
                 requires_memory=False,
                 requires_observation=True,
                 confidence=0.95,
             )
 
-        # 3. Simple Memory Query
+        # 3a. A direct "play <title>" request is a desktop action by default.
+        # Media/video phrases were routed above, so don't turn local game launches
+        # into open-ended research plans or expose file/shell tools for the task.
+        if self._PLAY_DESKTOP_PATTERN.match(clean):
+            is_multi_step = any(word in clean_lower for word in (" and ", " then ", "after that", "workflow", "automate"))
+            return RouteDecision(
+                category=RequestCategory.COMPLEX_TASK if is_multi_step else RequestCategory.COMPUTER_USE,
+                is_fast_path=not is_multi_step,
+                target_tool_categories=["COMPUTER", "SYSTEM", "GENERAL"],
+                requires_planning=is_multi_step,
+                requires_memory=False,
+                requires_observation=True,
+                confidence=0.92,
+            )
+
+        # 4. Simple Memory Query
         if self._MEMORY_PATTERNS.search(clean_lower):
             return RouteDecision(
                 category=RequestCategory.MEMORY_QUERY,

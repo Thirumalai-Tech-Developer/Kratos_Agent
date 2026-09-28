@@ -1,5 +1,4 @@
 """Build script to package Kratos Agent into a standalone Windows executable."""
-import os
 import sys
 import subprocess
 import shutil
@@ -8,10 +7,10 @@ from PIL import Image
 
 BASE_DIR = Path(__file__).resolve().parent
 DIST_DIR = BASE_DIR / "dist"
-BUILD_DIR = BASE_DIR / "build"
 SPEC_FILE = BASE_DIR / "kratos_agent.spec"
 ICON_FILE = BASE_DIR / "kratos.ico"
 BANNER_FILE = BASE_DIR / "kratos_banner.png"
+OPENPETS_PLUGIN_DIR = BASE_DIR / "openpets" / "kratos-companion"
 
 def prepare_icon():
     """Generates kratos.ico from banner image if not present."""
@@ -35,6 +34,10 @@ def run_build():
     
     prepare_icon()
 
+    if not OPENPETS_PLUGIN_DIR.is_dir():
+        print(f"[ERROR] OpenPets companion plugin not found: {OPENPETS_PLUGIN_DIR}")
+        sys.exit(1)
+
     cmd = [
         sys.executable,
         "-m",
@@ -53,10 +56,15 @@ def run_build():
 
     exe_path = DIST_DIR / "kratos-agent.exe"
     if exe_path.exists():
+        companion_path = DIST_DIR / "openpets" / "kratos-companion"
+        if companion_path.exists():
+            shutil.rmtree(companion_path)
+        shutil.copytree(OPENPETS_PLUGIN_DIR, companion_path, dirs_exist_ok=True)
         size_mb = exe_path.stat().st_size / (1024 * 1024)
         print("\n" + "=" * 60)
         print("  BUILD SUCCESSFUL!")
         print(f"  Executable: {exe_path}")
+        print(f"  OpenPets:   {companion_path}")
         print(f"  Size:       {size_mb:.2f} MB")
         print("=" * 60)
     else:

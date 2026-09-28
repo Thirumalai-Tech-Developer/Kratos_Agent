@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from kratos_agent.memory.models import MemoryLayer, MemoryRecord
 

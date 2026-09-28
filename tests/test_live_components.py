@@ -1,23 +1,18 @@
 """Unit and integration tests for Kratos Multimodal Live subsystem."""
 import asyncio
 import io
-import threading
 import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from kratos_agent.core.runtime_contracts import EventKind, RuntimeEvent
 from kratos_agent.live.audio import AudioManager
-from kratos_agent.live.bridge import KratosBridge
 from kratos_agent.live.camera import CameraCapture
 from kratos_agent.live.config import LiveConfig
 from kratos_agent.live.events import LiveState, LiveStatus, LiveStatusHub
 from kratos_agent.live.microphone import MicrophoneListener, _calculate_rms, get_input_devices
-from kratos_agent.live.narration import NarrationManager, sanitize_speech_text
-from kratos_agent.live.router import IntentKind, LiveRouter
+from kratos_agent.output.voice import sanitize_speech_text
 from kratos_agent.live.runtime import LiveRuntime
 from kratos_agent.live.screen import ScreenCapture
-from kratos_agent.live.session import LiveSession
 from kratos_agent.live.speaker import SpeakerPlayer
 from kratos_agent.live.vision import VisionManager
 
@@ -65,133 +60,13 @@ class TestSanitizeSpeechText(unittest.TestCase):
         sanitized = sanitize_speech_text(raw)
         self.assertNotIn("AIzaSyD", sanitized)
         self.assertNotIn("sk-123456", sanitized)
-        self.assertIn("[REDACTED]", sanitized)
+        self.assertIn("REDACTED", sanitized)
 
     def test_strips_html_tags(self):
         raw = "<think>internal reasoning</think> Task completed."
         sanitized = sanitize_speech_text(raw)
         self.assertNotIn("<think>", sanitized)
         self.assertIn("Task completed.", sanitized)
-
-
-class TestNarrationManager(unittest.TestCase):
-    def test_narrates_task_events(self):
-        spoken = []
-        mgr = NarrationManager(send_speech_fn=lambda text: spoken.append(text), min_interval_seconds=0.0)
-        mgr.is_active = True
-
-        event = RuntimeEvent(kind=EventKind.PLANNING_STARTED, payload={})
-        mgr.on_event(event)
-        self.assertTrue(any("planning" in s.lower() for s in spoken))
-
-        event_done = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"status": "completed"})
-        mgr.on_event(event_done)
-        self.assertTrue(any("completed" in s.lower() for s in spoken))
-
-    def test_throttling_prevents_rapid_chatter(self):
-        spoken = []
-        mgr = NarrationManager(send_speech_fn=lambda text: spoken.append(text), min_interval_seconds=10.0)
-        mgr.is_active = True
-
-        mgr.on_event(RuntimeEvent(kind=EventKind.TOOL_CALL_STARTED, payload={"name": "read_file"}))
-        self.assertEqual(len(spoken), 1)
-
-        # Immediate second non-priority event should be throttled
-        mgr.on_event(RuntimeEvent(kind=EventKind.TOOL_CALL_STARTED, payload={"name": "grep_search"}))
-        self.assertEqual(len(spoken), 1)
-
-
-class TestKratosBridge(unittest.IsolatedAsyncioTestCase):
-    async def test_submit_task_executes_runtime(self):
-        mock_runtime = MagicMock()
-        mock_runtime.run_agent.return_value = "Success output from Kratos"
-
-        hub = LiveStatusHub()
-        bridge = KratosBridge(runtime=mock_runtime, status_hub=hub)
-
-        res = await bridge.submit_task("Fix the bug", visual_context="Error on screen")
-        self.assertEqual(res["status"], "started")
-        self.assertIn("task_id", res)
-
-    async def test_cancels_active_task(self):
-        mock_runtime = MagicMock()
-        bridge = KratosBridge(runtime=mock_runtime)
-        bridge.active_task_id = "task-123"
-
-        res = bridge.cancel_active_task()
-        self.assertEqual(res["status"], "cancelled")
-        self.assertIsNone(bridge.active_task_id)
-        mock_runtime.cancel.assert_called_once()
-
-    async def test_busy_guard(self):
-        mock_runtime = MagicMock()
-        bridge = KratosBridge(runtime=mock_runtime)
-        bridge.active_task_id = "task-existing"
-        bridge.active_task_desc = "Running tests"
-
-        res = await bridge.submit_task("Do new thing", force=False)
-        self.assertEqual(res["status"], "busy")
-        self.assertIn("already working", res["message"])
-
-
-class TestLiveRouter(unittest.IsolatedAsyncioTestCase):
-    async def test_tool_declarations(self):
-        bridge = MagicMock()
-        router = LiveRouter(bridge=bridge)
-        tools = router.get_tool_declarations()
-
-        self.assertEqual(len(tools), 1)
-        fns = [fn.name for fn in tools[0].function_declarations]
-        self.assertIn("start_agent_task", fns)
-        self.assertIn("cancel_active_task", fns)
-        self.assertIn("get_task_status", fns)
-
-    async def test_handle_tool_call_start_task(self):
-        bridge = AsyncMock()
-        bridge.submit_task.return_value = {"status": "completed"}
-        router = LiveRouter(bridge=bridge)
-
-        res = await router.handle_tool_call("start_agent_task", {"task_description": "Run tests", "visual_context": "traceback"})
-        self.assertEqual(res["status"], "completed")
-        bridge.submit_task.assert_awaited_once_with("Run tests", visual_context="traceback")
-
-    async def test_handle_tool_call_cancel(self):
-        bridge = MagicMock()
-        bridge.cancel_active_task.return_value = {"status": "cancelled"}
-        router = LiveRouter(bridge=bridge)
-
-        res = await router.handle_tool_call("cancel_active_task", {})
-        self.assertEqual(res["status"], "cancelled")
-        bridge.cancel_active_task.assert_called_once()
-
-    def test_classify_intent_fallback(self):
-        router = LiveRouter(bridge=MagicMock())
-        self.assertEqual(router.classify_intent_fallback("Stop!"), IntentKind.CANCEL)
-        self.assertEqual(router.classify_intent_fallback("What are you doing?"), IntentKind.STATUS)
-        self.assertEqual(router.classify_intent_fallback("What is on my screen?"), IntentKind.VISION)
-        self.assertEqual(router.classify_intent_fallback("Fix the auth bug in login.py"), IntentKind.AGENT_TASK)
-        self.assertEqual(router.classify_intent_fallback("Hello there"), IntentKind.CHAT)
-
-
-
-class TestLiveExtendedThinkingContract(unittest.IsolatedAsyncioTestCase):
-    async def test_live_tools_are_non_blocking_for_extended_thinking(self):
-        router = LiveRouter(bridge=MagicMock())
-        tools = router.get_tool_declarations()
-        declarations = tools[0].function_declarations
-        self.assertTrue(declarations)
-        for declaration in declarations:
-            self.assertTrue(str(getattr(declaration, "behavior", "")).endswith("NON_BLOCKING"))
-
-    def test_interaction_status_normalization(self):
-        self.assertEqual(LiveSession._normalize_interaction_status("IN_PROGRESS"), "IN_PROGRESS")
-        self.assertEqual(LiveSession._normalize_interaction_status("idle"), "IDLE")
-        self.assertIsNone(LiveSession._normalize_interaction_status(None))
-
-    def test_interaction_status_extraction(self):
-        response = MagicMock()
-        response.interaction_status = "IN_PROGRESS"
-        self.assertEqual(LiveSession._extract_interaction_status(response), "IN_PROGRESS")
 
 
 class TestLiveErrorIsolation(unittest.TestCase):
@@ -203,13 +78,6 @@ class TestLiveErrorIsolation(unittest.TestCase):
         self.assertEqual(status.last_error_component, "microphone")
         self.assertEqual(status.errors["gemini"], "Live connection failed")
         self.assertEqual(status.errors["microphone"], "Microphone access denied")
-
-
-class TestLiveRouterCaptureFailure(unittest.IsolatedAsyncioTestCase):
-    async def test_observe_none_is_reported_as_failure(self):
-        router = LiveRouter(bridge=MagicMock(), capture_screen_handler=AsyncMock(return_value=None))
-        result = await router.handle_tool_call("observe", {"reason": "test"})
-        self.assertEqual(result["status"], "error")
 
 
 class TestAudioMuteSemantics(unittest.TestCase):
@@ -287,29 +155,32 @@ class TestLiveRuntimeLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_start_stop(self):
         cfg = LiveConfig(api_key="mock-key", enabled=True)
         rt = LiveRuntime(config=cfg)
+        listener = MagicMock()
 
-        with patch.object(rt.audio, "start", new_callable=AsyncMock), \
-             patch.object(rt.vision, "start", new_callable=AsyncMock), \
+        with patch("kratos_agent.live.native_listener.get_native_hearing", return_value=listener), \
+             patch.object(rt.audio, "start_output_only", new_callable=AsyncMock), \
              patch.object(rt.session, "run_connection_loop", new_callable=AsyncMock):
             await rt.start()
             self.assertTrue(rt._is_running)
+            listener.start.assert_called_once()
 
             await rt.stop()
             self.assertFalse(rt._is_running)
 
-    async def test_runtime_without_key_keeps_control_loop_ready_but_does_not_open_audio(self):
+    async def test_runtime_without_gemini_key_uses_local_speech_path(self):
         cfg = LiveConfig(api_key="", enabled=True)
         rt = LiveRuntime(config=cfg)
+        listener = MagicMock()
 
-        with patch.object(rt.audio, "start", new_callable=AsyncMock) as audio_start, \
-             patch.object(rt.vision, "start", new_callable=AsyncMock) as vision_start, \
+        with patch("kratos_agent.live.native_listener.get_native_hearing", return_value=listener), \
+             patch.object(rt.audio, "start_output_only", new_callable=AsyncMock) as audio_start, \
              patch.object(rt.session, "run_connection_loop", new_callable=AsyncMock) as session_start:
             await rt.start()
             self.assertTrue(rt._is_running)
             self.assertIs(asyncio.get_running_loop(), rt._loop)
-            self.assertIn("API_KEY", rt.get_status().last_error or "")
+            self.assertEqual(rt.get_status().live_health, "native")
             audio_start.assert_not_awaited()
-            vision_start.assert_not_awaited()
+            listener.start.assert_called_once()
             session_start.assert_not_awaited()
 
             await rt.set_vision_mode("none")

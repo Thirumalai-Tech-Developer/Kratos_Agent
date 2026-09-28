@@ -37,8 +37,26 @@ class TestCcsNoStubs(unittest.TestCase):
                 stubs.append(f"{p}:{e.lineno} SYNTAX_ERROR: {e}")
                 continue
 
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                # Abstract interface declarations and optional plugin hooks
+                # are contracts/default no-ops, not unfinished implementations.
+                decorators = [ast.unparse(item).split(".")[-1] for item in node.decorator_list]
+                parent = parents.get(node)
+                if "abstractmethod" in decorators:
+                    continue
+                if node.name in {"on_register", "on_start", "on_stop"}:
+                    continue
+                if isinstance(parent, ast.ClassDef) and any(
+                    ast.unparse(base).split(".")[-1] in {"ABC", "Protocol"}
+                    for base in parent.bases
+                ):
                     continue
                 body = [
                     n for n in node.body

@@ -170,7 +170,7 @@ class TestHarnessKernel(unittest.TestCase):
         self.assertEqual(p_audit.state, PluginState.ENABLED)
         self.assertEqual(p_creator.state, PluginState.ENABLED)
 
-        # Apply minimal preset (which only enables tools & deepseek_model)
+        # Apply minimal preset (which enables only core tool controls)
         self.kernel.apply_preset("minimal")
 
         self.assertEqual(p_tools.state, PluginState.ENABLED)

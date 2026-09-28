@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 3,
+  "sdkVersion": "3.x",
+  "id": "kratos.companion",
+  "name": "Kratos Companion",
+  "description": "Lets the desktop pet wander, react, and show Kratos speech bubbles.",
+  "version": "1.0.0",
+  "runtime": "javascript",
+  "entry": "index.js",
+  "permissions": [
+    "pet:move",
+    "pet:reaction",
+    "events",
+    "commands"
+  ]
+}

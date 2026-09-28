@@ -1,4 +1,4 @@
-"""Memory Plugin - Integrates 4-tier cognitive memory into DeepSeek Harness."""
+"""Memory plugin integrating Kratos's four-tier cognitive memory."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class MemoryPlugin(HarnessPlugin):
             metadata=PluginMetadata(
                 name="memory",
                 version="1.0.0",
-                description="Cognitive multi-tier memory subsystem for DeepSeek Harness.",
+                description="Cognitive multi-tier memory subsystem for the Kratos Harness.",
                 category="memory",
                 required_services=[],
                 provides_services=["memory"],

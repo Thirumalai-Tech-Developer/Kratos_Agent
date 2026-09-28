@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -12,19 +13,17 @@ from dotenv import load_dotenv
 # Load .env before modules that initialize global configuration.
 load_dotenv()
 
-from kratos_agent.brain import BrainChatModel, get_default_model
+from kratos_agent.brain import BrainClient, get_default_model
 from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
 from kratos_agent.core.context_pipeline import ContextBudget, ContextBuilder
 from kratos_agent.core.event_bus import event_bus
 from kratos_agent.core.event_store import EventStore
-from kratos_agent.core.framework_runtime import ExternalAgentFrameworks
 from kratos_agent.core.harness import HarnessKernel
 from kratos_agent.core.harness.plugins import (
     AuditPlugin,
     CreatorPlugin,
-    DeepSeekModelPlugin,
     HeadroomPlugin,
     MemoryPlugin,
     ToolsPlugin,
@@ -34,7 +33,8 @@ from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.memory import memory
 from kratos_agent.core.prompt_builder import CORE_PROMPT_V2
 from kratos_agent.core.prompt_library import prompt_library
-from kratos_agent.core.provider_runtime import BrainAdapter
+from kratos_agent.core.model_adapter import KratosModelAdapter
+from kratos_agent.core.risk_policy import assess_tool_risk
 from kratos_agent.core.runtime_contracts import (
     ChatMessage,
     EventKind,
@@ -45,6 +45,7 @@ from kratos_agent.core.skills import skill_manager
 from kratos_agent.core.subagents import SubagentManager
 from kratos_agent.core.tool_runtime import legacy_tool_registry
 from kratos_agent.memory import get_memory_manager
+from kratos_agent.output.speech_directives import DirectiveStreamFilter, extract_speech_directives
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,15 @@ _ACTIONABLE_REQUEST_PATTERN = re.compile(
     r"\b(?:make|create|build|implement|generate|scaffold|develop|write)\b.*\b(?:website|webapp|web|site|app|project|file|page|code)\b",
     re.IGNORECASE,
 )
+
+
+def _serialize_turn(method):
+    """Serialize interactive and voice requests through one agent loop."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._turn_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 def _derive_turn_status(
@@ -157,6 +167,7 @@ class KratosRuntime:
     def __init__(self, model_name: str = DEFAULT_MODEL, workspace: Path | None = None) -> None:
         self.workspace = (workspace or Path.cwd()).resolve()
         self.model_name = model_name
+        self._turn_lock = threading.RLock()
         self.skill_manager = skill_manager
         self.skill_manager.set_workspace(self.workspace)
         self.memory = memory
@@ -166,14 +177,12 @@ class KratosRuntime:
         self.context = ContextBuilder(ContextBudget())
         self.tools_registry = legacy_tool_registry(self.workspace)
         self.mcp = McpManager(self.workspace / ".kratos" / "mcp.json", self.workspace)
-        self.frameworks = ExternalAgentFrameworks(self.workspace)
-        self.frameworks.register_tools(self.tools_registry)
         for server_name, status in self.mcp.discover_enabled(self.tools_registry).items():
             if status.get("state") == "error":
                 logger.warning("MCP server %s unavailable (%s); Kratos will continue startup.", server_name, status.get("error"))
         self.tools = self.tools_registry.specs()  # Existing CLI compatibility.
-        self.brain = BrainChatModel(model=self.model_name)
-        self.model = BrainAdapter(self.model_name, self.brain.client)
+        self.brain = BrainClient()
+        self.model = KratosModelAdapter(self.model_name, self.brain)
         self.agent = None  # The explicit AgentLoop replaces the opaque LangChain graph.
         self._history = self._restore_history()
         self._event_store = self._open_event_store()
@@ -181,6 +190,7 @@ class KratosRuntime:
         self._current_tool_calls: list[dict[str, Any]] = []
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
+        self.loop.on_speech = self._speak_marked_text
         self.subagents = SubagentManager(self._run_isolated)
         from kratos_agent.utils.tools import (
             set_parallel_subagent_runner,
@@ -194,6 +204,34 @@ class KratosRuntime:
         self.harness = HarnessKernel(self)
         self._init_harness()
 
+    def _speak_marked_text(self, text: str) -> None:
+        """Send only explicit, sanitized speech text to Gemini and the pet bubble."""
+        from kratos_agent.output.voice import sanitize_speech_text
+
+        safe = " ".join(sanitize_speech_text(text).split())[:140].strip()
+        if not safe or re.search(
+            r"https?://|www\.|```|=>|\b(?:class|import|export|const|let|var)\b|"
+            r"/[\w.-]+/[\w./-]+|[A-Za-z]:\\|\b(?:api[_-]?key|secret|token|password|passwd)\b|"
+            r"BEGIN [A-Z ]+PRIVATE KEY",
+            safe,
+            re.IGNORECASE,
+        ):
+            return
+
+        try:
+            from kratos_agent.live import get_live_runtime
+            get_live_runtime().speak_marked(safe)
+        except Exception as exc:
+            logger.debug("Gemini marked speech delivery failed: %s", exc)
+
+        try:
+            openpets = self.mcp.servers.get("openpets")
+            status = self.mcp.status.get("openpets", {})
+            if openpets and openpets.enabled and status.get("state") == "connected":
+                self.mcp._sync_sdk(openpets, "call_tool", "openpets_say", {"message": safe})
+        except Exception as exc:
+            logger.debug("OpenPets speech bubble delivery failed: %s", exc)
+
     def _on_plan_mode_exit(self, plan: str) -> None:
         """Handles exit from Plan Mode when agent submits its final architecture plan."""
         self.plan_mode = False
@@ -201,15 +239,14 @@ class KratosRuntime:
             self.loop._on_plan_mode_exit(plan)
 
     def _init_harness(self) -> None:
-        """Initialize DeepSeek Harness kernel with built-in plugins."""
+        """Initialize the always-on Kratos harness with built-in controls."""
         tools_plugin = ToolsPlugin()
         memory_plugin = MemoryPlugin()
-        deepseek_model_plugin = DeepSeekModelPlugin()
         audit_plugin = AuditPlugin({"log_dir": str(self.workspace / ".kratos" / "trace")})
         creator_plugin = CreatorPlugin()
         headroom_plugin = HeadroomPlugin()
 
-        for plugin in [tools_plugin, memory_plugin, deepseek_model_plugin, audit_plugin, creator_plugin, headroom_plugin]:
+        for plugin in [tools_plugin, memory_plugin, audit_plugin, creator_plugin, headroom_plugin]:
             self.harness.register_plugin(plugin, enable_immediately=True)
 
         self.harness.apply_preset("standard")
@@ -227,11 +264,11 @@ class KratosRuntime:
             "You are Kratos, an autonomous terminal coding agent. You directly execute actions using tools. "
             "CRITICAL: Never output statements describing what you will do or intend to do (e.g. 'I will inspect the workspace', 'I am going to create the files') without immediately providing the corresponding tool call in the same response. "
             "Use self_tool_creator only when the user explicitly requests a new reusable Kratos tool; never use it for one-off project files or as a workaround when existing file tools can complete the task. "
-            "Use delegate_to_framework only when the user explicitly asks to use OpenClaw or Claude Code; external frameworks run with their own configured permissions and credentials. "
+            "Use only the configured Kratos reasoning model through the first-party Kratos SDK. Do not delegate model reasoning or execution to another agent runtime. "
             "Directly invoke tools to perform inspection, file creation, code edits, terminal commands, and verification."
         ), 10))
         self.instructions.register(InstructionModule("plan-mode-directive", "system", lambda: (
-            "YOU ARE CURRENTLY IN PLAN MODE (DeepSeek Harness / Claude Code Exploration & Planning).\n"
+            "YOU ARE CURRENTLY IN PLAN MODE (Kratos Harness Planning).\n"
             "Thoroughly explore and inspect the workspace, analyze relevant files, and design your technical implementation.\n"
             "Do NOT make file edits (`write_file`, `edit_file`) or run mutating terminal commands until the plan has been approved.\n"
             "When your investigation is complete and the implementation plan is ready, invoke `exit_plan_mode(plan=...)` with a detailed markdown plan starting with a '# ' header."
@@ -346,6 +383,7 @@ class KratosRuntime:
             return result
         finally:
             self._is_subagent_running = False
+        self._active_user_request = ""
 
     def cancel(self) -> None:
         """Signal the active agent turn to stop at the next tool boundary."""
@@ -357,23 +395,20 @@ class KratosRuntime:
 
     def reload_tools(self) -> None:
         self.tools_registry = legacy_tool_registry(self.workspace)
-        self.frameworks.register_tools(self.tools_registry)
         self.mcp.load()
         self.mcp.discover_enabled(self.tools_registry)
         self.tools = self.tools_registry.specs()
         self.loop.tools = self.tools_registry
 
-    def import_integration(self, source: str) -> dict[str, Any]:
-        """Import interoperable MCP/Agent Skills surfaces from a framework bundle."""
-        imported = self.frameworks.import_integration(source, self.mcp, self.skill_manager)
-        self.reload_tools()
-        imported["connected_servers"] = dict(self.mcp.status)
-        return imported
-
     def set_model(self, model_name: str) -> None:
+        configured_model = get_default_model()
+        if not configured_model:
+            raise ValueError("Set KRATOS_MODEL to the exact model ID served by the Kratos gateway.")
+        if model_name != configured_model:
+            raise ValueError(f"Model changes are disabled; Kratos is locked to '{configured_model}'.")
         self.model_name = model_name
-        self.brain = BrainChatModel(model=model_name)
-        self.model = BrainAdapter(model_name, self.brain.client)
+        self.brain = BrainClient()
+        self.model = KratosModelAdapter(model_name, self.brain)
         self.loop.model = self.model
         if self.memory.active_session:
             self.memory.active_session.model = model_name
@@ -382,10 +417,6 @@ class KratosRuntime:
     def _allow_tool(self, spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
         if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):
             return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
-        # Sovereign mode is the explicit autonomous execution profile: harness presets and Plan Mode
-        # must not silently downgrade a user-directed action into a permission gate.
-        if approval_gate.mode is ApprovalMode.SOVEREIGN:
-            return True, "sovereign"
         if hasattr(self, "harness") and self.harness:
             tools_plugin = self.harness.get_plugin("tools")
             if tools_plugin and not tools_plugin.is_tool_allowed(spec.name):
@@ -400,18 +431,28 @@ class KratosRuntime:
                 mutating_words = ("npm ", "npx ", "pnpm ", "yarn ", "pip ", "uv ", "python ", "rm ", "del ", "mkdir ", "touch ", "git commit", "git push", "git checkout -b", "cargo run", "cargo build")
                 if any(kw in cmd for kw in mutating_words):
                     return False, "Plan Mode active: mutating commands are disabled until the plan is approved via exit_plan_mode."
-        if spec.permission == ToolPermission.READ:
-            return True, "read-only"
+
         if spec.permission == ToolPermission.WRITE:
-            target = str(arguments.get("file_path", ""))
+            target = str(arguments.get("file_path", arguments.get("target_file", "")))
             resolved = (self.workspace / target).resolve()
             try:
                 resolved.relative_to(self.workspace)
             except ValueError:
-                if approval_gate.mode == ApprovalMode.SOVEREIGN:
-                    approval_gate.resolve("persist", target)
-                else:
-                    return False, "file target escapes workspace"
+                return False, "file target escapes workspace"
+
+        risk = assess_tool_risk(spec, arguments, getattr(self, "_active_user_request", ""))
+        if risk is not None:
+            if not risk.authorized:
+                return False, risk.reason
+            return True, risk.reason
+
+        # Sovereign mode applies to routine requested work, after plan-mode,
+        # workspace-boundary, and high-impact-action checks have run.
+        if approval_gate.mode is ApprovalMode.SOVEREIGN:
+            return True, "sovereign"
+        if spec.permission == ToolPermission.READ:
+            return True, "read-only"
+        if spec.permission == ToolPermission.WRITE:
             return approval_gate.check_write(target), f"write {target}"
         if spec.permission == ToolPermission.EXECUTE:
             return approval_gate.check_shell(str(arguments.get("command", ""))), "shell command"
@@ -419,12 +460,14 @@ class KratosRuntime:
             return False, f"{spec.permission.value} tools require auto-edit or full-auto mode"
         return True, spec.permission.value
 
+    @_serialize_turn
     def invoke(self, messages: list[dict[str, str]]) -> str:
         self._current_tool_calls = []
         self._cancellation_flag.clear()  # Always start fresh for a new turn
         history = [ChatMessage(role=item.get("role", "user"), content=str(item.get("content", ""))) for item in messages]
         resume_plan = None
         user = next((item.content for item in reversed(history) if item.role == "user"), "")
+        self._active_user_request = user
         if user.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:
             resume_plan = self.memory.active_session.get_plan()
         result, final_history = self.loop.run(history, self._allow_tool, resume_plan=resume_plan)
@@ -466,6 +509,7 @@ class KratosRuntime:
         )
         return result
 
+    @_serialize_turn
     def run_chat_restricted(self, query: str) -> str:
         """Run Kratos in highly restricted Normal Chat Mode without VPS / autonomous tool execution."""
         from kratos_agent.brain.config import get_normal_mode_model
@@ -474,6 +518,7 @@ class KratosRuntime:
 
         normal_model = get_normal_mode_model()
         self._current_tool_calls = []
+        self._active_user_request = query
         self._history.append(ChatMessage("user", query))
 
         system_instruction = (
@@ -487,14 +532,17 @@ class KratosRuntime:
 
         messages = [{"role": msg.role, "content": msg.content} for msg in self._history]
         response_chunks: list[str] = []
+        stream_filter = DirectiveStreamFilter()
 
         def on_chunk(chunk: str) -> None:
             if chunk:
                 response_chunks.append(chunk)
-                event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": chunk}))
+                visible_chunk = stream_filter.push(chunk)
+                if visible_chunk:
+                    event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": visible_chunk}))
 
         try:
-            full_text, _ = self.brain.client.complete(
+            full_text, _ = self.brain.complete(
                 model=normal_model,
                 messages=messages,
                 system_instruction=system_instruction,
@@ -502,10 +550,15 @@ class KratosRuntime:
                 stream=True,
                 on_chunk=on_chunk
             )
-            result = full_text or "".join(response_chunks)
+            stream_filter.flush()
+            directive = extract_speech_directives(full_text or "".join(response_chunks))
+            result = directive.display_text
             status = "completed"
             self._history.append(ChatMessage("assistant", result))
+            if directive.speech_text:
+                self._speak_marked_text(directive.speech_text)
         except Exception as ex:
+            stream_filter.flush()
             result = f"Execution error: {ex}"
             status = "failed"
             event_bus.publish(RuntimeEvent(kind=EventKind.MODEL_CHUNK, payload={"chunk": result}))
@@ -523,6 +576,7 @@ class KratosRuntime:
         self._emit(done_evt)
         return result
 
+    @_serialize_turn
     def run_agent(
         self,
         query: str,

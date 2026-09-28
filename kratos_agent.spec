@@ -1,7 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
-import sys
-from pathlib import Path
 
 block_cipher = None
 
@@ -13,22 +11,13 @@ datas = [
     (os.path.join(src_dir, "kratos_agent", "utils", "tools_list.json"), "kratos_agent/utils"),
 ]
 
-# Include optional workspace files if present
+# Include the application banner when available.
 for optional_file, dest in [
     ("kratos_banner.png", "."),
 ]:
     p = os.path.join(workspace_dir, optional_file)
     if os.path.exists(p):
         datas.append((p, dest))
-
-# Include bundled .kratos prompts/skills templates if present
-for optional_dir in [
-    (".kratos/claude_code_prompts", ".kratos/claude_code_prompts"),
-    (".kratos/skills", ".kratos/skills"),
-]:
-    p = os.path.join(workspace_dir, optional_dir[0])
-    if os.path.exists(p):
-        datas.append((p, optional_dir[1]))
 
 hidden_imports = [
     "dotenv",
@@ -51,14 +40,15 @@ hidden_imports = [
     "kratos_agent.cli",
     "kratos_agent.brain",
     "kratos_agent.brain.config",
-    "kratos_agent.brain.fetch_model",
     "kratos_agent.brain.client",
-    "kratos_agent.brain.chat_model",
+    "kratos_agent.brain.tool_calls",
     "kratos_agent.brain.brain",
+    "kratos_agent.sdk",
+    "kratos_agent.sdk.client",
+    "kratos_agent.sdk.agent",
     "kratos_agent.core",
     "kratos_agent.core.agent_loop",
     "kratos_agent.core.approval_mode",
-    "kratos_agent.core.background_runner",
     "kratos_agent.core.compactor",
     "kratos_agent.core.context_pipeline",
     "kratos_agent.core.event_store",
@@ -67,27 +57,38 @@ hidden_imports = [
     "kratos_agent.core.instruction_engine",
     "kratos_agent.core.mcp_runtime",
     "kratos_agent.core.memory",
+    "kratos_agent.core.model_adapter",
     "kratos_agent.core.planner",
     "kratos_agent.core.project_memory",
     "kratos_agent.core.prompt_library",
-    "kratos_agent.core.provider_runtime",
+    "kratos_agent.core.risk_policy",
     "kratos_agent.core.reloader",
     "kratos_agent.core.runtime_contracts",
     "kratos_agent.core.skills",
     "kratos_agent.core.subagents",
     "kratos_agent.core.tool_runtime",
+    "kratos_agent.core.verification_manager",
+    "kratos_agent.output.speech_directives",
+    "kratos_agent.live.config",
+    "kratos_agent.live.runtime",
+    "kratos_agent.live.session",
+    "kratos_agent.live.vision",
+    "kratos_agent.computer.browser.playwright",
+    "kratos_agent.computer.gui.backends.coordinate",
     "kratos_agent.utils",
     "kratos_agent.utils.step_tracker",
     "kratos_agent.utils.tool_creator",
     "kratos_agent.utils.tools",
-    "duckduckgo_search",
     "ddgs",
     "fastapi",
     "uvicorn",
-    "langchain",
-    "langchain_core",
-    "langchain_community",
-    "langchain_openai",
+    "requests",
+    "google.genai",
+    "mcp",
+    "mss",
+    "comtypes",
+    "pynput",
+    "pyautogui",
 ]
 
 icon_path = os.path.join(workspace_dir, "kratos.ico")

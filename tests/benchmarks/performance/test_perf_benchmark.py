@@ -26,7 +26,7 @@ class TestPerformanceBenchmark(unittest.TestCase):
 
         # Must build in under 50ms (baseline was 9,602ms)
         self.assertLess(elapsed_ms, 50.0)
-        self.assertIn("You are KRATOS", rendered)
+        self.assertIn("You are Kratos", rendered)
         print(f"\n[BENCHMARK] Prompt construction latency: {elapsed_ms:.2f}ms (Baseline: 9,602ms)")
 
     def test_tool_schema_token_reduction(self) -> None:

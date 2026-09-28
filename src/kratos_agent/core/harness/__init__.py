@@ -1,4 +1,4 @@
-"""DeepSeek Harness Framework - Everything is a Plugin architecture."""
+"""Kratos Harness plugin and lifecycle framework."""
 
 from .kernel import HarnessKernel
 from .plugin import HarnessPlugin, PluginMetadata, PluginState

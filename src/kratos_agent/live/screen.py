@@ -177,7 +177,7 @@ class ScreenCapture:
     def health_check(self) -> CaptureHealth:
         """Tests local screen capture, validates dimensions and JPEG payload (§7, §9)."""
         try:
-            import mss
+            import mss  # noqa: F401 - successful import is the dependency health check.
         except ImportError:
             self.health_status = ComponentHealth.ERROR
             self.last_error = "mss is not installed"

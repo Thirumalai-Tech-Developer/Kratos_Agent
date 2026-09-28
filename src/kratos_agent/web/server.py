@@ -282,22 +282,9 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             elif action == "reconnect":
                 live_rt.stop_background()
                 live_rt.start_in_background()
-            elif action == "avatar_toggle":
-                if live_rt.avatar:
-                    live_rt.stop_floating_avatar()
-                else:
-                    live_rt.start_floating_avatar()
-            elif action == "avatar_dock":
-                if live_rt.avatar:
-                    live_rt.avatar.toggle_dock()
-            elif action == "set_pet_breed" and isinstance(val, str):
-                if live_rt.avatar:
-                    live_rt.avatar.set_pet_breed(val)
-                else:
-                    live_rt.start_floating_avatar(pet_breed=val)
-            elif action == "pet_react":
-                if live_rt.avatar:
-                    live_rt.avatar.trigger_pet_reaction()
+            else:
+                self._send_json({"error": f"Unknown live control action: {action}"}, status=HTTPStatus.BAD_REQUEST)
+                return
 
             self._send_json(live_rt.get_status().to_dict())
         except Exception as e:
@@ -571,8 +558,8 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self._send_cors_headers()
         self.end_headers()
-        
-        # In a real implementation, this ties into event_adapter.py and the event_bus
+
+        # Send the initial stream event before forwarding live runtime events.
         self.wfile.write(b"event: ready\ndata: {}\n\n")
         self.wfile.flush()
 
@@ -865,7 +852,7 @@ def start_server(
             if live_runtime.config.is_gemini_backend:
                 print("🎤 Gemini Live Multimodal Subsystem: ONLINE\n")
             else:
-                print("🎤 Sovereign Multimodal Subsystem (Native Voice & OmniRoute Vision): ONLINE\n")
+                print("🎤 Kratos Live Speech and Vision: ONLINE\n")
         except Exception as e:
             print(f"⚠️ Multimodal subsystem could not start: {e}\n")
 

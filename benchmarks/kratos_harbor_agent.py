@@ -60,7 +60,7 @@ class KratosHarborAgent(BaseAgent):
 
     async def setup(self, environment: BaseEnvironment) -> None:
         # Kratos is installed in the host project environment by the runner.
-        # Do not copy provider credentials into the task container.
+        # Do not copy gateway credentials into the task container.
         del environment
 
     async def run(
@@ -72,19 +72,11 @@ class KratosHarborAgent(BaseAgent):
         project_root = Path(__file__).resolve().parents[1]
         load_dotenv(project_root / ".env", override=False)
 
-        # Preserve Kratos's configured OmniRoute endpoint and credential.
-        if os.getenv("OMNIROUTE_BASE_URL"):
-            os.environ["BRAIN_BASE_URL"] = os.environ["OMNIROUTE_BASE_URL"]
-        model_name = (
-            os.getenv("KRATOS_BENCH_MODEL")
-            or os.getenv("OMNIROUTE_MODEL")
-            or os.getenv("BRAIN_MODEL")
-            or os.getenv("KRATOS_MODEL")
-            or "ds-web/deepseek-v4-pro-think"
-        )
-        os.environ["BRAIN_MODEL"] = model_name
-        os.environ["KRATOS_MODEL"] = model_name
-        os.environ["NORMAL_MODE_MODEL"] = model_name
+        from kratos_agent.brain.config import get_default_model
+
+        model_name = get_default_model()
+        if not model_name:
+            raise RuntimeError("Set KRATOS_MODEL to the exact model ID served by the Kratos gateway.")
         max_steps = max(
             1,
             min(

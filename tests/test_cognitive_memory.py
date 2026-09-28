@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kratos_agent.brain.chat_model import extract_tool_calls_from_text
+from kratos_agent.brain.tool_calls import extract_tool_calls_from_text
 from kratos_agent.core.cognitive_memory import CognitiveMemoryStore, MemoryType
 from kratos_agent.core.d1_client import D1DatabaseClient
 from kratos_agent.core.memory import AgenticMemory

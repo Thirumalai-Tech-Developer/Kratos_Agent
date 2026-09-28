@@ -2,9 +2,8 @@ import unittest
 from unittest.mock import MagicMock
 from kratos_agent.core.evidence import Evidence, OutcomeAssertion
 from kratos_agent.core.verification_manager import VerificationManager, Verdict
-from kratos_agent.core.runtime_contracts import TerminalLatch, RuntimeEvent, EventKind
+from kratos_agent.core.runtime_contracts import TerminalLatch
 from kratos_agent.ccs.perception.blockers import detect_blockers, clear_blocker, Blocker
-from kratos_agent.live.narration import NarrationManager
 
 class TestFalseCompletionGui(unittest.TestCase):
     def setUp(self):
@@ -46,25 +45,6 @@ class TestFalseCompletionGui(unittest.TestCase):
         ev = clear_blocker(ccs, "youtube_bot_wall")
         self.assertFalse(ev.met)
         self.assertIn("sign-in", ev.detail.lower())
-
-        # Test narrator receives honest failure and does not claim success
-        spoken = []
-        narrator = NarrationManager(send_speech_fn=lambda text: spoken.append(text), min_interval_seconds=0.0)
-        narrator.is_active = True
-
-        event = RuntimeEvent(
-            kind=EventKind.TURN_FAILED,
-            payload={
-                "error": "YouTube is showing a sign-in wall. I can't play this video without an account.",
-                "honest_failure": True,
-            },
-        )
-        narrator.on_event(event)
-
-        self.assertEqual(len(spoken), 1)
-        self.assertIn("sign-in wall", spoken[0])
-        self.assertNotIn("completed successfully", spoken[0].lower())
-        self.assertNotIn("verified", spoken[0].lower())
 
     def test_exactly_one_terminal_status_guaranteed(self):
         task_id = "task_yt_play"

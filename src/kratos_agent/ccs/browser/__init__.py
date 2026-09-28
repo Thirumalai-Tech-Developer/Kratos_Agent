@@ -2,15 +2,15 @@
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from kratos_agent.ccs.base import ActionResult
 from kratos_agent.core.evidence import OutcomeAssertion
-from kratos_agent.utils.shell_quote import build_url, youtube_search_url
+from kratos_agent.utils.shell_quote import build_url as build_url
+from kratos_agent.utils.shell_quote import youtube_search_url as youtube_search_url
 
 from .cdp import cdp_client
 

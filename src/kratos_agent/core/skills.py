@@ -66,21 +66,15 @@ class SkillManager:
             self.extra_roots = []
 
     def skill_roots(self) -> list[Path]:
-        """Return standard Agent Skills locations used by Claude Code, OpenClaw, and Codex."""
+        """Return local Kratos, agent-skill, and workspace skill locations."""
         home = Path.home()
         roots = [
             self.skills_dir,
             self.workspace / ".agents" / "skills",
-            self.workspace / ".claude" / "skills",
-            self.workspace / ".claude" / "commands",
             self.workspace / ".codex" / "skills",
             self.workspace / "skills",
             home / ".agents" / "skills",
-            home / ".claude" / "skills",
-            home / ".claude" / "commands",
             home / ".codex" / "skills",
-            home / ".openclaw" / "skills",
-            home / ".openclaw" / "workspace" / "skills",
             *self.extra_roots,
         ]
         unique: list[Path] = []
@@ -113,7 +107,7 @@ class SkillManager:
             if candidate.name == "commands":
                 found.extend(candidate.glob("*.md"))
         if not found:
-            raise ValueError(f"No Agent Skills or Claude command Markdown files found under {root}")
+            raise ValueError(f"No skill or instruction Markdown files found under {root}")
         for candidate in candidate_roots:
             if candidate not in self.extra_roots:
                 self.extra_roots.append(candidate)
@@ -177,7 +171,7 @@ class SkillManager:
         if frontmatter_match:
             fm_text = frontmatter_match.group(1)
             body = frontmatter_match.group(2).strip()
-            
+
             for line in fm_text.splitlines():
                 if ":" in line:
                     key, val = line.split(":", 1)
@@ -220,7 +214,7 @@ class SkillManager:
                 )
                 if res.returncode != 0:
                     console.print(f"[bold red]Git clone failed:[/bold red] {res.stderr}")
-                
+
                 # Discover all SKILL.md files in repository
                 installed = []
                 for skill_file in temp_dir.rglob("SKILL.md"):
@@ -254,7 +248,7 @@ class SkillManager:
             url,
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KratosAgent/1.0"}
         )
-        
+
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw_data = resp.read().decode("utf-8", errors="replace")
 
@@ -263,15 +257,15 @@ class SkillManager:
         path_slug = parsed_url.path.strip("/").split("/")[-1].replace(".md", "").replace(".txt", "")
         if path_slug.lower() in ("skill", "raw", "main", "master") and len(parsed_url.path.strip("/").split("/")) > 1:
             path_slug = parsed_url.path.strip("/").split("/")[-2]
-            
+
         skill_name = re.sub(r"[^a-zA-Z0-9_-]", "-", path_slug).strip("-") or "custom-skill"
-        
+
         name, desc, tags, _, body = self._parse_skill_md(skill_name, raw_data)
-        
+
         # Save skill folder and file
         target_folder = self.skills_dir / skill_name.lower()
         target_folder.mkdir(parents=True, exist_ok=True)
-        
+
         skill_file_content = f"""---
 name: {name}
 description: {desc}
@@ -289,7 +283,7 @@ source_url: {url}
     def add_skill_from_internet(self, query: str, brain: Any) -> Skill:
         """Searches the web for the requested skill/technology and synthesizes a comprehensive SKILL.md."""
         console.print(f"[bold yellow]🔍 [Searching Web for Skill Knowledge][/bold yellow] [bold cyan]{query}[/bold cyan]")
-        
+
         # 1. Search web documentation
         search_results = ""
         try:
@@ -332,7 +326,7 @@ source_url: {url}
             messages=[{"role": "user", "content": prompt}],
             max_retries=3
         )
-        
+
         clean_content = reply.strip()
         if clean_content.startswith("```markdown"):
             clean_content = clean_content[11:].strip()
@@ -344,9 +338,9 @@ source_url: {url}
         slug = re.sub(r"[^a-zA-Z0-9_-]", "-", query.lower()).strip("-") or "new-skill"
         target_folder = self.skills_dir / slug
         target_folder.mkdir(parents=True, exist_ok=True)
-        
+
         name, desc, tags, _, body = self._parse_skill_md(slug, clean_content)
-        
+
         final_file_text = f"""---
 name: {name}
 description: {desc}
@@ -375,7 +369,7 @@ source_url: search:{query}
             return ""
 
         unique_skills = list({str(s.path): s for s in self.skills.values()}.values())
-        
+
         # If query is provided, prioritize matching skills
         if query:
             q_words = set(re.findall(r'\w+', query.lower()))

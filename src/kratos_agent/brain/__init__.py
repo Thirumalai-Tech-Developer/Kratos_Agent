@@ -1,23 +1,14 @@
-from kratos_agent.brain.brain import (
-    create_brain_llm,
-    get_agent_response,
-    get_http_client,
-)
-from kratos_agent.brain.chat_model import (
-    BrainChatModel,
-    OmnirouteChatModel,
-    clean_file_path,
-    extract_tool_calls_from_text,
-)
-from kratos_agent.brain.client import BrainClient, OmnirouteClient
-from kratos_agent.brain.config import (
+"""Kratos gateway configuration and lazy application adapters."""
+from __future__ import annotations
+
+from typing import Any
+
+from .config import (
     DEFAULT_BASE_URL,
     DEFAULT_CHAT_ENDPOINT,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MODEL,
     DEFAULT_MODEL_ENDPOINT,
-    # Backward compatibility aliases
-    DEFAULT_OMNIROUTE_URL,
     DEFAULT_TIMEOUT_SECONDS,
     BrainBadRequestError,
     BrainConnectionError,
@@ -26,13 +17,6 @@ from kratos_agent.brain.config import (
     BrainRateLimitError,
     BrainServerError,
     BrainTimeoutError,
-    OmnirouteBadRequestError,
-    OmnirouteConnectionError,
-    OmnirouteError,
-    OmnirouteNotFoundError,
-    OmnirouteRateLimitError,
-    OmnirouteServerError,
-    OmnirouteTimeoutError,
     authenticate,
     fetch_models,
     get_api_key,
@@ -42,65 +26,30 @@ from kratos_agent.brain.config import (
     get_endpoint_url,
     get_max_retries,
     get_model,
-    get_model_badge,
-    get_model_details,
     get_model_endpoint_url,
-    get_model_marks,
     get_request_timeout,
-    get_thinking_models,
-    get_vision_models,
-    is_thinking_model,
-    is_vision_model,
 )
 
+
+def __getattr__(name: str) -> Any:
+    if name == "BrainClient":
+        from .client import BrainClient
+        return BrainClient
+    if name == "get_agent_response":
+        from .brain import get_agent_response
+        return get_agent_response
+    if name in {"KratosClient", "KratosCompletion", "KratosToolCall"}:
+        from kratos_agent import sdk
+        return getattr(sdk, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
-    "DEFAULT_BASE_URL",
-    "DEFAULT_CHAT_ENDPOINT",
-    "DEFAULT_MODEL_ENDPOINT",
-    "DEFAULT_MODEL",
-    "DEFAULT_TIMEOUT_SECONDS",
-    "DEFAULT_MAX_RETRIES",
-    "get_base_url",
-    "get_endpoint_url",
-    "get_model_endpoint_url",
-    "get_api_key",
-    "get_default_model",
-    "get_request_timeout",
-    "get_max_retries",
-    "authenticate",
-    "get_model",
-    "fetch_models",
-    "get_available_models",
-    "get_model_details",
-    "is_vision_model",
-    "is_thinking_model",
-    "get_model_marks",
-    "get_model_badge",
-    "get_vision_models",
-    "get_thinking_models",
-    "BrainError",
-    "BrainConnectionError",
-    "BrainTimeoutError",
-    "BrainRateLimitError",
-    "BrainBadRequestError",
-    "BrainNotFoundError",
-    "BrainServerError",
-    "BrainClient",
-    "BrainChatModel",
-    "extract_tool_calls_from_text",
-    "clean_file_path",
-    "get_agent_response",
-    "create_brain_llm",
-    "get_http_client",
-    # Compatibility
-    "DEFAULT_OMNIROUTE_URL",
-    "OmnirouteError",
-    "OmnirouteConnectionError",
-    "OmnirouteTimeoutError",
-    "OmnirouteRateLimitError",
-    "OmnirouteBadRequestError",
-    "OmnirouteNotFoundError",
-    "OmnirouteServerError",
-    "OmnirouteClient",
-    "OmnirouteChatModel",
+    "DEFAULT_BASE_URL", "DEFAULT_CHAT_ENDPOINT", "DEFAULT_MODEL_ENDPOINT", "DEFAULT_MODEL",
+    "DEFAULT_TIMEOUT_SECONDS", "DEFAULT_MAX_RETRIES", "BrainError", "BrainConnectionError",
+    "BrainTimeoutError", "BrainRateLimitError", "BrainBadRequestError", "BrainNotFoundError",
+    "BrainServerError", "authenticate", "fetch_models", "get_api_key", "get_available_models",
+    "get_base_url", "get_default_model", "get_endpoint_url", "get_max_retries", "get_model",
+    "get_model_endpoint_url", "get_request_timeout", "BrainClient",
+    "get_agent_response", "KratosClient", "KratosCompletion", "KratosToolCall",
 ]

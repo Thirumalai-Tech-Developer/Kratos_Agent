@@ -1,6 +1,6 @@
 """
 Git-aware workflow tools for Kratos Agent.
-Implements Claude Code + Codex + Kimi-style git integration.
+Provides Git-aware workflow tools for the Kratos agent.
 """
 from __future__ import annotations
 

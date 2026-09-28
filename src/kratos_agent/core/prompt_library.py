@@ -8,9 +8,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-DEFAULT_PROMPTS_DIR = Path.cwd() / ".kratos" / "claude_code_prompts"
+DEFAULT_PROMPTS_DIR = Path.cwd() / ".kratos" / "prompts"
+LEGACY_PROMPTS_DIR = Path.cwd() / ".kratos" / "claude_code_prompts"
 
-class ClaudePrompt:
+class AgentPrompt:
     def __init__(self, filename: str, path: Path, title: str, description: str, category: str, content: str, token_count: int | None = None):
         self.filename = filename
         self.path = path
@@ -31,12 +32,14 @@ class ClaudePrompt:
         }
 
 class PromptLibrary:
-    """Indexes, parses, and provides access to all 515+ Claude Code system prompts, subagents, and tools."""
-    
+    """Indexes and searches local agent instructions, workflows, and tool guides."""
+
     def __init__(self, prompts_dir: Path | None = None):
-        self.prompts_dir = prompts_dir or DEFAULT_PROMPTS_DIR
-        self.prompts: dict[str, ClaudePrompt] = {}
-        self.categories: dict[str, list[ClaudePrompt]] = {
+        self.prompts_dir = prompts_dir or (
+            DEFAULT_PROMPTS_DIR if DEFAULT_PROMPTS_DIR.exists() else LEGACY_PROMPTS_DIR
+        )
+        self.prompts: dict[str, AgentPrompt] = {}
+        self.categories: dict[str, list[AgentPrompt]] = {
             "agent": [],
             "system": [],
             "data": [],
@@ -65,7 +68,7 @@ class PromptLibrary:
                 try:
                     text = md_file.read_text(encoding="utf-8", errors="replace")
                     title, desc, cat, body, tks = self._parse_prompt_file(md_file.name, text)
-                    prompt_obj = ClaudePrompt(
+                    prompt_obj = AgentPrompt(
                         filename=md_file.name,
                         path=md_file,
                         title=title,
@@ -74,7 +77,7 @@ class PromptLibrary:
                         content=body,
                         token_count=tks
                     )
-                    
+
                     key = md_file.stem.lower()
                     self.prompts[key] = prompt_obj
                     if cat in self.categories:
@@ -87,7 +90,7 @@ class PromptLibrary:
     def _parse_prompt_file(self, filename: str, text: str) -> tuple[str, str, str, str, int | None]:
         """Parses HTML comment frontmatter and markdown body from a prompt file."""
         title = filename.replace(".md", "").replace("-", " ").title()
-        description = "Claude Code prompt component"
+        description = "Agent prompt component"
         category = "system"
         body = text
         token_count = None
@@ -127,19 +130,19 @@ class PromptLibrary:
 
         return title, description, category, body, token_count
 
-    def get_prompt(self, name: str) -> ClaudePrompt | None:
+    def get_prompt(self, name: str) -> AgentPrompt | None:
         """Retrieves a prompt by key, filename, or partial match."""
         cleaned = name.lower().replace(".md", "").strip()
         if cleaned in self.prompts:
             return self.prompts[cleaned]
-        
+
         # Try finding prefix
         for key, p in self.prompts.items():
             if cleaned in key or cleaned in p.title.lower():
                 return p
         return None
 
-    def search_prompts(self, query: str, limit: int = 15) -> list[ClaudePrompt]:
+    def search_prompts(self, query: str, limit: int = 15) -> list[AgentPrompt]:
         """Performs full-text and metadata search across all indexed prompts."""
         q = query.lower().strip()
         if not q:
@@ -156,7 +159,7 @@ class PromptLibrary:
                 score += 7
             if q in prompt.content.lower():
                 score += 2
-            
+
             if score > 0:
                 results.append((score, prompt))
 
@@ -188,7 +191,7 @@ class PromptLibrary:
         if not q or len(q) < 4:
             return None
 
-        # 1. Frontend & UI/UX Design Architect (Claude Code Design / Kimi UI Specialist)
+        # 1. Frontend and UI/UX design workflow.
         ui_patterns = [
             r"\b(website|web\s*app|webapp|html|css|javascript|frontend|landing\s*page|ui|ux|react|vue|svelte|vite|threejs|three\.js|canvas|game|animation|omnitrix|ben\s*10|ben10|portfolio|dashboard)\b"
         ]
@@ -211,7 +214,7 @@ class PromptLibrary:
                 "prompt": (prompt.content if prompt else "") + "\n\n" + custom_directive
             }
 
-        # 2. Security & Vulnerability Audit (Claude Code / Codex Security specialist)
+        # 2. Security and vulnerability audit workflow.
         sec_patterns = [
             r"\b(security|vulnerability|vulnerabilities|exploit|cve|cwe|injection|xss|sqli|csrf|ssrf|idor|rce|auth\s*bypass|privilege\s*escalation|acl\s*abuse|pentest|audit\s*security)\b"
         ]
@@ -225,7 +228,7 @@ class PromptLibrary:
                     "prompt": prompt.content
                 }
 
-        # 3. Code Review & Quality Sweep (Claude Code UltraReview / Codex Reviewer)
+        # 3. Code review and quality workflow.
         review_patterns = [
             r"\b(code\s*review|review\s*this|review\s*my|review\s*code|audit\s*code|find\s*bugs|inspect\s*changes|pr\s*review|pull\s*request\s*review|diff\s*review)\b"
         ]
@@ -239,7 +242,7 @@ class PromptLibrary:
                     "prompt": prompt.content
                 }
 
-        # 4. Code Simplification & Anti-Bloat Refactoring (Claude Code Simplify / Kimi Code Optimizer)
+        # 4. Code simplification and refactoring workflow.
         simplify_patterns = [
             r"\b(simplify|clean\s*up|refactor|reduce\s*complexity|remove\s*bloat|remove\s*dead\s*code|anti-bloat|decouple|optimize\s*structure)\b"
         ]
@@ -253,7 +256,7 @@ class PromptLibrary:
                     "prompt": prompt.content
                 }
 
-        # 5. Error Diagnostics & Deep Debugging (Claude Code Debugger / Codex Self-Healing)
+        # 5. Error diagnostics and debugging workflow.
         debug_patterns = [
             r"\b(debug|fix\s*error|fix\s*bug|traceback|stack\s*trace|why\s*is\s*this\s*failing|failing\s*test|exception\s*in|diagnose|error\s*log|segfault|crash|unhandled\s*exception)\b"
         ]
@@ -267,7 +270,7 @@ class PromptLibrary:
                     "prompt": prompt.content
                 }
 
-        # 6. Codebase Exploration & Architectural Discovery (Claude Code Explore / Kimi Repo Navigator)
+        # 6. Codebase exploration and architecture workflow.
         explore_patterns = [
             r"\b(explore|where\s*is|how\s*does\s*.*work|map\s*the\s*repo|find\s*all\s*usages|trace\s*flow|architecture\s*of|codebase\s*overview)\b"
         ]
@@ -295,7 +298,7 @@ class PromptLibrary:
                     "prompt": prompt.content
                 }
 
-        # 8. Full-Stack Creation & Autonomous Engineering (Claude Code Builder)
+        # 8. Full-stack creation and engineering workflow.
         build_patterns = [
             r"\b(create|build|scaffold|develop|make|generate|implement)\b"
         ]
@@ -318,7 +321,7 @@ class PromptLibrary:
         return None
 
     def get_engineering_guidelines(self) -> str:
-        """Constructs a consolidated, high-fidelity software engineering instruction prompt from Claude Code, OpenAI Codex, and Kimi Code rules."""
+        """Builds a consolidated software-engineering instruction prompt from local guidance."""
         if hasattr(self, "_cached_guidelines") and self._cached_guidelines:
             return self._cached_guidelines
 
@@ -487,14 +490,14 @@ Act when the goal is clear. Adapt when reality differs from the plan. Verify bef
         return result
 
     def get_workspace_environment_context(self) -> str:
-        """Builds high-density environment, git status, and workspace context (Kimi-Code / Codex / FCC style)."""
+        """Builds compact environment, Git status, and workspace context."""
         import platform
         import sys
-        
+
         ws = os.getcwd().replace("\\", "/")
         os_name = f"{platform.system()} {platform.release()} ({platform.machine()})"
         py_ver = f"Python {sys.version.split()[0]}"
-        
+
         # Git context
         git_branch = "N/A"
         git_status_lines = []
