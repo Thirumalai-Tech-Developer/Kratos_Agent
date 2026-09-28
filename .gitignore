@@ -55,6 +55,7 @@ worker-configuration.d.ts
 # Kratos runtime state & session memory
 .kratos/
 *.db
+/.gitnexus/
 
 # Pytest & Coverage
 .pytest_cache/

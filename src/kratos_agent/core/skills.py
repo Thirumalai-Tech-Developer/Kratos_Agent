@@ -370,17 +370,19 @@ source_url: search:{query}
 
         unique_skills = list({str(s.path): s for s in self.skills.values()}.values())
 
-        # If query is provided, prioritize matching skills
-        if query:
-            q_words = set(re.findall(r'\w+', query.lower()))
-            scored = []
-            for s in unique_skills:
-                score = sum(1 for w in q_words if w in s.name.lower() or w in s.description.lower())
-                scored.append((score, s))
-            scored.sort(key=lambda x: x[0], reverse=True)
-            selected = [s for _, s in scored[:12]]
-        else:
-            selected = unique_skills[:12]
+        # Prefer skills whose names, descriptions, or tags match the active task.
+        # Stable tie-breaking keeps the injected catalog predictable across launches.
+        q_words = set(re.findall(r'\w+', query.lower())) if query else set()
+        scored = []
+        for skill in unique_skills:
+            corpus = set(re.findall(
+                r'\w+',
+                f"{skill.name} {skill.description} {' '.join(skill.tags)}".lower(),
+            ))
+            score = sum(1 for word in q_words if word in corpus)
+            scored.append((score, skill.name.lower(), skill))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        selected = [skill for _, _, skill in scored[:12]]
 
         parts = ["\nACTIVE AGENT SKILLS:"]
         for s in selected:

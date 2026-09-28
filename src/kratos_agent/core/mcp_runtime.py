@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -134,6 +135,72 @@ def _openpets_mcp_default() -> McpServerConfig | None:
     )
 
 
+def _env_enabled(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _context7_mcp_default() -> McpServerConfig:
+    """Expose Context7's hosted library documentation tools."""
+    headers = {}
+    if os.getenv("CONTEXT7_API_KEY", "").strip():
+        headers["Authorization"] = "Bearer ${CONTEXT7_API_KEY}"
+    return McpServerConfig.from_mapping(
+        "context7",
+        {
+            "url": "https://mcp.context7.com/mcp",
+            "headers": headers,
+            "enabled": _env_enabled("KRATOS_CONTEXT7_MCP", True),
+            "timeout": 20,
+        },
+    )
+
+
+def _composio_mcp_default() -> McpServerConfig:
+    """Expose Composio Connect when the user has configured their consumer key."""
+    configured = bool(os.getenv("COMPOSIO_CONSUMER_API_KEY", "").strip())
+    return McpServerConfig.from_mapping(
+        "composio",
+        {
+            "url": "https://connect.composio.dev/mcp",
+            "headers": {"x-consumer-api-key": "${COMPOSIO_CONSUMER_API_KEY}"},
+            "enabled": _env_enabled("KRATOS_COMPOSIO_MCP", configured),
+            "timeout": 30,
+        },
+    )
+
+
+def _gitnexus_mcp_default(workspace: Path | None = None) -> McpServerConfig:
+    """Expose the local GitNexus graph MCP using a pinned package version."""
+    if shutil.which("pnpm"):
+        command = "pnpm"
+        args = [
+            "--allow-build=@ladybugdb/core",
+            "--allow-build=gitnexus",
+            "--allow-build=tree-sitter",
+            "dlx",
+            "gitnexus@1.6.12",
+            "mcp",
+        ]
+    else:
+        # npm 11 can fail to resolve native optional dependencies. Prefer pnpm
+        # when present; npx remains a usable fallback on other installations.
+        command = "npx"
+        args = ["-y", "gitnexus@1.6.12", "mcp"]
+    return McpServerConfig.from_mapping(
+        "gitnexus",
+        {
+            "command": command,
+            "args": args,
+            "cwd": str((workspace or Path.cwd()).resolve()),
+            "enabled": _env_enabled("KRATOS_GITNEXUS_MCP", True),
+            "timeout": 90,
+        },
+    )
+
+
 class McpManager:
     """Loads MCP configs, connects with the official SDK, and registers tools."""
 
@@ -147,7 +214,7 @@ class McpManager:
         self.load()
 
     def load(self) -> None:
-        """Load Kratos MCP config and add the default computer-use and OpenPets servers."""
+        """Load Kratos MCP config and add its built-in tool integrations."""
         self.servers = {}
         self.import_paths = []
         self._local_names = set()
@@ -169,7 +236,13 @@ class McpManager:
         # Keep the published computer-use server on the standard Kratos SDK
         # path. An explicit local or imported entry always wins, including an
         # explicit `enabled: false` override.
-        for default_server in (_computer_use_mcp_default(), _openpets_mcp_default()):
+        for default_server in (
+            _computer_use_mcp_default(),
+            _openpets_mcp_default(),
+            _context7_mcp_default(),
+            _composio_mcp_default(),
+            _gitnexus_mcp_default(self.workspace),
+        ):
             if default_server and default_server.name not in self.servers:
                 self.servers[default_server.name] = default_server
 
