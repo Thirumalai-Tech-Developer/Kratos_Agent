@@ -24,7 +24,9 @@ DEFAULT_MAX_RETRIES: int = 2
 _cached_models: list[str] = []
 _cached_model_details: dict[str, dict[str, Any]] = {}
 _cache_timestamp: float = 0.0
+_catalog_last_attempt: float = 0.0
 _CACHE_TTL_SECONDS: float = 30.0
+_CATALOG_RETRY_DELAY_SECONDS: float = 5.0
 
 PUBLIC_MODELS: list[str] = []
 
@@ -311,6 +313,58 @@ def _model_modalities(model: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _model_limits(model: dict[str, Any]) -> dict[str, Any]:
+    sources = [model]
+    for key in ("model_info", "limits", "capabilities"):
+        nested = model.get(key)
+        if isinstance(nested, dict):
+            sources.append(nested)
+
+    limits: dict[str, Any] = {
+        "context_length": None,
+        "max_input_tokens": None,
+        "max_output_tokens": None,
+        "effort_tiers": [],
+        "selected_effort": None,
+    }
+    for key in ("context_length", "max_input_tokens", "max_output_tokens"):
+        for source in sources:
+            value = _positive_int(source.get(key))
+            if value:
+                limits[key] = value
+                break
+
+    for source in sources:
+        tiers = source.get("effort_tiers")
+        if isinstance(tiers, (list, tuple)):
+            normalized = [str(tier).strip() for tier in tiers if str(tier).strip()]
+            if normalized:
+                limits["effort_tiers"] = normalized
+                limits["selected_effort"] = normalized[-1]
+                break
+    return limits
+
+
+def _modality_badges(model_info: dict[str, Any]) -> list[str]:
+    badges = []
+    text_support = model_info.get("supports_text_input")
+    if text_support is True or (model_info.get("is_configured") and text_support is None):
+        badges.append("Text 📝")
+    if model_info.get("supports_image_input") is True:
+        badges.append("Vision 👁️")
+    return badges
+
+
 def get_model_catalog(
     endpoint: str | None = None,
     timeout: float = 3.0,
@@ -320,9 +374,10 @@ def get_model_catalog(
 
     The catalog is informational. Runtime requests still use only KRATOS_MODEL.
     A missing modality declaration is reported as ``Unknown`` instead of being
-    inferred from a model ID.
+    inferred from a model ID. If the endpoint is unavailable, the configured
+    model is still returned with its text-chat baseline and unknown limits.
     """
-    global _cached_model_details, _cached_models, _cache_timestamp
+    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_last_attempt
 
     target_endpoint = endpoint or get_model_endpoint_url()
     now = time.time()
@@ -333,7 +388,16 @@ def get_model_catalog(
         and (now - _cache_timestamp) < _CACHE_TTL_SECONDS
     ):
         details = _cached_model_details
+    elif (
+        not refresh
+        and endpoint is None
+        and _catalog_last_attempt
+        and (now - _catalog_last_attempt) < _CATALOG_RETRY_DELAY_SECONDS
+    ):
+        details = _cached_model_details
     else:
+        if endpoint is None:
+            _catalog_last_attempt = now
         session = requests.Session()
         session.trust_env = False
         try:
@@ -352,9 +416,52 @@ def get_model_catalog(
             details = _cached_model_details if endpoint is None else {}
 
     catalog = []
+    configured_model = get_default_model()
     for model_id, metadata in details.items():
-        catalog.append({"id": model_id, **_model_modalities(metadata)})
+        entry = {
+            "id": model_id,
+            **_model_modalities(metadata),
+            **_model_limits(metadata),
+            "metadata_available": True,
+            "is_configured": model_id == configured_model,
+        }
+        entry["modality_badges"] = _modality_badges(entry)
+        catalog.append(entry)
+
+    if configured_model and not any(item["id"] == configured_model for item in catalog):
+        fallback = {
+            "id": configured_model,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supports_text_input": True,
+            "supports_image_input": None,
+            "modality_label": "Text input; vision support unknown",
+            "context_length": None,
+            "max_input_tokens": None,
+            "max_output_tokens": None,
+            "effort_tiers": [],
+            "selected_effort": None,
+            "metadata_available": False,
+            "is_configured": True,
+        }
+        fallback["modality_badges"] = _modality_badges(fallback)
+        catalog.insert(0, fallback)
     return catalog
+
+
+def get_model_request_options(model_id: str | None = None) -> dict[str, Any]:
+    """Return cached gateway generation settings without making a network call."""
+    target_model = model_id or get_default_model()
+    metadata = _cached_model_details.get(target_model)
+    if not metadata:
+        return {}
+    limits = _model_limits(metadata)
+    options = {}
+    if limits["max_output_tokens"]:
+        options["max_tokens"] = limits["max_output_tokens"]
+    if limits["selected_effort"]:
+        options["reasoning_effort"] = limits["selected_effort"]
+    return options
 
 
 def get_model(

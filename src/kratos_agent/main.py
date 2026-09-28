@@ -175,6 +175,17 @@ class KratosRuntime:
         self.instructions = InstructionEngine()
         self._register_instruction_modules()
         self.context = ContextBuilder(ContextBudget())
+        self.model_metadata: dict[str, Any] | None = None
+        try:
+            from kratos_agent.brain.config import get_model_catalog
+
+            model_metadata = next(
+                (item for item in get_model_catalog(timeout=0.75) if item["id"] == self.model_name),
+                None,
+            )
+            self.apply_model_metadata(model_metadata)
+        except Exception as exc:
+            logger.debug("Could not load Kratos model limits during startup: %s", exc)
         self.tools_registry = legacy_tool_registry(self.workspace)
         self.mcp = McpManager(self.workspace / ".kratos" / "mcp.json", self.workspace)
         for server_name, status in self.mcp.discover_enabled(self.tools_registry).items():
@@ -413,6 +424,33 @@ class KratosRuntime:
         if self.memory.active_session:
             self.memory.active_session.model = model_name
             self.memory.save()
+
+    def apply_model_metadata(self, metadata: dict[str, Any] | None) -> None:
+        """Apply advertised gateway context and output limits to the runtime."""
+        self.model_metadata = metadata
+        if not metadata or not metadata.get("metadata_available"):
+            return
+
+        budget = self.context.budget
+        context_length = metadata.get("context_length")
+        max_input_tokens = metadata.get("max_input_tokens")
+        max_output_tokens = metadata.get("max_output_tokens")
+        reserve_output = max_output_tokens or budget.reserve_output_tokens
+        if context_length and reserve_output >= int(context_length):
+            reserve_output = max(1, int(context_length) - 1)
+
+        if context_length:
+            input_limit = max(1, int(context_length) - reserve_output)
+        elif max_input_tokens:
+            input_limit = int(max_input_tokens)
+        else:
+            input_limit = budget.max_input_tokens - budget.reserve_output_tokens
+
+        if max_input_tokens:
+            input_limit = min(input_limit, int(max_input_tokens))
+
+        budget.reserve_output_tokens = reserve_output
+        budget.max_input_tokens = input_limit + reserve_output
 
     def _allow_tool(self, spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
         if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):

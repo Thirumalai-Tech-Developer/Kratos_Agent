@@ -397,32 +397,50 @@ def handle_model_command(arg: str = ""):
         return
     runtime.set_model(configured)
 
-    catalog = get_model_catalog()
+    catalog = get_model_catalog(timeout=0.75)
     active_entry = next((item for item in catalog if item["id"] == configured), None)
-    active_modality = active_entry["modality_label"] if active_entry else "Unknown"
+    active_modality = " + ".join(active_entry.get("modality_badges", [])) if active_entry else "Text 📝"
+    if not active_modality:
+        active_modality = "Text 📝"
     console.print(
         f"[bold cyan]Configured Kratos model:[/bold cyan] {escape(configured)} "
-        f"[dim]({escape(active_modality)})[/dim]"
+        f"({escape(active_modality)})"
     )
 
-    if not catalog:
-        console.print("[dim]Gateway model catalog unavailable; modality metadata is unknown.\n[/dim]")
+    apply_metadata = getattr(runtime, "apply_model_metadata", None)
+    if active_entry and callable(apply_metadata):
+        apply_metadata(active_entry)
+
+    has_gateway_metadata = any(item.get("metadata_available") for item in catalog)
+    if not has_gateway_metadata:
+        console.print(
+            "[dim]Gateway metadata is unavailable. Text is shown as the chat input; "
+            "vision and token limits will appear when the gateway reports them.\n[/dim]"
+        )
         return
+    if not active_entry or not active_entry.get("metadata_available"):
+        console.print("[dim]The gateway did not report metadata for the configured model.\n[/dim]")
 
     table = Table(title="Kratos Gateway Models", border_style="cyan")
     table.add_column("Model ID", style="white")
-    table.add_column("Input modalities", style="cyan")
-    table.add_column("Output modalities", style="green")
+    table.add_column("Modalities", style="cyan")
+    table.add_column("Context", style="green", justify="right")
+    table.add_column("Max input", style="green", justify="right")
+    table.add_column("Max output", style="green", justify="right")
+    table.add_column("Effort", style="magenta")
     table.add_column("Runtime", style="yellow")
     for item in catalog:
         table.add_row(
             escape(item["id"]),
-            item["modality_label"],
-            ", ".join(item["output_modalities"]) or "Unknown",
+            " + ".join(item.get("modality_badges", [])) or "Unknown",
+            f"{item['context_length']:,}" if item.get("context_length") else "Unknown",
+            f"{item['max_input_tokens']:,}" if item.get("max_input_tokens") else "Unknown",
+            f"{item['max_output_tokens']:,}" if item.get("max_output_tokens") else "Unknown",
+            item.get("selected_effort") or "Default",
             "Configured" if item["id"] == configured else "Catalog only",
         )
     console.print(table)
-    console.print("[dim]Model selection stays locked to KRATOS_MODEL. Unknown means the gateway did not report modalities.\n[/dim]")
+    console.print("[dim]The highest advertised effort tier is selected automatically when the model provides effort_tiers.\n[/dim]")
 
 
 def handle_memory_command(arg: str = ""):

@@ -7,7 +7,13 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from kratos_agent.brain.config import get_default_model, get_endpoint_url, get_max_retries, get_request_timeout
+from kratos_agent.brain.config import (
+    get_default_model,
+    get_endpoint_url,
+    get_max_retries,
+    get_model_request_options,
+    get_request_timeout,
+)
 from kratos_agent.core.latency_tracker import latency_tracker
 from kratos_agent.sdk import KratosClient
 
@@ -35,7 +41,9 @@ class BrainClient:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build a Kratos SDK request using the local gateway's chat contract."""
-        return self.sdk.build_request(model, messages, system_instruction, stream=stream, tools=tools)
+        request = self.sdk.build_request(model, messages, system_instruction, stream=stream, tools=tools)
+        request.update(get_model_request_options(model))
+        return request
 
     def complete_with_sdk(
         self,
