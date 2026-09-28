@@ -81,7 +81,7 @@ def get_kratos_banner():
 HELP_TEXT = """
 [bold gold1]Available CLI Commands:[/bold gold1]
   [bold cyan]/doctor[/bold cyan]                  - Run Kratos model connection & transport diagnostics (alias: /health)
-  [bold cyan]/model[/bold cyan]                  - View the one configured Kratos model
+  [bold cyan]/model[/bold cyan]                  - List Kratos models and their input modalities
   [bold cyan]/gateway[/bold cyan]                - View Kratos Gateway status & configuration (alias: /accounts)
   [bold cyan]/bypass[/bold cyan]                 - View / confirm autonomous bypass permissions status
   [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set Kratos approval mode
@@ -154,7 +154,7 @@ class KratosCompleter(Completer):
         ("/gateway", "View Brain Gateway status & configuration (alias: /accounts)"),
         ("/bypass", "View / confirm autonomous bypass permissions mode"),
         ("/session", "Manage isolated agentic memory sessions (new, load, list, show, rm)"),
-        ("/model", "View the one configured Kratos model"),
+        ("/model", "List Kratos models and their input modalities"),
         ("/prompts", "Browse the project's engineering prompt library"),
         ("/review", "Run senior multi-angle code review on changes"),
         ("/simplify", "Run 4-angle code cleanup and refactoring sweep"),
@@ -385,8 +385,8 @@ def handle_login(arg: str = ""):
 
 
 def handle_model_command(arg: str = ""):
-    """Show the single configured model; runtime model switching is disabled."""
-    from kratos_agent.brain.config import get_default_model
+    """List gateway model modalities while keeping runtime selection locked."""
+    from kratos_agent.brain.config import get_default_model, get_model_catalog
 
     configured = get_default_model()
     if not configured:
@@ -396,7 +396,33 @@ def handle_model_command(arg: str = ""):
         console.print(f"[bold yellow]Kratos is locked to {configured}.[/bold yellow] Model switching is disabled.\n")
         return
     runtime.set_model(configured)
-    console.print(f"[bold cyan]Kratos reasoning model:[/bold cyan] {escape(configured)}\n")
+
+    catalog = get_model_catalog()
+    active_entry = next((item for item in catalog if item["id"] == configured), None)
+    active_modality = active_entry["modality_label"] if active_entry else "Unknown"
+    console.print(
+        f"[bold cyan]Configured Kratos model:[/bold cyan] {escape(configured)} "
+        f"[dim]({escape(active_modality)})[/dim]"
+    )
+
+    if not catalog:
+        console.print("[dim]Gateway model catalog unavailable; modality metadata is unknown.\n[/dim]")
+        return
+
+    table = Table(title="Kratos Gateway Models", border_style="cyan")
+    table.add_column("Model ID", style="white")
+    table.add_column("Input modalities", style="cyan")
+    table.add_column("Output modalities", style="green")
+    table.add_column("Runtime", style="yellow")
+    for item in catalog:
+        table.add_row(
+            escape(item["id"]),
+            item["modality_label"],
+            ", ".join(item["output_modalities"]) or "Unknown",
+            "Configured" if item["id"] == configured else "Catalog only",
+        )
+    console.print(table)
+    console.print("[dim]Model selection stays locked to KRATOS_MODEL. Unknown means the gateway did not report modalities.\n[/dim]")
 
 
 def handle_memory_command(arg: str = ""):

@@ -5,6 +5,7 @@ from kratos_agent.brain.config import (
     fetch_models,
     get_available_models,
     get_model,
+    get_model_catalog,
 )
 
-__all__ = ["authenticate", "fetch_models", "get_available_models", "get_model"]
+__all__ = ["authenticate", "fetch_models", "get_available_models", "get_model", "get_model_catalog"]

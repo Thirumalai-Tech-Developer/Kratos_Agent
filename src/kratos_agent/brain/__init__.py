@@ -26,6 +26,7 @@ from .config import (
     get_endpoint_url,
     get_max_retries,
     get_model,
+    get_model_catalog,
     get_model_endpoint_url,
     get_request_timeout,
 )
@@ -50,6 +51,6 @@ __all__ = [
     "BrainTimeoutError", "BrainRateLimitError", "BrainBadRequestError", "BrainNotFoundError",
     "BrainServerError", "authenticate", "fetch_models", "get_api_key", "get_available_models",
     "get_base_url", "get_default_model", "get_endpoint_url", "get_max_retries", "get_model",
-    "get_model_endpoint_url", "get_request_timeout", "BrainClient",
+    "get_model_catalog", "get_model_endpoint_url", "get_request_timeout", "BrainClient",
     "get_agent_response", "KratosClient", "KratosCompletion", "KratosToolCall",
 ]
