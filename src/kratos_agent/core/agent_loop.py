@@ -807,6 +807,10 @@ class AgentLoop:
                 active.start()
             self.emit(RuntimeEvent(EventKind.AGENT_RESUMED, {"plan": self.current_plan.to_dict()}, turn_id))
         elif intent.requires_plan:
+            # Planned task IDs are commonly reused across independent requests.
+            # Keep the latch when resuming a plan, but clear it for a new plan.
+            if not is_continue:
+                self.terminal_latch.reset()
             self.emit(RuntimeEvent(EventKind.UNDERSTANDING_STARTED, {"query": user_query}, turn_id))
             self.emit(RuntimeEvent(EventKind.PLANNING_STARTED, {"query": user_query}, turn_id))
 

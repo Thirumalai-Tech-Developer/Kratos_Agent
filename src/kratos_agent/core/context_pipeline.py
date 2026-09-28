@@ -131,12 +131,22 @@ class ContextBuilder:
         if total <= limit or len(messages) <= 1:
             return messages, None
 
-        # Always preserve the root user request (messages[0]) so the agent never loses its original task.
+        # Preserve the newest explicit user request. Keeping messages[0] here
+        # retained stale goals from earlier turns and could drop the request
+        # currently being executed when an old assistant reply was large.
         root_user: ChatMessage | None = None
         remaining_messages = list(messages)
-        if messages and messages[0].role == "user":
-            root_user = messages[0]
-            remaining_messages = messages[1:]
+        internal_user_prefixes = (
+            "[System Directive",
+            "[RUNTIME VERIFICATION FAILED",
+            "[COMPACTION CHECKPOINT]",
+        )
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if message.role == "user" and not message.content.startswith(internal_user_prefixes):
+                root_user = message
+                remaining_messages = messages[:index] + messages[index + 1:]
+                break
 
         # Preserve the newest turns from remaining_messages up to budget
         kept: list[ChatMessage] = []

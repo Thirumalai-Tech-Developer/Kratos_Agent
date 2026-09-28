@@ -480,7 +480,8 @@ class AgenticMemory:
             "timestamp": timestamp,
             "user": user_query,
             "agent": effective_reply,
-            "tools_used": tool_calls or []
+            "tools_used": tool_calls or [],
+            "status": status,
         }
         self.active_session.turns.append(turn)
 

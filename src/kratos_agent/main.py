@@ -61,6 +61,28 @@ _ACTIONABLE_REQUEST_PATTERN = re.compile(
 )
 
 
+def _recent_conversation(history: list[ChatMessage], exchanges: int = 2) -> list[ChatMessage]:
+    """Keep a small conversational window and drop old execution transcripts."""
+    user_positions = [i for i, message in enumerate(history) if message.role == "user"]
+    if not user_positions:
+        return []
+
+    selected = user_positions[-max(1, exchanges):]
+    recent: list[ChatMessage] = []
+    for offset, start in enumerate(selected):
+        end = selected[offset + 1] if offset + 1 < len(selected) else len(history)
+        recent.append(history[start])
+        # Keep the final assistant reply for each exchange; tool traces and
+        # intermediate model/tool messages are scoped to their original run.
+        assistant = next(
+            (history[i] for i in range(end - 1, start, -1) if history[i].role == "assistant"),
+            None,
+        )
+        if assistant is not None:
+            recent.append(assistant)
+    return recent
+
+
 def _serialize_turn(method):
     """Serialize interactive and voice requests through one agent loop."""
     @wraps(method)
@@ -289,7 +311,7 @@ class KratosRuntime:
         ), 12))
         def _get_compact_memory_context() -> str:
             mm = get_memory_manager()
-            mems = mm.get_compact_context(query_text=str(getattr(self, "last_request", "") or ""))
+            mems = mm.get_compact_context(query_text=str(getattr(self, "_active_user_request", "") or ""))
             memory_section = ("\n\nRELEVANT MEMORY:\n" + "\n".join(f"- {m}" for m in mems)) if mems else ""
             return KRATOS_COGNITIVE_MEMORY_PROMPT + memory_section
 
@@ -334,7 +356,9 @@ class KratosRuntime:
         if not active:
             return []
         history: list[ChatMessage] = []
-        turns = active.turns[-36:]
+        # Keep durable session history on disk, but restore only the latest two
+        # successful exchanges into the model context for a fresh process.
+        turns = [turn for turn in active.turns if turn.get("status") != "failed"][-2:]
         for turn in turns:
             agent_text = str(turn.get("agent", "")).strip()
             if len(agent_text) > 8000:
@@ -516,7 +540,10 @@ class KratosRuntime:
     def invoke(self, messages: list[dict[str, str]]) -> str:
         self._current_tool_calls = []
         self._cancellation_flag.clear()  # Always start fresh for a new turn
-        history = [ChatMessage(role=item.get("role", "user"), content=str(item.get("content", ""))) for item in messages]
+        history = _recent_conversation([
+            ChatMessage(role=item.get("role", "user"), content=str(item.get("content", "")))
+            for item in messages
+        ])
         resume_plan = None
         user = next((item.content for item in reversed(history) if item.role == "user"), "")
         self._active_user_request = user
@@ -571,6 +598,7 @@ class KratosRuntime:
         normal_model = get_normal_mode_model()
         self._current_tool_calls = []
         self._active_user_request = query
+        self._history = _recent_conversation(self._history)
         self._history.append(ChatMessage("user", query))
 
         system_instruction = (
@@ -640,6 +668,8 @@ class KratosRuntime:
             return self.run_chat_restricted(query)
 
         self._current_tool_calls = []
+        self._active_user_request = query
+        self._history = _recent_conversation(self._history)
         self._history.append(ChatMessage("user", query))
         resume_plan = None
         if query.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:

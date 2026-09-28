@@ -81,9 +81,20 @@ class TerminalLatch:
         self._set: dict[str, str] = {}
         self._audit = audit_recorder
 
+    def reset(self) -> None:
+        """Start a fresh task namespace when a new execution plan replaces the old one."""
+        self._set.clear()
+
     def try_set(self, task_id: str, status: str) -> bool:
+        if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
+            return True  # non-terminal, always allowed
         prev = self._set.get(task_id)
         if prev is not None:
+            # Repeated reports of the same outcome are harmless and should not
+            # look like an integrity failure. The caller still gets False so it
+            # does not emit a duplicate terminal event.
+            if prev == status:
+                return False
             import logging
             logging.getLogger("kratos.latch").error(
                 "TERMINAL LATCH VIOLATION: task %s already %s, refused %s",
@@ -99,8 +110,6 @@ class TerminalLatch:
                     refused=status,
                 )
             return False
-        if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
-            return True  # non-terminal, always allowed
         self._set[task_id] = status
         return True
 
