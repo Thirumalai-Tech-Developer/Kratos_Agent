@@ -233,11 +233,14 @@ export function getCanonicalModelMetadata(input: {
       ? getSyncedCapability(provider, resolved.model, input.snapshot?.synced ?? null)
       : null;
   const canonicalStaticAlias = resolveStaticModelAlias(resolved.model || modelId);
-  const modalities = buildModalities(
-    resolved.modalitiesInput,
-    resolved.modalitiesOutput,
-    resolved.supportsVision
-  );
+  // These browser executors route text-only messages. Preserve that explicit
+  // registry declaration when enriching shortened public aliases as well.
+  const textOnlyWebTransport =
+    registryModel?.supportsVision === false &&
+    ["deepseek-web", "doubao-web", "qwen-browser", "zai-web"].includes(provider || "");
+  const modalities = textOnlyWebTransport
+    ? { input: ["text"], output: ["text"] }
+    : buildModalities(resolved.modalitiesInput, resolved.modalitiesOutput, resolved.supportsVision);
 
   return {
     provider,
@@ -258,7 +261,7 @@ export function getCanonicalModelMetadata(input: {
       supportsThinking: resolved.supportsThinking,
       supportedThinkingEfforts: resolved.supportedThinkingEfforts,
       supportsTools: resolved.supportsTools,
-      vision: resolved.supportsVision,
+      vision: textOnlyWebTransport ? false : resolved.supportsVision,
       attachment: resolved.attachment,
       structuredOutput: resolved.structuredOutput,
       temperature: resolved.temperature,

@@ -13,6 +13,20 @@ const { persistBrowserDiscoveredModels } =
   await import("../../src/lib/providerModels/browserModelDiscovery.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
 const connectionModels = await import("../../src/app/api/providers/[id]/models/route.ts");
+const { getCanonicalModelMetadata } = await import("../../src/lib/modelMetadataRegistry.ts");
+
+test("web alias enrichment preserves the declared text-only transport", () => {
+  for (const [provider, model] of [
+    ["ds-web", "deepseek-v4-pro"],
+    ["db", "dola-pro"],
+  ]) {
+    const metadata = getCanonicalModelMetadata({ provider, model });
+    assert.ok(metadata);
+    assert.deepEqual(metadata.modalities.input, ["text"]);
+    assert.deepEqual(metadata.modalities.output, ["text"]);
+    assert.equal(metadata.capabilities.vision, false);
+  }
+});
 
 test("text-only web transports advertise text and preserve explicit vision false", async () => {
   for (const provider of ["deepseek-web", "doubao-web"]) {
