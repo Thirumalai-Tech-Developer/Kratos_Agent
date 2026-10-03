@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import json
 import inspect
+import re
 import uuid
 from collections.abc import Callable
 from typing import Any
+
+from kratos_agent.brain.config import BrainToolCallError
 
 from .runtime_contracts import ModelCapabilities, ModelResponse, ToolCall
 
@@ -77,11 +80,15 @@ class KratosModelAdapter:
     def _dedupe_calls(calls: list[dict[str, Any]]) -> list[ToolCall]:
         result: list[ToolCall] = []
         seen: set[tuple[str, str]] = set()
+        if not isinstance(calls, list):
+            raise BrainToolCallError("The provider returned an invalid tool-call collection.")
         for call in calls:
-            name = str(call.get("name") or "tool")
-            args = call.get("args") or call.get("arguments") or {}
+            if not isinstance(call, dict) or not isinstance(call.get("name"), str) or not call["name"].strip():
+                raise BrainToolCallError("The provider returned a tool call without a valid name.")
+            name = call["name"].strip()
+            args = call.get("args", call.get("arguments", {}))
             if not isinstance(args, dict):
-                args = {}
+                raise BrainToolCallError("The provider returned tool arguments that are not a JSON object.")
             key = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
             if key in seen:
                 continue
@@ -107,35 +114,28 @@ class KratosModelAdapter:
             # BrainClient already sends them through the native `tools` field.
             system_content = system_content + self._tool_protocol_hint()
 
-        buffered: list[str] = []
-        recent = ""
+        pending_text = ""
         suppress_text = False
-        streaming_active = False
 
         def stream_filter(chunk: str) -> None:
-            nonlocal recent, suppress_text, streaming_active
+            nonlocal pending_text, suppress_text
             if not on_chunk or suppress_text:
                 return
-            recent += chunk
-            if len(recent) > 256:
-                recent = recent[-256:]
-            stripped = recent.lstrip()
-            tool_prefixes = ("call:", "<tool", "<｜", "<||", '{"name"')
-            if any(stripped.startswith(prefix) for prefix in tool_prefixes):
-                suppress_text = True
-                buffered.clear()
-                return
-            if not streaming_active:
-                buffered.append(chunk)
-                candidate = "".join(buffered).lstrip()
-                maybe_tool = any(prefix.startswith(candidate[: min(len(candidate), 8)]) for prefix in tool_prefixes)
-                if len(candidate) >= 24 or "\n" in candidate or not maybe_tool:
-                    streaming_active = True
-                    for item in buffered:
-                        on_chunk(item)
-                    buffered.clear()
-            else:
-                on_chunk(chunk)
+            pending_text += chunk
+            prefixes = ('call:', '<tool', '<||DSML||', '<|DSML|', '<|toolcallbegin|>', '{"name"')
+            visible = []
+            while pending_text:
+                candidate = re.sub(r'\s+', '', pending_text).replace('｜', '|')
+                if any(candidate.lower().startswith(prefix.lower()) for prefix in prefixes):
+                    suppress_text = True
+                    pending_text = ''
+                    break
+                if candidate and any(prefix.lower().startswith(candidate.lower()) for prefix in prefixes):
+                    break
+                visible.append(pending_text[0])
+                pending_text = pending_text[1:]
+            if visible:
+                on_chunk(''.join(visible))
 
         raw_text = ""
         native_calls: list[dict[str, Any]] = []
@@ -198,12 +198,16 @@ class KratosModelAdapter:
                 on_chunk=stream_filter if on_chunk else None,
             )
 
-        if on_chunk and not suppress_text and buffered:
-            for item in buffered:
-                on_chunk(item)
+        if on_chunk and not suppress_text and pending_text:
+            on_chunk(pending_text)
 
-        text, text_calls = extract_tool_calls_from_text(str(raw_text or ""))
+        text, text_calls = extract_tool_calls_from_text(str(raw_text or ""), strict=True)
+        if not isinstance(native_calls, list):
+            raise BrainToolCallError("The provider returned an invalid tool-call collection.")
         all_calls = self._dedupe_calls([*native_calls, *text_calls])
+        advertised = {str((tool.get("function") or tool).get("name", "")) for tool in tools if isinstance(tool, dict)}
+        if any(call.name not in advertised for call in all_calls):
+            raise BrainToolCallError("The provider requested a tool that was not supplied in this request.")
 
         return ModelResponse(
             text=text,

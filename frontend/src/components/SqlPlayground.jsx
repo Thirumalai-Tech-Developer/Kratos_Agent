@@ -22,7 +22,7 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
 
   return (
     <div className="flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6 space-y-4">
-      
+
       {/* Top Header & Presets */}
       <div className="flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
@@ -113,8 +113,8 @@ export default function SqlPlayground({ onExecuteQuery, results, isLoading, erro
                   <tr key={rIdx} className="hover:bg-pink-950/20 transition">
                     {columns.map((col, cIdx) => (
                       <td key={cIdx} className="p-2.5 text-slate-300 whitespace-nowrap max-w-xs truncate">
-                        {row[col] !== null && typeof row[col] === 'object' 
-                          ? JSON.stringify(row[col]) 
+                        {row[col] !== null && typeof row[col] === 'object'
+                          ? JSON.stringify(row[col])
                           : String(row[col] ?? 'null')}
                       </td>
                     ))}

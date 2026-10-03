@@ -9,11 +9,16 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from threading import Event, Thread
+from types import MappingProxyType
 from typing import Any
 
 import requests
+from kratos_agent.core.model_guard import OutputGuard, repetitive_output, RepetitiveOutputError
 
 from kratos_agent.brain.config import (
     BrainBadRequestError,
@@ -23,6 +28,7 @@ from kratos_agent.brain.config import (
     BrainRateLimitError,
     BrainServerError,
     BrainTimeoutError,
+    BrainToolCallError,
     get_api_key,
     get_endpoint_url,
     get_max_retries,
@@ -30,6 +36,76 @@ from kratos_agent.brain.config import (
 )
 
 logger = logging.getLogger(__name__)
+_request_context: ContextVar[Mapping[str, str]] = ContextVar("kratos_gateway_request", default=MappingProxyType({}))
+
+_cancel_context: ContextVar[Event | None] = ContextVar("kratos_gateway_cancel", default=None)
+
+
+@contextmanager
+def gateway_scope(*, session_id: str = "", task_id: str = "", cancel: Event | None = None):
+    """Carry task identity through nested model calls without leaking between turns."""
+    context = dict(_request_context.get())
+    for name, value in (("x-session-id", session_id), ("x-kratos-task-id", task_id)):
+        if value:
+            if "\r" in value or "\n" in value:
+                raise ValueError("Request identifiers must not contain line breaks")
+            context[name] = value
+    token = _request_context.set(context)
+    cancellation = _cancel_context.set(cancel if cancel is not None else _cancel_context.get())
+    try:
+        yield
+    finally:
+        _cancel_context.reset(cancellation)
+        _request_context.reset(token)
+
+
+def _check_cancelled() -> None:
+    event = _cancel_context.get()
+    if event is not None and event.is_set():
+        raise BrainError("Kratos model request cancelled.")
+
+
+def _retry_wait(delay: float) -> None:
+    event = _cancel_context.get()
+    if event is None:
+        time.sleep(delay)
+    else:
+        event.wait(delay)
+        _check_cancelled()
+
+
+@contextmanager
+def _close_stream_on_cancel(response: requests.Response):
+    """Close an idle SSE socket when the owning task is cancelled."""
+    cancellation = _cancel_context.get()
+    if cancellation is None:
+        yield
+        return
+    finished = Event()
+
+    def watch() -> None:
+        while not finished.is_set():
+            if cancellation.wait(0.1):
+                if not finished.is_set():
+                    response.close()
+                return
+
+    watcher = Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        yield
+    finally:
+        finished.set()
+        watcher.join(timeout=0.2)
+
+
+class KratosStreamError(BrainError):
+    """An incomplete response, preserved for diagnostics and never executable."""
+
+    def __init__(self, message: str, partial_text: str = "") -> None:
+        super().__init__(message)
+        self.partial_text = partial_text
+        self.request_id = _request_context.get().get("X-Request-Id", "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +152,32 @@ class KratosClient:
         on_chunk: Callable[[str], None] | None = None,
         max_retries: int | None = None,
         timeout: float | None = None,
+        session_id: str | None = None,
+        request_id: str | None = None,
+        task_id: str | None = None,
+    ) -> KratosCompletion:
+        context = {**_request_context.get(), "X-Request-Id": request_id or uuid.uuid4().hex}
+        if task_id:
+            context["x-kratos-task-id"] = task_id
+        if session_id:
+            context["x-session-id"] = session_id
+        if any("\r" in value or "\n" in value for value in context.values()):
+            raise ValueError("Request identifiers must not contain line breaks")
+        token = _request_context.set(context)
+        try:
+            return self._complete(payload, stream=stream, on_chunk=on_chunk,
+                                  max_retries=max_retries, timeout=timeout)
+        finally:
+            _request_context.reset(token)
+
+    def _complete(
+        self,
+        payload: dict[str, Any],
+        *,
+        stream: bool | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+        max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> KratosCompletion:
         """Complete one request, returning validated text and native tool calls."""
         request_payload = dict(payload)
@@ -94,13 +196,19 @@ class KratosClient:
             fallback_payload = dict(request_payload)
             fallback_payload["stream"] = False
             result = self._json_completion(fallback_payload, req_timeout, 0)
+            if repetitive_output(result.text):
+                raise RepetitiveOutputError('Repeated output detected; generation was stopped.')
             if on_chunk and result.text:
                 self._notify_chunk(on_chunk, result.text)
         else:
             result = self._json_completion(request_payload, req_timeout, retries)
+            if repetitive_output(result.text):
+                raise RepetitiveOutputError('Repeated output detected; generation was stopped.')
             if on_chunk and result.text:
                 self._notify_chunk(on_chunk, result.text)
 
+        if repetitive_output(result.text):
+            raise RepetitiveOutputError('Repeated output detected; generation was stopped.')
         if not result.text and not result.tool_calls:
             raise BrainError(f"Kratos model returned an empty response for '{request_payload.get('model', 'unknown')}'.")
         return result
@@ -204,42 +312,63 @@ class KratosClient:
         req_timeout = self.timeout if timeout is None else timeout
         chunks: list[str] = []
         last_error: Exception | None = None
+        terminal = False
+        output_guard = OutputGuard()
+        headers = self._headers()
         for attempt in range(retries + 1):
+            _check_cancelled()
             try:
                 with self.session.post(
                     self.endpoint_url,
-                    headers=self._headers(),
+                    headers=headers,
                     json=request_payload,
                     stream=True,
                     timeout=req_timeout,
                 ) as response:
                     if response.status_code != 200:
                         self._raise_response_error(response, str(request_payload.get("model", "unknown")))
-                    for raw_line in response.iter_lines(decode_unicode=False):
-                        if not raw_line:
-                            continue
-                        line = raw_line.decode("utf-8", errors="replace").strip() if isinstance(raw_line, bytes) else str(raw_line).strip()
-                        if not line.startswith("data:"):
-                            continue
-                        data_text = line[5:].strip()
-                        if data_text == "[DONE]":
-                            break
-                        try:
-                            event = json.loads(data_text)
-                        except json.JSONDecodeError:
-                            continue
-                        choices = event.get("choices") or []
-                        if not choices or not isinstance(choices[0], dict):
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        content = delta.get("content")
-                        if isinstance(content, str) and content:
-                            chunks.append(content)
-                            yield content
+                    with _close_stream_on_cancel(response):
+                        for raw_line in response.iter_lines(decode_unicode=False):
+                            _check_cancelled()
+                            if not raw_line:
+                                continue
+                            line = raw_line.decode("utf-8", errors="replace").strip() if isinstance(raw_line, bytes) else str(raw_line).strip()
+                            if not line.startswith("data:"):
+                                continue
+                            data_text = line[5:].strip()
+                            if data_text == "[DONE]":
+                                terminal = True
+                                break
+                            try:
+                                event = json.loads(data_text)
+                            except json.JSONDecodeError:
+                                continue
+                            if not isinstance(event, dict):
+                                raise KratosStreamError("Kratos gateway returned an invalid stream event.", "".join(chunks))
+                            if event.get("error"):
+                                raise KratosStreamError("Kratos gateway reported a stream error.", "".join(chunks))
+                            choices = event.get("choices") or []
+                            if not choices or not isinstance(choices[0], dict):
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            terminal = terminal or bool(choices[0].get("finish_reason"))
+                            if delta.get("tool_calls"):
+                                raise KratosStreamError("Text-only stream received tool calls; use complete().", "".join(chunks))
+                            content = delta.get("content")
+                            if isinstance(content, str) and content:
+                                output_guard.push(content)
+                                chunks.append(content)
+                                yield content
+                    _check_cancelled()
+                if not terminal and chunks:
+                    raise KratosStreamError("Kratos stream interrupted before completion.", "".join(chunks))
+                # Empty streams have exposed no content or tool action.
                 if not chunks:
                     fallback = dict(request_payload)
                     fallback["stream"] = False
                     result = self._json_completion(fallback, req_timeout, 0)
+                    if repetitive_output(result.text):
+                        raise RepetitiveOutputError('Repeated output detected; generation was stopped.')
                     if result.text:
                         yield result.text
                 return
@@ -248,15 +377,20 @@ class KratosClient:
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
                 raise
             except requests.exceptions.Timeout:
+                _check_cancelled()
                 last_error = BrainTimeoutError(f"Kratos model request timed out after {req_timeout}s.")
             except requests.exceptions.ConnectionError:
+                _check_cancelled()
                 last_error = BrainConnectionError(f"Kratos model gateway is unreachable at {self.endpoint_url}.")
             except requests.exceptions.RequestException as exc:
+                _check_cancelled()
                 last_error = BrainError(f"Kratos model transport failed: {type(exc).__name__}.")
             if attempt < retries and not chunks:
-                time.sleep(min(0.5 * (2 ** attempt), 2.0))
+                _retry_wait(min(0.5 * (2 ** attempt), 2.0))
             else:
                 if last_error:
+                    if chunks:
+                        raise KratosStreamError("Kratos stream interrupted during transport.", "".join(chunks)) from last_error
                     raise last_error
 
     def _stream_completion(
@@ -270,10 +404,13 @@ class KratosClient:
         tool_deltas: dict[int, dict[str, str]] = {}
         usage: dict[str, int] = {}
         finish_reason = "stop"
+        terminal = False
+        output_guard = OutputGuard()
 
         def consume(response: requests.Response) -> None:
-            nonlocal finish_reason, usage
+            nonlocal finish_reason, usage, terminal
             for raw_line in response.iter_lines(decode_unicode=False):
+                _check_cancelled()
                 if not raw_line:
                     continue
                 line = raw_line.decode("utf-8", errors="replace").strip() if isinstance(raw_line, bytes) else str(raw_line).strip()
@@ -281,11 +418,16 @@ class KratosClient:
                     continue
                 data_text = line[5:].strip()
                 if data_text == "[DONE]":
+                    terminal = True
                     break
                 try:
                     event = json.loads(data_text)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(event, dict):
+                    raise KratosStreamError("Kratos gateway returned an invalid stream event.", "".join(chunks))
+                if event.get("error"):
+                    raise KratosStreamError("Kratos gateway reported a stream error.", "".join(chunks))
                 if isinstance(event.get("usage"), dict):
                     usage = _integer_usage(event["usage"])
                 choices = event.get("choices") or []
@@ -295,23 +437,35 @@ class KratosClient:
                 delta = choice.get("delta") or {}
                 content = delta.get("content")
                 if isinstance(content, str) and content:
+                    output_guard.push(content)
                     chunks.append(content)
                     if on_chunk:
                         self._notify_chunk(on_chunk, content)
                 if choice.get("finish_reason"):
                     finish_reason = str(choice["finish_reason"])
-                for item in delta.get("tool_calls") or []:
+                    terminal = True
+                delta_calls = delta.get("tool_calls") or []
+                if not isinstance(delta_calls, list):
+                    raise BrainToolCallError("Kratos gateway streamed an invalid tool-call collection.")
+                for item in delta_calls:
                     if not isinstance(item, dict):
-                        continue
-                    index = int(item.get("index", 0) or 0)
+                        raise BrainToolCallError("Kratos gateway streamed an invalid structured tool call.")
+                    index = item.get("index", 0)
+                    if type(index) is not int or index < 0:
+                        raise BrainToolCallError("Kratos gateway streamed an invalid tool-call index.")
                     state = tool_deltas.setdefault(index, {"id": "", "name": "", "arguments": ""})
                     state["id"] = str(item.get("id") or state["id"])
                     function = item.get("function") or {}
+                    if not isinstance(function, dict):
+                        raise BrainToolCallError("Kratos gateway streamed an invalid tool function.")
+                    if any(key in function and function[key] is not None and not isinstance(function[key], str) for key in ("name", "arguments")):
+                        raise BrainToolCallError("Kratos gateway streamed invalid tool-call fragments.")
                     state["name"] += str(function.get("name") or "")
                     state["arguments"] += str(function.get("arguments") or "")
 
         last_error: Exception | None = None
         for attempt in range(retries + 1):
+            _check_cancelled()
             try:
                 with self.session.post(
                     self.endpoint_url,
@@ -322,22 +476,37 @@ class KratosClient:
                 ) as response:
                     if response.status_code != 200:
                         self._raise_response_error(response, str(payload.get("model", "unknown")))
-                    consume(response)
+                    with _close_stream_on_cancel(response):
+                        consume(response)
+                    _check_cancelled()
+                if not terminal and (chunks or tool_deltas):
+                    from kratos_agent.brain.tool_calls import has_unparsed_tool_marker
+                    if tool_deltas or has_unparsed_tool_marker("".join(chunks)):
+                        raise BrainToolCallError("Kratos stream interrupted with an incomplete tool call; the response was discarded before execution.")
+                    raise KratosStreamError("Kratos stream interrupted before completion.", "".join(chunks))
                 break
             except (BrainRateLimitError, BrainServerError) as exc:
                 last_error = exc
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
                 raise
-            except requests.exceptions.Timeout as exc:
+            except requests.exceptions.Timeout:
+                _check_cancelled()
                 last_error = BrainTimeoutError(f"Kratos model request timed out after {timeout}s.")
-            except requests.exceptions.ConnectionError as exc:
+            except requests.exceptions.ConnectionError:
+                _check_cancelled()
                 last_error = BrainConnectionError(f"Kratos model gateway is unreachable at {self.endpoint_url}.")
             except requests.exceptions.RequestException as exc:
+                _check_cancelled()
                 last_error = BrainError(f"Kratos model transport failed: {type(exc).__name__}.")
             if attempt < retries and not chunks and not tool_deltas:
-                time.sleep(min(0.5 * (2 ** attempt), 2.0))
+                _retry_wait(min(0.5 * (2 ** attempt), 2.0))
                 continue
             if last_error:
+                if chunks or tool_deltas:
+                    from kratos_agent.brain.tool_calls import has_unparsed_tool_marker
+                    if tool_deltas or has_unparsed_tool_marker("".join(chunks)):
+                        raise BrainToolCallError("Kratos stream interrupted during transport with an incomplete tool call; the response was discarded before execution.") from last_error
+                    raise KratosStreamError("Kratos stream interrupted during transport.", "".join(chunks)) from last_error
                 raise last_error
 
         calls = _finish_tool_calls(tool_deltas)
@@ -348,6 +517,7 @@ class KratosClient:
     def _json_completion(self, payload: dict[str, Any], timeout: float, retries: int) -> KratosCompletion:
         last_error: Exception | None = None
         for attempt in range(retries + 1):
+            _check_cancelled()
             try:
                 response = self.session.post(
                     self.endpoint_url,
@@ -383,16 +553,16 @@ class KratosClient:
                 last_error = exc
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
                 raise
-            except requests.exceptions.Timeout as exc:
+            except requests.exceptions.Timeout:
                 last_error = BrainTimeoutError(f"Kratos model request timed out after {timeout}s.")
-            except requests.exceptions.ConnectionError as exc:
+            except requests.exceptions.ConnectionError:
                 last_error = BrainConnectionError(f"Kratos model gateway is unreachable at {self.endpoint_url}.")
             except requests.exceptions.RequestException as exc:
                 last_error = BrainError(f"Kratos model transport failed: {type(exc).__name__}.")
             except (ValueError, json.JSONDecodeError) as exc:
                 raise BrainError(f"Kratos gateway returned invalid JSON ({type(exc).__name__}).") from exc
             if attempt < retries:
-                time.sleep(min(0.5 * (2 ** attempt), 2.0))
+                _retry_wait(min(0.5 * (2 ** attempt), 2.0))
         if last_error:
             raise last_error
         raise BrainError("Kratos gateway request failed without a response.")
@@ -425,7 +595,12 @@ class KratosClient:
         return ids
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "Connection": "Keep-Alive"}
+        headers = {
+            "Content-Type": "application/json", "Connection": "Keep-Alive",
+            "x-omniroute-no-memory": "true",
+            "X-Request-Id": uuid.uuid4().hex,
+            **_request_context.get(),
+        }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
@@ -452,7 +627,7 @@ class KratosClient:
     def _notify_chunk(callback: Callable[[str], None], text: str) -> None:
         try:
             callback(text)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a client callback must not corrupt the stream
             logger.debug("Kratos stream callback failed: %s", exc)
 
     @staticmethod
@@ -462,7 +637,7 @@ class KratosClient:
             error = body.get("error") if isinstance(body, dict) else None
             detail = error.get("message") if isinstance(error, dict) else None
             detail = str(detail or response.text[:300] or "gateway returned an error")
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed upstream error bodies need a fallback
             detail = str(response.text[:300] or "gateway returned an error")
         status = response.status_code
         lower = detail.lower()
@@ -494,27 +669,27 @@ def _integer_usage(value: Any) -> dict[str, int]:
 
 def _parse_tool_calls(items: Any) -> list[KratosToolCall]:
     if not isinstance(items, list):
-        return []
+        raise BrainToolCallError("Kratos gateway returned an invalid tool-call collection.")
     calls: list[KratosToolCall] = []
     for item in items:
         if not isinstance(item, dict):
-            continue
+            raise BrainToolCallError("Kratos gateway returned an invalid structured tool call.")
         function = item.get("function") or {}
         if not isinstance(function, dict):
-            raise BrainError("Kratos gateway returned an invalid structured tool call.")
+            raise BrainToolCallError("Kratos gateway returned an invalid structured tool call.")
         raw_args = function.get("arguments", {})
         if isinstance(raw_args, str):
             try:
                 arguments = json.loads(raw_args) if raw_args else {}
             except json.JSONDecodeError as exc:
-                raise BrainError("Kratos gateway returned malformed JSON tool arguments.") from exc
+                raise BrainToolCallError("Kratos gateway returned malformed JSON tool arguments.") from exc
         else:
             arguments = raw_args
         if not isinstance(arguments, dict):
-            raise BrainError("Kratos tool arguments must be a JSON object.")
+            raise BrainToolCallError("Kratos tool arguments must be a JSON object.")
         name = str(function.get("name") or "").strip()
         if not name:
-            raise BrainError("Kratos gateway returned a tool call without a name.")
+            raise BrainToolCallError("Kratos gateway returned a tool call without a name.")
         calls.append(KratosToolCall(str(item.get("id") or f"call_{uuid.uuid4().hex[:12]}"), name, arguments))
     return calls
 
@@ -525,12 +700,12 @@ def _finish_tool_calls(items: dict[int, dict[str, str]]) -> list[KratosToolCall]
         try:
             arguments = json.loads(item["arguments"] or "{}")
         except json.JSONDecodeError as exc:
-            raise BrainError("Kratos gateway streamed malformed JSON tool arguments.") from exc
+            raise BrainToolCallError("Kratos gateway streamed malformed JSON tool arguments.") from exc
         if not isinstance(arguments, dict):
-            raise BrainError("Kratos streamed tool arguments must be a JSON object.")
+            raise BrainToolCallError("Kratos streamed tool arguments must be a JSON object.")
         name = item["name"].strip()
         if not name:
-            raise BrainError("Kratos gateway streamed a tool call without a name.")
+            raise BrainToolCallError("Kratos gateway streamed a tool call without a name.")
         calls.append(KratosToolCall(item["id"] or f"call_{uuid.uuid4().hex[:12]}", name, arguments))
     return calls
 

@@ -20,7 +20,7 @@ export default function SessionsExplorer({
 
   return (
     <div className="flex flex-col md:flex-row h-full w-full min-h-0 gap-4 rounded-2xl overflow-hidden">
-      
+
       {/* Left Column: Search & Sessions List */}
       <aside className="w-full md:w-80 xl:w-96 flex-shrink-0 flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 p-4 shadow-xl">
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
@@ -83,7 +83,7 @@ export default function SessionsExplorer({
 
       {/* Right Column: Session Detail & Turns Stream */}
       <div className="flex-1 min-w-0 min-h-0 h-full flex flex-col glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl">
-        
+
         {/* Active Session Hero Bar */}
         <div className="flex-shrink-0 p-4 sm:p-5 bg-[#0e071c] border-b border-pink-500/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
@@ -174,9 +174,9 @@ export default function SessionsExplorer({
                   {agentText && (
                     <div className="flex justify-start gap-3">
                       <div className="flex-shrink-0 mt-1">
-                        <img 
-                          src="/kratos_badge.png" 
-                          alt="Kratos" 
+                        <img
+                          src="./kratos_badge.png"
+                          alt="Kratos"
                           className="w-8 h-8 rounded-xl object-cover border border-pink-500/40 shadow-sm"
                         />
                       </div>

@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from kratos_agent.brain.config import (
+    BrainToolCallError,
+    get_max_retries,
     get_max_parallel_workers,
     is_parallel_execution_enabled,
 )
@@ -25,6 +27,7 @@ from kratos_agent.performance.profiler import reset_active_profiler
 from kratos_agent.performance.router import RequestCategory, get_request_router
 
 from .context_pipeline import ContextBuilder
+from .model_guard import ProgressGuard, RepetitiveOutputError
 from .event_bus import event_bus
 from .planner import IntentKind, classify_intent, formulate_agent_plan
 from .runtime_contracts import (
@@ -39,6 +42,8 @@ from .runtime_contracts import (
 from .task_manager import AgentState, ExecutionPlan, TaskItem, TaskState
 from .verification_manager import VerificationManager, VerificationResult
 from .workspace_tracker import WorkspaceTracker
+from .scratch_space import ScratchSpace
+from .recovery_memory import RecoveryMemory
 from kratos_agent.output.speech_directives import DirectiveStreamFilter, extract_speech_directives
 
 # Tools that are read-only and have zero side effects on filesystem or workspace state.
@@ -433,6 +438,7 @@ class AgentLoop:
         self.current_run: AgentRunState | None = None
         self._current_turn_id: str = ""
         self.on_speech: Callable[[str], None] | None = None
+        self.recovery_memory = RecoveryMemory(self.workspace, self.tool_platform)
 
         # Wire dynamic todo_write and exit_plan_mode tool handlers
         try:
@@ -614,6 +620,15 @@ class AgentLoop:
     ) -> ToolResult:
         """Executes a single tool call and prunes its result text."""
         try:
+            if self.cancellation_flag.is_set():
+                return ToolResult(call_id=call.call_id, name=call.name, content="Cancelled by user before execution.", is_error=True)
+            scratch = getattr(self, "_scratch", None)
+            if scratch is not None:
+                registered = self.tools.get(call.name)
+                if registered is not None:
+                    call.name = registered.spec.name
+                shell_tool = self.tools.get("run_terminal_command")
+                scratch.prepare(call, supports_cwd=bool(shell_tool and "working_directory" in (shell_tool.spec.parameters.get("properties") or {})))
             if (
                 call.name in ARTIFACT_INSPECTION_TOOLS
                 and self.current_run is not None
@@ -635,8 +650,11 @@ class AgentLoop:
                         is_error=True,
                     )
             if call.name == "run_terminal_command" and self.current_run is not None:
-                command = str(call.arguments.get("command", "")).strip()
-                previously_failed = any(
+                arguments = call.arguments
+                if set(arguments) == {"arguments"} and isinstance(arguments["arguments"], dict):
+                    arguments = arguments["arguments"]
+                command = str(next((arguments[key] for key in ("command", "cmd", "script", "terminal_command", "terminal", "code", "input", "action") if key in arguments), "")).strip()
+                previously_failed = bool(command) and any(
                     item.get("name") == call.name
                     and item.get("is_error")
                     and str((item.get("args") or {}).get("command", "")).strip() == command
@@ -667,7 +685,12 @@ class AgentLoop:
                     ),
                     is_error=True,
                 )
-            result = self.tools.execute(call, allow_tool)
+            from kratos_agent.core.execution_control import execution_scope
+            from kratos_agent.sdk.client import gateway_scope
+            if self.cancellation_flag.is_set():
+                return ToolResult(call_id=call.call_id, name=call.name, content="Cancelled by user before execution.", is_error=True)
+            with execution_scope(self.cancellation_flag), gateway_scope(cancel=self.cancellation_flag):
+                result = self.tools.execute(call, allow_tool)
             # If writing a relative deliverable and target_dir is configured, mirror to target_dir as well
             if not result.is_error and call.name in ("write_file", "edit_file") and self.current_run and self.current_run.target_dir:
                 fp = str(call.arguments.get("file_path", "")).strip()
@@ -698,6 +721,10 @@ class AgentLoop:
 
         if self.current_run:
             self.current_run.record_tool_call(name, args, is_error)
+
+        scratch = getattr(self, "_scratch", None)
+        if scratch is not None and fp and scratch.owns(fp):
+            return  # Disposable helpers are not workspace deliverables.
 
         if name == "write_file":
             if not is_error and fp:
@@ -730,6 +757,8 @@ class AgentLoop:
                     for target in re.findall(r'(?:>|>>)\s*["\']?([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)["\']?', cmd):
                         created_targets.append(target)
                     for target in created_targets:
+                        if scratch is not None and (target.replace("\\", "/").startswith("scratch/") or scratch.owns(target)):
+                            continue
                         self.workspace_tracker.record_file_created(target)
                         if self.current_run:
                             self.current_run.record_written_file(target)
@@ -743,10 +772,27 @@ class AgentLoop:
         max_steps: int | None = None,
         resume_plan: ExecutionPlan | None = None,
     ) -> tuple[str, list[ChatMessage]]:
+        self._scratch = ScratchSpace()
+        try:
+            return self._run(history, allow_tool, max_steps, resume_plan)
+        finally:
+            try:
+                self._scratch.close()
+            finally:
+                self._scratch = None
+
+    def _run(
+        self,
+        history: list[ChatMessage],
+        allow_tool: Callable[..., tuple[bool, str]],
+        max_steps: int | None = None,
+        resume_plan: ExecutionPlan | None = None,
+    ) -> tuple[str, list[ChatMessage]]:
         turn_id = uuid.uuid4().hex
         self._current_turn_id = turn_id
         self.workspace_tracker.reset()
         self.last_verification = None
+        self.recovery_memory = RecoveryMemory(self.workspace, self.tool_platform)
 
         profiler = reset_active_profiler()
         router = get_request_router()
@@ -797,10 +843,18 @@ class AgentLoop:
         if is_continue and resume_plan:
             self.current_plan = resume_plan
             self.current_plan.state = AgentState.EXECUTING
+            if self.current_run:
+                self.terminal_latch.begin_retry(self.current_run.run_id)
             # Reset any interrupted tasks to pending
             for t in self.current_plan.tasks:
-                if t.state == TaskState.NEEDS_ATTENTION:
+                if t.state in (TaskState.NEEDS_ATTENTION, TaskState.FAILED):
+                    self.terminal_latch.begin_retry(t.id)
                     t.state = TaskState.PENDING
+                    t.retry_count = 0
+                    if not t.retry_required_tool:
+                        failed = [item for item in t.evidence if (item.get("data") or {}).get("is_error")]
+                        if failed:
+                            t.retry_required_tool = failed[-1].get("kind")
             # Activate first unfinished task
             active = self.current_plan.get_active_task() or (self.current_plan.get_pending_tasks()[0] if self.current_plan.get_pending_tasks() else None)
             if active:
@@ -836,6 +890,11 @@ class AgentLoop:
             self.current_plan = None
 
         conversational_nudge_count = 0
+        acknowledgement_spoken = False
+        progress_guard = ProgressGuard(user_query, getattr(self, 'inspection_limit', 12))
+        repetition_retries = 0
+        tool_format_retries = 0
+        tool_format_retry_limit = min(2, get_max_retries())
 
         # 3. Execution Phase Loop
         step = 0
@@ -852,8 +911,15 @@ class AgentLoop:
                 return message, history
 
             # Assemble Context & Request with active run_state and dynamic tool filtering
+            sections = self.instructions.build() + [{"name": "temporary_research", "layer": "runtime", "content": self._scratch.instruction()}]
+            active_for_memory = self.current_plan.get_active_task() if self.current_plan else None
+            if active_for_memory is None and self.current_plan:
+                active_for_memory = next((task for task in self.current_plan.tasks if task.state == TaskState.NEEDS_ATTENTION), None)
+            lesson_context = self.recovery_memory.context(self.current_run.user_request if self.current_run else user_query, active_for_memory)
+            if lesson_context:
+                sections.append({"name": "verified-recovery-memory", "layer": "runtime", "content": lesson_context})
             built = self.context.assemble(
-                self.instructions.build(),
+                sections,
                 history,
                 self._tool_schemas(
                     user_query,
@@ -887,6 +953,39 @@ class AgentLoop:
                 stream_filter.flush()
             except Exception as exc:
                 stream_filter.flush()
+                if self.cancellation_flag.is_set():
+                    if self.current_plan:
+                        self.current_plan.pause_running_tasks("Interrupted by user")
+                        self.emit(RuntimeEvent(EventKind.AGENT_PAUSED, {"plan": self.current_plan.to_dict()}, turn_id))
+                    self.emit(RuntimeEvent(EventKind.TURN_FAILED, {"error": "cancelled", "plan": self.current_plan.to_dict() if self.current_plan else None}, turn_id))
+                    profiler.finish()
+                    return "Agent execution was interrupted.", history
+                if isinstance(exc, BrainToolCallError):
+                    if tool_format_retries < tool_format_retry_limit:
+                        tool_format_retries += 1
+                        history.append(ChatMessage(role="user", content=(
+                            "[RUNTIME TOOL-CALL FORMAT CORRECTION]\n"
+                            "The previous response contained an incomplete, malformed, or unavailable tool call. "
+                            "No tool calls from that response were executed. Continue the original task from "
+                            "the verified evidence and return a corrected response. Use only tools supplied "
+                            "in this request, with complete JSON objects matching their schemas. Prefer native "
+                            "tool calls; if text calls are required, use call:TOOL_NAME{valid JSON}. "
+                            "Do not repeat the rejected markup, invent tools, or claim unverified success.")))
+                        self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {"chunk": (
+                            f"\n[Invalid tool response rejected; requesting correction "
+                            f"{tool_format_retries}/{tool_format_retry_limit}.]\n")}, turn_id))
+                        continue
+                    exc = BrainToolCallError(
+                        f"The provider still returned invalid tool calls after {tool_format_retries} correction attempts. "
+                        "No tool calls from those rejected responses were executed.")
+                if isinstance(exc, RepetitiveOutputError) and repetition_retries < 1:
+                    repetition_retries += 1
+                    history.append(ChatMessage(role='user', content=(
+                        'Generation was stopped because the response repeated the same phrase excessively. '
+                        'Continue from the verified tool evidence. Give a short factual answer or the next '
+                        'necessary tool call. Do not reproduce the repetitive text or claim unverified success.')))
+                    self.emit(RuntimeEvent(EventKind.MODEL_CHUNK, {'chunk': '\n[Repeated generation stopped; recovering once.]\n'}, turn_id))
+                    continue
                 if self.current_plan:
                     active = self.current_plan.get_active_task()
                     if active:
@@ -988,18 +1087,13 @@ class AgentLoop:
                     if evidence_gate_blocked:
                         continue
 
-                    has_created_deliverables = bool(
-                        changed
-                        or (self.current_run and self.current_run.written_files)
-                        or len(self.workspace_tracker.created_files) > 0
-                        or len(self.workspace_tracker.modified_files) > 0
-                    )
-
                     # If verification passed and files were validated, fulfill all verified tasks with evidence
-                    if (self.last_verification and self.last_verification.passed and self.last_verification.files_checked > 0) or has_created_deliverables:
+                    if self.last_verification and self.last_verification.passed and self.last_verification.files_checked > 0:
                         files_count = self.last_verification.files_checked if (self.last_verification and self.last_verification.files_checked > 0) else len(changed)
                         for t in self.current_plan.tasks:
                             if t.state in (TaskState.PENDING, TaskState.RUNNING):
+                                if t.retry_required_tool:
+                                    continue
                                 if getattr(t, "requires_observable_evidence", False):
                                     allowed, _ = self._check_task_completion_gate(t, turn_id)
                                     if not allowed:
@@ -1010,7 +1104,7 @@ class AgentLoop:
                                     self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
                     elif self.last_verification and self.last_verification.passed and is_read_only_goal:
                         for t in self.current_plan.tasks:
-                            if t.state != TaskState.COMPLETED:
+                            if t.state in (TaskState.PENDING, TaskState.RUNNING) and not t.retry_required_tool:
                                 t.complete("Completed")
                                 if self.terminal_latch.try_set(t.id, "COMPLETED"):
                                     self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, t.to_dict(), turn_id))
@@ -1018,24 +1112,8 @@ class AgentLoop:
                     # Check unfinished tasks after verification
                     remaining_unfinished = self.current_plan.get_unfinished_tasks()
 
-                    # Detect if the model stated completion or delivered final output
-                    final_text_lower = final_text.lower()
-                    model_claims_done = any(w in final_text_lower for w in (
-                        "status: ✅ completed", "status: completed", "completed", "all files written",
-                        "created a complete", "files written", "all three write", "successfully created",
-                        "task completed", "finished", "here is the", "here are the"
-                    ))
-
-                    # If deliverables were created or model delivered the final answer, complete remaining non-failing tasks
-                    if remaining_unfinished and (has_created_deliverables or model_claims_done):
-                        for ut in remaining_unfinished:
-                            ut.complete("Completed with final deliverables")
-                            if self.terminal_latch.try_set(ut.id, "COMPLETED"):
-                                self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, ut.to_dict(), turn_id))
-                        remaining_unfinished = []
-
-                    # Auto-continue: Only nudge if genuinely unfinished with zero deliverables and no completion stated
-                    if remaining_unfinished and not has_created_deliverables and not model_claims_done and conversational_nudge_count < 2:
+                    # Files and completion prose cannot repair a failed task.
+                    if remaining_unfinished and conversational_nudge_count < 2:
                         next_task = remaining_unfinished[0]
                         if next_task.state == TaskState.PENDING:
                             next_task.start()
@@ -1045,7 +1123,7 @@ class AgentLoop:
                         history.append(ChatMessage(
                             role="user",
                             content=(
-                                f"[System Directive - Auto-Continue]: Plan task '{next_task.title}' is pending ({len(remaining_unfinished)} tasks remaining). "
+                                f"[System Directive - Auto-Continue]: Plan task '{next_task.title}' is {next_task.state.value} ({len(remaining_unfinished)} tasks remaining). "
                                 + (f"You stated: '{final_text[:120]}'. " if final_text else "") +
                                 "Do NOT stop or output conversational text without tool calls. "
                                 "Immediately invoke the required tools (`run_terminal_command`, `write_file`, `edit_file`, etc.) to execute this task now."
@@ -1119,12 +1197,17 @@ class AgentLoop:
                     final = "Task completed and verified, but no summary text was returned."
                 else:
                     final = "No final response was produced; task completion is unconfirmed."
+                if self.current_plan and self.current_plan.state == AgentState.COMPLETED:
+                    self.recovery_memory.commit(self.current_plan, self.last_verification)
                 history.append(ChatMessage(role="assistant", content=final))
                 self.emit(RuntimeEvent(EventKind.TURN_COMPLETED, {"steps": step + 1, "final": final}, turn_id))
-                plan_allows_speech = not self.current_plan or self.current_plan.state == AgentState.COMPLETED
-                if directive.speech_text and plan_allows_speech and self.on_speech:
+                if directive.speech_text and self.on_speech:
+                    speech_text = directive.speech_text
+                    if self.current_plan and self.current_plan.state != AgentState.COMPLETED:
+                        # A failed evidence gate overrides any model claim of success.
+                        speech_text = "The task is incomplete. Some steps still need attention."
                     try:
-                        self.on_speech(directive.speech_text)
+                        self.on_speech(speech_text)
                     except Exception as exc:
                         logger.debug("Marked speech delivery failed: %s", exc)
                 profiler.finish()
@@ -1136,6 +1219,12 @@ class AgentLoop:
                 return final, history
 
             # Assistant Message with Tool Calls
+            if directive.speech_text and not acknowledgement_spoken and self.on_speech:
+                try:
+                    self.on_speech(directive.speech_text)
+                    acknowledgement_spoken = True
+                except Exception as exc:
+                    logger.debug("Marked acknowledgement delivery failed: %s", exc)
             assistant_content = directive.display_text or ""
             if not assistant_content and response.tool_calls:
                 call_strs = [f"call:{c.name}{json.dumps(c.arguments)}" for c in response.tool_calls]
@@ -1148,7 +1237,14 @@ class AgentLoop:
             ))
 
             # Execute Tool Calls in Parallel Waves
+            def execute_with_guard(call):
+                if progress_guard.repeated(call):
+                    return ToolResult(call_id=call.call_id, name=call.name,
+                        content='Unchanged inspection blocked. Use previous evidence and perform the requested edit, or explain the blocker.', is_error=True)
+                return self._execute_tool_call_worker(call, allow_tool)
+
             waves = partition_tool_waves(response.tool_calls)
+            progress_corrections = []
             for wave in waves:
                 if self.cancellation_flag.is_set():
                     if self.current_plan:
@@ -1167,10 +1263,20 @@ class AgentLoop:
                 )
 
                 # Pre-execution: Register substeps and emit TOOL_CALL_STARTED for all calls in wave
+                call_tasks = {}
                 for call in wave:
                     active_task = None
                     if self.current_plan:
                         active_task = self.current_plan.get_active_task()
+                        recoverable = [task for task in self.current_plan.get_failed_tasks() if task.state == TaskState.NEEDS_ATTENTION and task.retry_count < 2]
+                        if recoverable:
+                            active_task = recoverable[0]
+                            for other in self.current_plan.tasks:
+                                if other is not active_task and other.state == TaskState.RUNNING:
+                                    other.state = TaskState.PENDING
+                            active_task.retry_count += 1
+                            active_task.start()
+                            self.emit(RuntimeEvent(EventKind.TASK_STARTED, active_task.to_dict(), turn_id))
                         if not active_task:
                             pending = self.current_plan.get_pending_tasks()
                             if pending:
@@ -1186,6 +1292,7 @@ class AgentLoop:
                             self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
 
                     action_label = format_tool_action_label(call.name, call.arguments)
+                    call_tasks[call.call_id] = active_task
                     display_label = f"[tool call] {action_label}"
                     self.emit(RuntimeEvent(
                         EventKind.TOOL_CALL_STARTED,
@@ -1206,14 +1313,24 @@ class AgentLoop:
                     if use_parallel:
                         max_workers = min(len(wave), get_max_parallel_workers())
                         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            futures = [executor.submit(self._execute_tool_call_worker, c, allow_tool) for c in wave]
+                            futures = [executor.submit(execute_with_guard, c) for c in wave]
                             results = [f.result() for f in futures]
                     else:
-                        results = [self._execute_tool_call_worker(c, allow_tool) for c in wave]
+                        results = [execute_with_guard(c) for c in wave]
 
                 # Post-execution: Process results in original wave order
+                failed_in_wave = set()
                 for call, result in zip(wave, results):
-                    active_task = self.current_plan.get_active_task() if self.current_plan else None
+                    correction = progress_guard.observe(call, result)
+                    if correction:
+                        progress_corrections.append(correction)
+                    active_task = call_tasks.get(call.call_id)
+
+                    earlier_wave_failure = active_task is not None and id(active_task) in failed_in_wave
+                    if result.is_error or not earlier_wave_failure:
+                        self.recovery_memory.observe(active_task, call, result)
+                    if active_task is not None and result.is_error:
+                        failed_in_wave.add(id(active_task))
 
                     kind = EventKind.TOOL_FAILED if result.is_error else EventKind.TOOL_COMPLETED
                     self.emit(RuntimeEvent(kind, result.__dict__, turn_id))
@@ -1225,14 +1342,30 @@ class AgentLoop:
                     if active_task:
                         if result.is_error:
                             active_task.resolve_substep("✗", f"Failed {call.name}: {result.content[:50]}", style="bold red")
-                            active_task.state = TaskState.NEEDS_ATTENTION
+                            active_task.state = TaskState.NEEDS_ATTENTION if active_task.retry_count < 2 else TaskState.FAILED
+                            active_task.retry_required_tool = call.name
                             active_task.detail = result.content[:120]
                             active_task.add_evidence(call.name, {"args": call.arguments, "is_error": True})
+                            history.append(ChatMessage(role="user", content=(
+                                f"[Recovery required for '{active_task.title}']: {result.content[:800]} "
+                                "Diagnose the error, correct the arguments/command, or use a suitable fallback. "
+                                "Keep working on this step before moving to later steps. Do not repeat a deterministic failure unchanged."
+                            )))
                             self.emit(RuntimeEvent(EventKind.TASK_FAILED, active_task.to_dict(), turn_id))
                         else:
                             res_sub = _format_tool_result_substep(call.name, call.arguments, result.content)
                             active_task.resolve_substep("✓", res_sub, style="dim green")
                             active_task.add_evidence(call.name, {"args": call.arguments, "is_error": False})
+
+                            scratch = getattr(self, "_scratch", None)
+                            fp = str(call.arguments.get("file_path", "") or call.arguments.get("path", ""))
+                            temporary_call = bool(scratch and fp and scratch.owns(fp))
+                            research_fallback = active_task.retry_required_tool == "run_terminal_command" and call.name in {"fetch_url", "google_search", "web_search_duckduckgo", "browser_read", "browser_snapshot_dom", "computer_browser_read"}
+                            if earlier_wave_failure or temporary_call or (active_task.retry_required_tool and active_task.retry_required_tool != call.name and not research_fallback):
+                                self.emit(RuntimeEvent(EventKind.TASK_UPDATED, active_task.to_dict(), turn_id))
+                                history.append(ChatMessage(role="tool", content=result.content, name=result.name, tool_call_id=result.call_id, metadata={"is_error": False, "truncated": result.truncated}))
+                                continue
+                            active_task.retry_required_tool = None
 
                             # File writing / editing tool completes file tasks
                             if call.name in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content"):
@@ -1258,7 +1391,7 @@ class AgentLoop:
                                     # Start next pending task if available
                                     if self.current_plan:
                                         next_pending = self.current_plan.get_pending_tasks()
-                                        if next_pending:
+                                        if next_pending and not self.current_plan.get_active_task():
                                             next_t = next_pending[0]
                                             next_t.start()
                                             self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
@@ -1276,7 +1409,7 @@ class AgentLoop:
                                             self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
                                         if self.current_plan:
                                             next_pending = self.current_plan.get_pending_tasks()
-                                            if next_pending:
+                                            if next_pending and not self.current_plan.get_active_task():
                                                 next_t = next_pending[0]
                                                 next_t.start()
                                                 self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
@@ -1318,7 +1451,7 @@ class AgentLoop:
                                             self.emit(RuntimeEvent(EventKind.TASK_COMPLETED, active_task.to_dict(), turn_id))
                                         if self.current_plan:
                                             next_pending = self.current_plan.get_pending_tasks()
-                                            if next_pending:
+                                            if next_pending and not self.current_plan.get_active_task():
                                                 next_t = next_pending[0]
                                                 next_t.start()
                                                 self.emit(RuntimeEvent(EventKind.TASK_STARTED, next_t.to_dict(), turn_id))
@@ -1334,6 +1467,16 @@ class AgentLoop:
                         tool_call_id=result.call_id,
                         metadata={"is_error": result.is_error, "truncated": result.truncated},
                     ))
+
+            history.extend(ChatMessage(role='user', content=correction) for correction in progress_corrections)
+            if progress_guard.blocked >= 3:
+                message = 'Stopped after repeated inspections without progress. Review the recorded changes and resolve the reported blocker before retrying.'
+                self.emit(RuntimeEvent(EventKind.TURN_FAILED, {'error': 'no_progress', 'message': message}, turn_id))
+                if self.current_plan:
+                    self.current_plan.pause_running_tasks(message)
+                    self.current_plan.state = AgentState.FAILED
+                profiler.finish()
+                return message, history
 
         message = (
             f"Stopped after {max_steps} agent steps to prevent an unbounded tool loop."

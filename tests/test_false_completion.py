@@ -179,6 +179,131 @@ class FalseCompletionTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("No files", result.details[0])
 
+    def test_created_report_does_not_resurrect_failed_task(self):
+        events = []
+        self.tools.register(
+            ToolSpec("run_terminal_command", "execute", {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}, ToolPermission.EXECUTE),
+            lambda command: (_ for _ in ()).throw(RuntimeError("Research failed")),
+        )
+        model = MockModel([
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "research"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Draft</h1>"})]),
+            ModelResponse(text="Status: completed. All files written and verified."),
+        ])
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=1000)), self.instructions, self.tools, model, events.append, self.workspace)
+        reply, _ = loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, "allowed"))
+        self.assertTrue((self.workspace / "index.html").exists())
+        self.assertEqual(loop.current_plan.state, AgentState.FAILED)
+        self.assertTrue(any(task.state == TaskState.FAILED for task in loop.current_plan.tasks))
+        self.assertNotIn(EventKind.AGENT_COMPLETED, [event.kind for event in events])
+        self.assertNotIn("Status: completed", reply)
+
+    def test_corrected_retry_recovers_original_task(self):
+        seen = []
+        def execute(command):
+            seen.append(command)
+            if command == "broken research":
+                raise RuntimeError("Invalid command; use corrected research")
+            return "Actual research output"
+        self.tools.register(ToolSpec("run_terminal_command", "execute", {"properties": {"command": {"type": "string"}}, "required": ["command"]}, ToolPermission.EXECUTE), execute)
+        model = MockModel([
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "broken research"})]),
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "corrected research"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Results</h1>"})]),
+            ModelResponse(text="Completed with research output"),
+        ])
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=4000)), self.instructions, self.tools, model, lambda event: None, self.workspace)
+        loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, ""))
+        self.assertEqual(seen, ["broken research", "corrected research"])
+        self.assertEqual(loop.current_plan.tasks[0].retry_count, 1)
+        self.assertEqual(loop.current_plan.tasks[0].state, TaskState.COMPLETED)
+        self.assertEqual(loop.current_plan.state, AgentState.COMPLETED)
+
+    def test_retries_are_bounded_and_failure_survives_saved_plan(self):
+        self.tools.register(ToolSpec("run_terminal_command", "execute", {"properties": {"command": {"type": "string"}}, "required": ["command"]}, ToolPermission.EXECUTE), lambda command: (_ for _ in ()).throw(RuntimeError("Unavailable source")))
+        model = MockModel([
+            *[ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": command})]) for command in ("first attempt", "corrected attempt", "alternate attempt")],
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Draft</h1>"})]),
+            ModelResponse(text="Completed"),
+        ])
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=4000)), self.instructions, self.tools, model, lambda event: None, self.workspace)
+        loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, ""))
+        task = loop.current_plan.tasks[0]
+        self.assertEqual(task.retry_count, 2)
+        self.assertEqual(task.state, TaskState.FAILED)
+        restored = TaskItem.from_dict(task.to_dict())
+        self.assertEqual(restored.retry_required_tool, "run_terminal_command")
+        self.assertEqual(restored.state, TaskState.FAILED)
+
+    def test_research_can_recover_using_another_tool(self):
+        self.tools.register(ToolSpec("run_terminal_command", "execute", {"properties": {"command": {"type": "string"}}}, ToolPermission.EXECUTE), lambda command: (_ for _ in ()).throw(RuntimeError("Shell unavailable")))
+        self.tools.register(ToolSpec("fetch_url", "read source", {"properties": {"url": {"type": "string"}}}, ToolPermission.NETWORK), lambda url: "Source-backed research result")
+        model = MockModel([
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "research"})]),
+            ModelResponse(tool_calls=[ToolCall("fetch_url", {"url": "https://example.com/source"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Source result</h1>"})]),
+            ModelResponse(text="Completed after fallback"),
+        ])
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=4000)), self.instructions, self.tools, model, lambda event: None, self.workspace)
+        loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, ""))
+        self.assertEqual(loop.current_plan.state, AgentState.COMPLETED)
+        self.assertIsNone(loop.current_plan.tasks[0].retry_required_tool)
+
+    def test_continue_retries_failed_plan_and_emits_completion_after_recovery(self):
+        def execute(command):
+            if command == "broken":
+                raise RuntimeError("Incorrect arguments")
+            return "Verified research result"
+        self.tools.register(ToolSpec("run_terminal_command", "execute", {"properties": {"command": {"type": "string"}}, "required": ["command"]}, ToolPermission.EXECUTE), execute)
+        model = MockModel([
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "broken"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Draft</h1>"})]),
+            ModelResponse(text="Completed"),
+        ])
+        events = []
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=4000)), self.instructions, self.tools, model, events.append, self.workspace)
+        _, history = loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, ""))
+        self.assertEqual(loop.current_plan.state, AgentState.FAILED)
+        saved_plan = loop.current_plan
+        model.responses = [
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"command": "corrected research"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Verified result</h1>"})]),
+            ModelResponse(text="Completed after correction"),
+        ]
+        events.clear()
+        history.append(ChatMessage("user", "continue"))
+        loop.run(history, lambda spec, args: (True, ""), resume_plan=saved_plan)
+        self.assertEqual(loop.current_plan.state, AgentState.COMPLETED)
+        self.assertIsNone(loop.current_plan.tasks[0].retry_required_tool)
+        self.assertIn(EventKind.AGENT_COMPLETED, [event.kind for event in events])
+
+    def test_temporary_probe_runs_extracts_and_cleans_without_becoming_deliverable(self):
+        from unittest.mock import patch
+        import sys
+        from kratos_agent.utils.tools import run_terminal_command
+        self.tools.register(ToolSpec("run_terminal_command", "execute", {"properties": {"argv": {"type": "array"}, "working_directory": {"type": "string"}}}, ToolPermission.EXECUTE), run_terminal_command)
+        captured = []
+        def read(file_path):
+            captured.append(Path(file_path))
+            return Path(file_path).read_text(encoding="utf-8")
+        self.tools.register(ToolSpec("read_file", "read", {"properties": {"file_path": {"type": "string"}}, "required": ["file_path"]}, ToolPermission.READ), read)
+        model = MockModel([
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "scratch/probe.py", "content": "from pathlib import Path\nPath('scratch/raw.json').write_text('{\"price\": 429}', encoding='utf-8')\nprint('probe finished')"})]),
+            ModelResponse(tool_calls=[ToolCall("run_terminal_command", {"argv": [sys.executable, "scratch/probe.py"]})]),
+            ModelResponse(tool_calls=[ToolCall("read_file", {"file_path": "scratch/raw.json"})]),
+            ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "index.html", "content": "<h1>Extracted price: 429</h1>"})]),
+            ModelResponse(text="Completed"),
+        ])
+        loop = AgentLoop(ContextBuilder(ContextBudget(max_input_tokens=4000)), self.instructions, self.tools, model, lambda event: None, self.workspace)
+        with patch("kratos_agent.utils.tools.approval_gate.check_shell", return_value=True):
+            loop.run([ChatMessage("user", "create a webapp")], lambda spec, args: (True, ""))
+        self.assertEqual(loop.current_plan.state, AgentState.COMPLETED)
+        self.assertEqual(loop.workspace_tracker.created_files, {"index.html"})
+        self.assertFalse((self.workspace / "scratch").exists())
+        self.assertEqual(len(captured), 1)
+        self.assertFalse(captured[0].parent.parent.exists())
+        self.assertEqual(len(loop.current_plan.tasks[0].evidence), 2)  # helper write + actual execution
+
     def test_task_item_evidence_guard(self):
         """TaskItem accurately tracks evidence and completion."""
         task = TaskItem(id="1", title="Scaffold file")

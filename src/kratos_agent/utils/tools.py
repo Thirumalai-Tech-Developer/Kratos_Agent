@@ -107,7 +107,7 @@ def is_persistent_server_command(command: str) -> bool:
     ]
     return any(re.search(pat, last_cmd) for pat in server_patterns)
 
-def run_terminal_command(command: str = "", argv: list[str] | None = None) -> str:
+def run_terminal_command(command: str = "", argv: list[str] | None = None, working_directory: str | None = None) -> str:
     """
     Direct Terminal / Shell Access: Executes bash, powershell, or cmd terminal commands directly.
     Shows real-time dynamic single-line status, handles background servers, and tracks completion.
@@ -118,15 +118,23 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
     from kratos_agent.core.command_lint import lint_command
     from kratos_agent.system.shell.output_parser import normalize_command_output
     from kratos_agent.system.shell.renderer import render_command_argv
+    from kratos_agent.core.execution_control import collect_command_output, current_cancel_event, stop_process_tree
+
+    cancellation = current_cancel_event()
+    if cancellation is not None and cancellation.is_set():
+        return "Error: Command cancelled by user before execution."
 
     shell_dialect = "powershell" if sys.platform == "win32" else "bash"
+    if not command.strip() and not argv:
+        return "Error: Supply command or argv."
+    process_cwd = str(Path(working_directory).resolve()) if working_directory else None
 
     if argv:
         exec_argv = argv
         command = " ".join(argv)
     else:
         command = clean_command(command)
-        missing_script = _missing_script_target(command)
+        missing_script = _missing_script_target(command, process_cwd)
         if missing_script:
             return json.dumps({
                 "ok": False,
@@ -168,13 +176,18 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
                 shell=False,
                 creationflags=creationflags,
                 env=env,
+                cwd=process_cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace"
             )
-            time.sleep(0.5)
+            if cancellation is not None and cancellation.wait(0.5):
+                stop_process_tree(proc)
+                return "Error: Command cancelled by user during server startup."
+            if cancellation is None:
+                time.sleep(0.5)
             poll_res = proc.poll()
             if poll_res is not None and poll_res != 0:
                 out, err = proc.communicate(timeout=1)
@@ -185,12 +198,13 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
                 memory.record_command(command, 0, f"Server started in background with PID {proc.pid}")
                 return f"Server successfully launched in background (PID: {proc.pid}).\nCommand: {command}\nStatus: Active & Listening"
 
-        # Standard command execution with live single-line status updates
+        # Bounded command execution that observes cancellation even on silent commands.
         proc = subprocess.Popen(
             exec_argv,
             shell=False,
             creationflags=creationflags,
             env=env,
+            cwd=process_cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -202,22 +216,17 @@ def run_terminal_command(command: str = "", argv: list[str] | None = None) -> st
         
         output_lines = []
         try:
-            if proc.stdout:
-                for line in iter(proc.stdout.readline, ''):
-                    clean_line = line.rstrip('\r\n').strip()
-                    if clean_line:
-                        step_tracker.update(f"Running: {command[:35]} ❯ {clean_line[:45]}")
-                    output_lines.append(line)
-                proc.stdout.close()
-            
-            proc.wait(timeout=300)
+            output_lines.append(collect_command_output(proc))
+        except InterruptedError:
+            step_tracker.fail("Command stopped by user", command)
+            return "Error: Command cancelled by user."
         except subprocess.TimeoutExpired:
-            proc.kill()
+            stop_process_tree(proc)
             step_tracker.fail("[bold red]Command timed out after 300s[/bold red]", command)
             return f"Error: Command '{command}' timed out after 300 seconds."
         except Exception as stream_err:
             try:
-                proc.kill()
+                stop_process_tree(proc)
             except Exception as e:
                 logger.debug("Failed to kill process after stream error: %s", e)
             step_tracker.fail("[bold red]Execution error[/bold red]", str(stream_err))
@@ -411,34 +420,20 @@ def computer_visual_diagnose(include_ocr: bool = True) -> str:
 
 
 def clean_file_path(fp_str: str) -> str:
-    """Cleans file paths from raw string prefixes, URL schemes, and quote artifacts, redirecting any scratch paths into the active workspace."""
+    """Remove literal wrappers without changing the requested destination."""
     cleaned = str(fp_str).strip()
-    cleaned = re.sub(r'^[rfbRFB]?#*["\']?', '', cleaned)
-    cleaned = re.sub(r'["\']?#*$', '', cleaned)
+    literal = re.fullmatch(r'''[rfbRFB]?("|')(.*)\1''', cleaned, re.DOTALL)
+    if literal:
+        cleaned = literal.group(2)
     cleaned = cleaned.strip('"\' \t\n')
     if cleaned.startswith("file:///"):
         cleaned = cleaned[8:]
     elif cleaned.startswith("file://"):
         cleaned = cleaned[7:]
 
-    # Normalize slashes
-    norm_path = cleaned.replace("\\", "/")
+    return cleaned.replace("\\", "/")
 
-    # Strip external scratch paths and anchor into current directory
-    if "antigravity-cli" in norm_path.lower() or ".gemini" in norm_path.lower() or "/scratch/" in norm_path.lower():
-        parts = re.split(r'/scratch/', norm_path, flags=re.IGNORECASE)
-        if len(parts) > 1:
-            sub = parts[1].lstrip("/")
-            sub_parts = [p for p in sub.split("/") if p]
-            cleaned = "/".join(sub_parts[1:]) if len(sub_parts) > 1 else (sub_parts[0] if sub_parts else "script.py")
-        else:
-            cleaned = norm_path.lstrip("/")
-    else:
-        cleaned = norm_path
-
-    return cleaned.lstrip("/")
-
-def _missing_script_target(command: str) -> str | None:
+def _missing_script_target(command: str, working_directory: str | None = None) -> str | None:
     """Detect an explicit PowerShell -File target that does not exist yet."""
     if sys.platform != "win32":
         return None
@@ -450,7 +445,7 @@ def _missing_script_target(command: str) -> str | None:
         return None
     target_path = Path(target).expanduser()
     if not target_path.is_absolute():
-        target_path = Path.cwd() / target_path
+        target_path = Path(working_directory or Path.cwd()) / target_path
     return str(target_path) if not target_path.exists() else None
 
 

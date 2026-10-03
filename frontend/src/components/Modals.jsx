@@ -15,7 +15,7 @@ export function AgentAuthModal({ isOpen, onClose, onAuthenticate, error }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div className="relative w-full max-w-md rounded-2xl glass-panel border border-pink-500/40 p-6 shadow-[0_0_40px_rgba(255,0,127,0.3)]">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
           <div className="flex items-center gap-2">
@@ -24,7 +24,7 @@ export function AgentAuthModal({ isOpen, onClose, onAuthenticate, error }) {
               COMMANDER SECURITY CLEARANCE
             </h3>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="p-1 rounded-lg text-slate-400 hover:text-white"
           >
@@ -107,7 +107,7 @@ export function TechSpecsModal({ isOpen, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div className="relative w-full max-w-2xl rounded-2xl glass-panel border border-cyan-500/40 p-6 sm:p-8 shadow-[0_0_50px_rgba(0,243,255,0.2)] max-h-[90vh] overflow-y-auto scrollbar-thin">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between pb-4 mb-6 border-b border-white/10">
           <div className="flex items-center gap-2.5">
@@ -207,7 +207,7 @@ export function PayloadModal({ isOpen, onClose, event }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div className="relative w-full max-w-xl rounded-2xl glass-panel border border-cyan-500/30 p-6 shadow-2xl max-h-[85vh] flex flex-col">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
           <div>

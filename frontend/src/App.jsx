@@ -1,18 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
-import RecruiterStrip from './components/RecruiterStrip';
 import AgentArena from './components/AgentArena';
 import AgentHud from './components/AgentHud';
 import SessionsExplorer from './components/SessionsExplorer';
 import TraceReplay from './components/TraceReplay';
 import SqlPlayground from './components/SqlPlayground';
+import WorkspaceCommands from './components/WorkspaceCommands';
+import ChangesReview from './components/ChangesReview';
+import ModelSettings from './components/ModelSettings';
+import ModelPicker from './components/ModelPicker';
 import { AgentAuthModal, TechSpecsModal, PayloadModal } from './components/Modals';
-import { Gamepad2, MessageSquare, Zap, Database } from 'lucide-react';
+import { Gamepad2, MessageSquare, Zap, Database, FileDiff } from 'lucide-react';
+
+import { apiFetch } from './api';
+import { modelModalityLabel, normalizeModelCatalog } from './modelCatalog';
+import { isToolEvent, updateToolActivity, finishToolActivity, restoredToolActivity } from './chatActivity';
 
 export default function App() {
   // Navigation
   const [activeTab, setActiveTab] = useState('arena');
   const [isHudOpen, setIsHudOpen] = useState(false);
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [currentModel, setCurrentModel] = useState(null);
+  const [modelCatalog, setModelCatalog] = useState([]);
+
+  useEffect(() => {
+    const onShortcut = event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandsOpen(open => !open);
+      }
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, []);
 
   // Core Data State
   const [stats, setStats] = useState(null);
@@ -32,10 +55,67 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [inputPrompt, setInputPrompt] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [executionError, setExecutionError] = useState('');
+  const [connectionInterrupted, setConnectionInterrupted] = useState(false);
+  const executionRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(null);
   const [activeTool, setActiveTool] = useState(null);
   const [isAgentMode, setIsAgentMode] = useState(true);
   const [agentPassword, setAgentPassword] = useState('kratos');
+
+  // A disconnected response is not proof that the worker stopped. Keep sending
+  // disabled until the runtime confirms it is idle, including after a refresh.
+  useEffect(() => {
+    let disposed = false;
+    const checkExecution = async () => {
+      try {
+        const response = await apiFetch('/api/health');
+        const health = response.ok ? await response.json() : null;
+        if (disposed || !health || typeof health.busy !== 'boolean') return;
+        if (health.busy && !executionRef.current) {
+          setIsExecuting(true);
+          setConnectionInterrupted(true);
+          setExecutionError('A task is still active in the runtime. Stop it here or wait for it to finish.');
+        } else if (!health.busy && connectionInterrupted) {
+          const index = executionRef.current?.index;
+          if (index != null) setMessages(previous => previous.map((message, i) => i === index ? {
+            ...message, status: 'interrupted', isThinking: false, tools: finishToolActivity(message.tools, 'unknown'),
+          } : message));
+          executionRef.current = null;
+          setIsExecuting(false);
+          setIsStopping(false);
+          setConnectionInterrupted(false);
+          setExecutionError('The runtime is idle. The disconnected response may be incomplete; review Activity or resume the session.');
+          refreshAll();
+        }
+      } catch {
+        if (!disposed && connectionInterrupted) setExecutionError('Connection lost. Waiting for the runtime to confirm the task has stopped.');
+      }
+    };
+    checkExecution();
+    const interval = connectionInterrupted ? setInterval(checkExecution, 2000) : null;
+    return () => { disposed = true; if (interval) clearInterval(interval); };
+  }, [connectionInterrupted]);
+
+  const handleStop = async () => {
+    if (!isExecuting || isStopping) return;
+    setIsStopping(true);
+    setExecutionError('');
+    try {
+      const response = await apiFetch('/api/chat/cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: activeSessionId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Stop request failed (${response.status}).`);
+      setCurrentStep({ tag: 'STOPPING', label: 'Stop requested. Waiting for the running operation to exit.' });
+      // Keep the original stream alive so its terminal status acknowledges stop.
+    } catch (error) {
+      setIsStopping(false);
+      setExecutionError(`${error.message || 'Could not request stop.'} The task may still be running. Try Stop again.`);
+    }
+  };
 
   // Modals
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -46,28 +126,42 @@ export default function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats');
+      const res = await apiFetch('/api/stats');
       if (res.ok) setStats(await res.json());
     } catch {}
   };
 
   const fetchTelemetry = async () => {
     try {
-      const res = await fetch('/api/telemetry');
-      if (res.ok) setTelemetry(await res.json());
+      const res = await apiFetch('/api/telemetry');
+      if (res.ok) {
+        const data = await res.json();
+        setTelemetry(data);
+        if (data.normal_mode_model || data.model) setCurrentModel(data.normal_mode_model || data.model);
+      }
     } catch {}
   };
 
   const fetchTools = async () => {
     try {
-      const res = await fetch('/api/tools');
+      const res = await apiFetch('/api/tools');
       if (res.ok) setTools(await res.json());
+    } catch {}
+  };
+
+  const fetchModelCatalog = async () => {
+    try {
+      const response = await apiFetch('/api/models');
+      if (!response.ok) return;
+      const data = await response.json();
+      setModelCatalog(normalizeModelCatalog(data.models));
+      if (typeof data.model === 'string' && data.model) setCurrentModel(data.model);
     } catch {}
   };
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch('/api/sessions');
+      const res = await apiFetch('/api/sessions');
       if (res.ok) {
         const data = await res.json();
         setSessions(data || []);
@@ -78,7 +172,7 @@ export default function App() {
   const fetchSessionDetail = async (id) => {
     if (!id) return;
     try {
-      const res = await fetch(`/api/sessions/${id}`);
+      const res = await apiFetch(`/api/sessions/${id}`);
       if (res.ok) {
         const data = await res.json();
         setActiveSessionData(data);
@@ -89,7 +183,7 @@ export default function App() {
   const fetchEvents = async (sId = null) => {
     try {
       const url = sId ? `/api/events/${sId}` : '/api/events';
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         setEvents(data || []);
@@ -99,14 +193,14 @@ export default function App() {
 
   const fetchLiveStatus = async () => {
     try {
-      const res = await fetch('/api/live/status');
+      const res = await apiFetch('/api/live/status');
       if (res.ok) {
         setLiveStatus(await res.json());
       }
     } catch {}
   };
 
-  const refreshAll = async () => {
+  async function refreshAll() {
     await Promise.all([
       fetchStats(),
       fetchTelemetry(),
@@ -115,21 +209,23 @@ export default function App() {
       fetchEvents(),
       fetchLiveStatus()
     ]);
-  };
+  }
 
   // Initial Load & polling
   useEffect(() => {
     const initialRefresh = setTimeout(refreshAll, 0);
+    const initialModels = setTimeout(fetchModelCatalog, 0);
     const interval = setInterval(fetchLiveStatus, 3000);
     return () => {
       clearTimeout(initialRefresh);
+      clearTimeout(initialModels);
       clearInterval(interval);
     };
   }, []);
 
   const handleLiveControl = async (action, value = null) => {
     try {
-      const res = await fetch('/api/live/control', {
+      const res = await apiFetch('/api/live/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, value }),
@@ -147,7 +243,7 @@ export default function App() {
   };
 
   const setVisionMode = async (mode) => {
-    const response = await fetch('/api/live/control', {
+    const response = await apiFetch('/api/live/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'set_vision_mode', value: mode }),
@@ -248,6 +344,9 @@ function parseThinkTags(rawContent, currentReasoning = '') {
 
     setInputPrompt('');
     setIsExecuting(true);
+    setIsStopping(false);
+    setExecutionError('');
+    setConnectionInterrupted(false);
     setCurrentStep({ tag: 'INITIALIZING', label: 'Connecting to Kratos Edge Worker...' });
 
     // Append user message
@@ -260,12 +359,15 @@ function parseThinkTags(rawContent, currentReasoning = '') {
 
     // Prepare agent message placeholder
     const agentMsgIndex = messages.length + 1;
+    executionRef.current = { index: agentMsgIndex };
     const initialAgentMsg = {
       role: 'agent',
       content: '',
       reasoning: '',
       isThinking: false,
       thinkingDuration: 0,
+      tools: [],
+      status: 'running',
       timestamp: new Date().toLocaleTimeString()
     };
     setMessages((prev) => [...prev, initialAgentMsg]);
@@ -275,6 +377,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
     let isActivelyThinking = false;
     let thinkStartTime = Date.now();
     let thinkingDuration = 0;
+    let terminalAcknowledged = false;
 
     try {
       const payload = {
@@ -288,18 +391,19 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         agent_password: agentPassword
       };
 
-      const res = await fetch('/api/chat', {
+      const res = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
+        terminalAcknowledged = true;
         const errText = await res.text().catch(() => '');
         rawContent = `⚠️ **Error HTTP ${res.status}**: ${errText || 'Edge server error'}`;
         setMessages((prev) => {
           const updated = [...prev];
-          updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: rawContent };
+          updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: rawContent, status: 'failed' };
           return updated;
         });
         setIsExecuting(false);
@@ -332,6 +436,33 @@ function parseThinkTags(rawContent, currentReasoning = '') {
 
                 if (data.session_id && !activeSessionId) {
                   setActiveSessionId(data.session_id);
+                }
+
+                if (data.type === 'start' && data.model) {
+                  setMessages(previous => previous.map((message, i) => i === agentMsgIndex ? { ...message, model: data.model } : message));
+                }
+
+                if (isToolEvent(data)) {
+                  setMessages(previous => previous.map((message, i) => i === agentMsgIndex ? {
+                    ...message, tools: updateToolActivity(message.tools, data),
+                  } : message));
+                  if (data.type === 'tool_call' || data.tool_call) setActiveTool(data.tool_call || data.name);
+                  else setActiveTool(null);
+                  // Tool output often has a top-level `result`; it is never the
+                  // assistant's final response. Render it inside the tool card.
+                  continue;
+                }
+
+                if (data.type === 'error') {
+                  setExecutionError(data.message || data.error || 'The task failed.');
+                }
+
+                if (data.type === 'done') {
+                  terminalAcknowledged = true;
+                  const status = data.status || 'completed';
+                  setMessages(previous => previous.map((message, i) => i === agentMsgIndex ? {
+                    ...message, status, isThinking: false, tools: finishToolActivity(message.tools, status),
+                  } : message));
                 }
 
                 // Handle reasoning stream events
@@ -378,7 +509,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                   });
                 } else if (data.result || data.reply || data.response || data.content) {
                   const finalTxt = data.result || data.reply || data.response || data.content;
-                  if (finalTxt && (!rawContent || finalTxt.length > rawContent.length)) {
+                  if (typeof finalTxt === 'string' && finalTxt) {
                     rawContent = finalTxt;
                   }
                   const parsed = parseThinkTags(rawContent, accumulatedReasoning);
@@ -402,13 +533,6 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                   setCurrentStep(stepObj);
                 }
 
-                if (data.tool_call) {
-                  setActiveTool(data.tool_call);
-                }
-
-                if (data.tool_result) {
-                  setActiveTool(null);
-                }
               } catch {}
             }
           }
@@ -431,6 +555,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         });
       } else {
         // Standard JSON response
+        terminalAcknowledged = true;
         const data = await res.json().catch(() => ({}));
         rawContent = data.result || data.reply || data.response || data.content || JSON.stringify(data);
         if (data.session_id) setActiveSessionId(data.session_id);
@@ -442,37 +567,41 @@ function parseThinkTags(rawContent, currentReasoning = '') {
             content: parsed.content,
             reasoning: parsed.reasoning || accumulatedReasoning,
             isThinking: false,
-            thinkingDuration: 0
+            thinkingDuration: 0,
+            status: data.status || 'completed'
           };
           return updated;
         });
       }
     } catch (err) {
-      rawContent = `⚠️ **Connection Error**: ${err.message || String(err)}`;
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[agentMsgIndex] = { ...updated[agentMsgIndex], content: rawContent };
-        return updated;
-      });
+      setExecutionError(`Connection lost: ${err.message || String(err)}. Checking whether the runtime is still active.`);
     } finally {
-      setIsExecuting(false);
-      setCurrentStep(null);
-      setActiveTool(null);
+      if (terminalAcknowledged) {
+        executionRef.current = null;
+        setIsExecuting(false);
+        setIsStopping(false);
+        setCurrentStep(null);
+        setActiveTool(null);
+      } else {
+        setConnectionInterrupted(true);
+        setExecutionError('Response disconnected before completion. Checking the runtime; Stop remains available.');
+      }
       refreshAll();
     }
   };
 
   // Resume Session in Arena
   const handleResumeSession = async (sessionId) => {
+    if (isExecuting) return;
     setActiveSessionId(sessionId);
     setActiveTab('arena');
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
+      const res = await apiFetch(`/api/sessions/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
         setActiveSessionData(data);
         const turnsList = data.turns || [];
-        if (turnsList.length > 0) {
+        {
           const restoredMessages = [];
           turnsList.forEach((t) => {
             const userContent = t.user_query || t.user || t.prompt || t.query || '';
@@ -503,6 +632,8 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 reasoning: parsed.reasoning || '',
                 isThinking: false,
                 thinkingDuration: 0,
+                tools: restoredToolActivity(t.tool_calls || []),
+                status: t.status || 'completed',
                 timestamp: timeStr
               });
             }
@@ -517,7 +648,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
   const handleDeleteSession = async (sessionId) => {
     if (!confirm('Are you sure you want to delete this session from Cloudflare D1?')) return;
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
       if (res.ok) {
         if (activeSessionId === sessionId) {
           setActiveSessionId(null);
@@ -534,7 +665,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
     setSqlLoading(true);
     setSqlError(null);
     try {
-      const res = await fetch('/api/query', {
+      const res = await apiFetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: query })
@@ -552,9 +683,35 @@ function parseThinkTags(rawContent, currentReasoning = '') {
     }
   };
 
+  const startNewTask = () => {
+    if (isExecuting) return;
+    setActiveSessionId(null);
+    setActiveSessionData(null);
+    setMessages([]);
+    setInputPrompt('');
+    setActiveTab('arena');
+  };
+
+  const commands = [
+    { id: 'new', label: 'New task', detail: 'Start a fresh conversation', run: startNewTask, disabled: isExecuting },
+    { id: 'workspace', label: 'Open workspace', run: () => setActiveTab('arena') },
+    { id: 'sessions', label: 'Browse sessions', run: () => { setActiveTab('sessions'); fetchSessions(); } },
+    { id: 'activity', label: 'View activity', run: () => { setActiveTab('traces'); fetchEvents(); } },
+    { id: 'changes', label: 'Review task changes', detail: 'Inspect diffs and restore files from task checkpoints', run: () => setActiveTab('changes') },
+    { id: 'data', label: 'Open data explorer', run: () => setActiveTab('sql') },
+    { id: 'refresh', label: 'Refresh workspace', run: refreshAll },
+    { id: 'settings', label: 'Model and execution settings', detail: 'Temperature, thinking effort, and inspection budget', run: () => setSettingsOpen(true) },
+    { id: 'model', label: 'Change model', detail: 'Browse models from connected providers', run: () => setModelPickerOpen(true), disabled: isExecuting },
+    ...sessions.filter(session => session.session_id).map(session => ({
+      id: `session-${session.session_id}`, label: session.title || 'Untitled session',
+      detail: `${session.model || 'auto'} · ${session.session_id}`, kind: 'Resume session',
+      run: () => handleResumeSession(session.session_id), disabled: isExecuting,
+    })),
+  ];
+
   return (
-    <div className="h-screen w-screen bg-[#07030e] text-slate-100 flex flex-col selection:bg-pink-600 selection:text-white cyber-grid-bg overflow-hidden">
-      
+    <div className="studio-app h-screen w-screen bg-[#07030e] text-slate-100 flex flex-col selection:bg-pink-600 selection:text-white cyber-grid-bg overflow-hidden">
+
       {/* Top Navbar */}
       <div className="flex-shrink-0 z-40">
         <Navbar
@@ -562,12 +719,10 @@ function parseThinkTags(rawContent, currentReasoning = '') {
           isAgentMode={isAgentMode}
           onToggleAgentMode={handleToggleAgentMode}
           onRefresh={refreshAll}
-          onNewSession={() => {
-            setActiveSessionId(null);
-            setActiveSessionData(null);
-            setMessages([]);
-            setActiveTab('arena');
-          }}
+          onNewSession={startNewTask}
+          isExecuting={isExecuting}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenCommands={() => { setCommandsOpen(true); fetchSessions(); }}
           onOpenTechSpecs={() => setTechSpecsOpen(true)}
           isHudOpen={isHudOpen}
           onToggleHud={() => setIsHudOpen(!isHudOpen)}
@@ -576,7 +731,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
       </div>
 
       {/* Navigation Tabs Bar */}
-      <div className="w-full flex-shrink-0 bg-[#0b0616] border-b border-pink-500/15 px-4 sm:px-6 lg:px-8">
+      <div className="workspace-tabs w-full flex-shrink-0 bg-[#0b0616] border-b border-pink-500/15 px-4 sm:px-6 lg:px-8">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between overflow-x-auto scrollbar-none">
           <div className="flex items-center gap-1 sm:gap-2 py-2">
             <button
@@ -588,7 +743,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               }`}
             >
               <Gamepad2 className="w-4 h-4 text-pink-400" />
-              <span>AGENT ARENA & LIVE HUD</span>
+              <span>Workspace</span>
               <span className="px-1.5 py-0.2 text-[9px] rounded-full bg-pink-500 text-white font-pixl animate-pulse">
                 LIVE
               </span>
@@ -603,7 +758,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               }`}
             >
               <MessageSquare className="w-4 h-4 text-cyan-400" />
-              <span>D1 SESSIONS & TURNS</span>
+              <span>Sessions</span>
               <span className="px-1.5 py-0.2 text-[9px] rounded-full bg-slate-800 text-cyan-300 font-pixl">
                 {stats?.sessions_count ?? sessions?.length ?? 0}
               </span>
@@ -618,7 +773,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               }`}
             >
               <Zap className="w-4 h-4 text-amber-400" />
-              <span>AGENTIC TRACE REPLAY</span>
+              <span>Activity</span>
               <span className="px-1.5 py-0.2 text-[9px] rounded-full bg-slate-800 text-amber-300 font-pixl">
                 {events?.length ?? 0}
               </span>
@@ -633,8 +788,9 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               }`}
             >
               <Database className="w-4 h-4 text-purple-400" />
-              <span>D1 SQL PLAYGROUND</span>
+              <span>Data</span>
             </button>
+            <button onClick={() => setActiveTab('changes')} className={`px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 whitespace-nowrap ${activeTab === 'changes' ? 'bg-purple-600/30 border border-purple-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}><FileDiff className="w-4 h-4" /><span>Changes</span></button>
           </div>
 
           {/* Live Multimodal Perception Bar */}
@@ -694,16 +850,9 @@ function parseThinkTags(rawContent, currentReasoning = '') {
         </div>
       </div>
 
-      {/* Recruiter 1-Click Demo Strip */}
-      <div className="flex-shrink-0">
-        <RecruiterStrip onSelectPrompt={(prompt) => {
-          setActiveTab('arena');
-          handleSendPrompt(prompt);
-        }} />
-      </div>
-
       {/* Main Workspace Layout */}
-      <main className="flex-1 min-h-0 w-full max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3.5 overflow-hidden flex flex-col min-w-0">
+      <main className="workspace-main flex-1 min-h-0 w-full max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3.5 overflow-hidden flex flex-col min-w-0">
+        {activeTab === 'changes' && <ChangesReview isExecuting={isExecuting} />}
         {activeTab === 'arena' && (
           <div className="flex-1 min-h-0 h-full flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 w-full min-w-0 overflow-hidden">
             {/* Arena Chat Panel */}
@@ -713,14 +862,19 @@ function parseThinkTags(rawContent, currentReasoning = '') {
                 inputPrompt={inputPrompt}
                 setInputPrompt={setInputPrompt}
                 onSend={() => handleSendPrompt()}
+                onStop={handleStop}
+                isStopping={isStopping}
+                executionError={executionError}
                 onVisionMode={setVisionMode}
-                visionMode={liveStatus?.video_mode || 'camera'}
-                onClear={() => setMessages([])}
+                visionMode={liveStatus?.video_mode || 'none'}
+                onClear={() => { if (!isExecuting) setMessages([]); }}
                 isExecuting={isExecuting}
                 currentStep={currentStep}
                 activeTool={activeTool}
                 isAgentMode={isAgentMode}
-                modelName={telemetry?.normal_mode_model || telemetry?.model}
+                modelName={currentModel || telemetry?.normal_mode_model || telemetry?.model}
+                modelModality={modelModalityLabel(modelCatalog.find(model => model.id === (currentModel || telemetry?.normal_mode_model || telemetry?.model)))}
+                onOpenModelPicker={() => { if (!isExecuting) setModelPickerOpen(true); }}
                 sessionId={activeSessionId}
               />
             </div>
@@ -780,6 +934,11 @@ function parseThinkTags(rawContent, currentReasoning = '') {
       </main>
 
       {/* Modals */}
+      {commandsOpen && <WorkspaceCommands commands={commands} onClose={() => setCommandsOpen(false)} />}
+      {settingsOpen && <ModelSettings isExecuting={isExecuting} onClose={() => setSettingsOpen(false)} />}
+      {modelPickerOpen && <ModelPicker currentModel={currentModel || telemetry?.normal_mode_model || telemetry?.model}
+        isExecuting={isExecuting} onCurrentModel={setCurrentModel} onCatalogLoaded={setModelCatalog} onClose={() => setModelPickerOpen(false)}
+        onSelected={async model => { setCurrentModel(model); await Promise.all([fetchStats(), fetchTelemetry()]); }} />}
       <AgentAuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}

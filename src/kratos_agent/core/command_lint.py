@@ -132,6 +132,14 @@ def lint_command(cmd: str, shell: str = "powershell") -> LintResult:
     problems: list[str] = []
     code = "OK"
 
+    if (shell.lower() in ("powershell", "pwsh") and '\\"' in cmd
+            and re.search(r"(?i)\b(?:node(?:\.exe)?\s+-e|python(?:3|\.exe)?\s+-c)\s", cmd)):
+        return LintResult(
+            ok=False, shell=shell, code="COMMAND_PARSE_RISK",
+            problems=["Backslash does not escape double quotes in PowerShell."],
+            hint="Pass argv for node -e/python -c, or write a script file and run it. Use PowerShell backticks for shell quote escapes.",
+        )
+
     # 1. Check Known Bad / Forbidden Targets
     for pat, msg in KNOWN_BAD:
         if pat.search(cmd):

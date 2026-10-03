@@ -1,36 +1,39 @@
 # Kratos Agent
 
-Kratos Agent is a tool-using desktop and coding agent built around one configured Kratos reasoning model. It owns the planning loop, tool schemas, permissions, execution, and verification. It does not route reasoning to another model provider.
+Kratos Studio combines the Kratos desktop and coding agent with the current OmniRoute gateway and dashboard. Kratos owns planning, tools, permissions, task state, verification, and memory for Kratos tasks. OmniRoute owns provider connections, configured model or combo routing, compression, quotas, and its native feature pages and agents.
 
 ## Runtime boundaries
 
 | Component | Responsibility |
 | --- | --- |
-| Kratos SDK | Typed completions, streaming, structured tool calls, and same-endpoint retries through the local Kratos gateway. |
+| Kratos SDK | Typed completions, streaming, structured tool calls, and same-endpoint retries through the supervised local OmniRoute gateway. |
+| OmniRoute | Provider routing, fallback, compression, quotas, dashboard, APIs, and native agent features. Kratos requests opt out of OmniRoute memory and skill injection. |
 | Agent loop and harness | Planning, tool execution, memory, audit events, permission checks, and evidence-based completion. |
 | `computer-use` MCP | Desktop and browser actions, subject to Kratos tool policy. |
 | Gemini Live | Optional text-to-speech only. Kratos sends only text enclosed by `[[speak]]...[[/speak]]`; Gemini receives no user audio, video, screen frames, tools, or reasoning prompts. |
 | Local Windows speech | System.Speech recognition turns spoken requests into text for the Kratos agent. SAPI is the local speech fallback. |
 | OpenPets | Animated desktop companion and speech bubble for approved spoken phrases. |
 
-If the Kratos gateway is unavailable, the task reports a visible model error. Retries use the same endpoint and model; there is no reasoning-provider fallback.
+If the gateway is unavailable, the task reports a visible model error. Kratos retries its configured endpoint and model ID; any provider fallback inside a configured OmniRoute combo remains OmniRoute's responsibility.
 
 ## Setup
 
-Requirements: Python 3.12 or 3.13, a running Kratos-compatible gateway, Node.js 20+ for the built-in MCP servers, and the OpenPets desktop app for the animated companion.
+Requirements: Python 3.12 or 3.13, Node.js 20+ for OmniRoute and the built-in MCP servers, and the OpenPets desktop app if you use the animated companion.
 
-1. Install dependencies with `uv sync --extra dev`.
-2. Configure the local gateway and the exact model ID it serves:
+1. Install dependencies with `uv sync`.
+2. Build the bundled frontends and gateway once with `uv run kratos-studio setup`.
+3. Start the unified app with `uv run kratos-studio run --workspace .`. Open `http://127.0.0.1:20128/dashboard/kratos`.
+4. Read the initial dashboard password from `.kratos/studio/gateway/studio-secrets.json`. Keep that file private. For an existing OmniRoute store, use the offline import procedure in [Studio operations](integration/STUDIO_OPERATIONS.md); the imported database keeps its original login password.
+5. Configure a model or combo in the OmniRoute dashboard and set its exact ID for Kratos:
 
    ```dotenv
-   KRATOS_BASE_URL=http://127.0.0.1:20128/v1
-   KRATOS_MODEL=<exact model ID from the Kratos gateway>
-   KRATOS_API_KEY=<gateway key, if required>
+   KRATOS_MODEL=<exact OmniRoute model or combo ID>
+   KRATOS_API_KEY=<OmniRoute API key, if required by your endpoint>
    ```
 
-3. Start the CLI with `uv run kratos`.
+The launcher supplies `KRATOS_BASE_URL` and starts both local services. For the terminal interface, run `uv run kratos-studio run --cli --workspace .` (or `uv run kratos --cli --workspace .`). It connects to a ready gateway on the selected port, or starts its own gateway and stops it when the CLI exits. Use `uv run kratos-studio setup --cli` for a gateway-only installation without building the agent web frontend. Setup prepares dependencies; `run --cli` opens the terminal agent.
 
-`KRATOS_MODEL` is preferred. Existing `.env` files may keep using `BRAIN_MODEL`; `KRATOS_MODEL` takes precedence when both are set. Kratos does not guess an ID, silently select another model, or use another provider when the gateway or model is unavailable.
+`KRATOS_MODEL` is preferred. Existing `.env` files may keep using `BRAIN_MODEL`; `KRATOS_MODEL` takes precedence when both are set. Kratos does not guess an ID or silently choose another model when the gateway or configured model is unavailable. An OmniRoute combo may route among its configured compatible providers.
 
 Optional speech output uses `GEMINI_API_KEY` or `GOOGLE_API_KEY` and `KRATOS_LIVE_ENABLED=true`. Without Gemini credentials, only marked phrases use local Windows SAPI output. Speech recognition remains local. Set `KRATOS_COMPUTER_USE_MCP=false` or `KRATOS_OPENPETS_MCP=false` to disable those built-in MCP servers.
 

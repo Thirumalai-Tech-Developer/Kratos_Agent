@@ -7,6 +7,7 @@ Uses Python's standard library http.server for zero external dependencies.
 from __future__ import annotations
 
 import json
+import hmac
 import logging
 import mimetypes
 import os
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.agent_loop import format_tool_action_label
+from ..core.change_review import ReviewConflict
 from ..core.d1_client import D1DatabaseClient, get_d1_client
 from ..core.event_bus import event_bus
 from ..core.memory import AgenticMemory
@@ -77,6 +79,15 @@ class KratosWebHandler(BaseHTTPRequestHandler):
 
     server_version = "KratosViceCyberpunkServer/2.0"
 
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        token = getattr(self.server, "internal_token", "")
+        if token and not hmac.compare_digest(self.headers.get("X-Kratos-Internal-Token", ""), token):
+            self._send_json({"error": "Unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
+            return False
+        return True
+
     def log_message(self, format: str, *args: Any) -> None:
         if args and str(args[1]) not in ("200", "304"):
             logger.info("%s - %s", self.address_string(), format % args)
@@ -101,11 +112,17 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             path = parsed.path
 
             # REST API Routes
-            if path == "/api/stats":
+            if path == "/api/health":
+                self._send_json({"status": "ok", "service": "kratos", "busy": self.server.turn_lock.locked()})
+                return
+            elif path == "/api/stats":
                 self._handle_get_stats()
                 return
             elif path == "/api/telemetry":
                 self._handle_get_telemetry()
+                return
+            elif path == "/api/mcp":
+                self._send_json({"servers": self.server.runtime.mcp.overview()})
                 return
             elif path == "/api/tools":
                 self._handle_get_tools()
@@ -126,6 +143,20 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 return
             elif path == "/api/live/status":
                 self._handle_get_live_status()
+                return
+            elif path == "/api/changes":
+                self._handle_changes()
+                return
+            elif path == "/api/settings":
+                runtime = self.server.runtime
+                self._send_json(runtime.generation_settings.status(runtime.model_name, runtime.model_metadata))
+                return
+            elif path == "/api/models":
+                self._handle_get_models()
+                return
+            elif path == "/api/changes/diff":
+                query = urllib.parse.parse_qs(parsed.query)
+                self._handle_changes(query.get('checkpoint', [''])[0], query.get('path', [''])[0])
                 return
 
             # Static assets (Vite assets, images, fonts, HTML)
@@ -192,11 +223,27 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-        if path == "/api/chat":
+        if path == "/api/settings":
+            self._handle_generation_settings(payload)
+            return
+        elif path == "/api/models":
+            self._handle_select_model(payload)
+            return
+        elif path == "/api/changes/restore":
+            self._handle_restore_changes(payload)
+            return
+        elif path == "/api/chat/cancel":
+            self.server.runtime.cancel()
+            self._send_json({"status": "cancellation_requested"})
+            return
+        elif path == "/api/chat":
             self._handle_chat_sse(payload)
             return
         elif path == "/api/chat/sync":
             self._handle_chat_sync(payload)
+            return
+        elif path == "/api/mcp":
+            self._handle_mcp_config(payload)
             return
         elif path == "/api/sessions":
             self._handle_create_session(payload)
@@ -302,26 +349,6 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def _handle_voice_command(self, payload: dict[str, Any]) -> None:
-        try:
-            cmd = payload.get("command", "")
-            from kratos_agent.main import run_agent
-            res = run_agent(cmd)
-            self._send_json({"ok": True, "result": res})
-        except Exception as e:
-            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
-
-    def _handle_voice_panic(self, payload: dict[str, Any]) -> None:
-        try:
-            from kratos_agent.ccs.safety_ops import panic_halt
-            panic_halt(reason=payload.get("reason", "voice_panic"))
-            self._send_json({"ok": True, "panic": "halted"})
-        except Exception as e:
-            self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
-
-    def _handle_voice_stream(self, payload: dict[str, Any]) -> None:
-        self._send_json({"ok": True, "stream": "active"})
-
     # ── Static File Helper ─────────────────────────────────────────────────────
 
     def _serve_file(self, file_path: Path, content_type: str) -> None:
@@ -342,6 +369,15 @@ class KratosWebHandler(BaseHTTPRequestHandler):
     # ── Live Agent Streaming (Server-Sent Events) ──────────────────────────────
 
     def _handle_chat_sse(self, payload: dict[str, Any]) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "A Kratos turn is already running."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            self._execute_chat_sse(payload)
+        finally:
+            self.server.turn_lock.release()
+
+    def _execute_chat_sse(self, payload: dict[str, Any]) -> None:
         """Streams real-time agent execution tokens, steps, and tool calls using SSE."""
         prompt = str(
             payload.get("prompt")
@@ -365,7 +401,9 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         runtime = self.server.runtime
         requested_session_id = payload.get("session_id")
         if requested_session_id and runtime.memory:
-            runtime.memory.load_session(requested_session_id)
+            if not runtime.memory.load_session(requested_session_id):
+                self._send_json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
+                return
             runtime.activate_session()
 
         # Send SSE Headers
@@ -376,13 +414,17 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
 
+        disconnected = threading.Event()
+
         def send_event(data: dict[str, Any]) -> None:
             try:
                 line = f"data: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
                 self.wfile.write(line.encode("utf-8"))
                 self.wfile.flush()
             except Exception as exc:
-                logger.debug("Operation error suppressed: %s", exc)
+                disconnected.set()
+                runtime.cancel()
+                logger.debug("Client disconnected; cancellation requested: %s", exc)
 
         from ..brain.config import get_normal_mode_model
         normal_model = get_normal_mode_model()
@@ -447,10 +489,12 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 action_lbl = format_tool_action_label(tool_name, tool_args)
                 ev_queue.put({
                     "type": "tool_call",
+                    "call_id": p.get("call_id"),
                     "name": tool_name,
                     "label": f"[tool call] {action_lbl}",
                     "tool_call": {
                         "name": tool_name,
+                        "call_id": p.get("call_id"),
                         "label": action_lbl,
                         "args": tool_args
                     },
@@ -464,13 +508,17 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                     },
                     "label": f"Calling: {action_lbl}"
                 })
-            elif kind == "tool.completed":
+            elif kind in ("tool.completed", "tool.failed"):
                 tool_name = p.get("name") or "tool"
                 content = p.get("content") or ""
                 ev_queue.put({
-                    "type": "tool_result",
+                    "type": "tool_failed" if kind == "tool.failed" else "tool_result",
                     "name": tool_name,
-                    "result": content[:300] + ("..." if len(content) > 300 else "")
+                    "call_id": p.get("call_id"),
+                    "is_error": bool(p.get("is_error") or kind == "tool.failed"),
+                    "status": "cancelled" if content.startswith(("Cancelled by user", "Error: Command cancelled")) else ("failed" if kind == "tool.failed" else "completed"),
+                    "truncated": bool(p.get("truncated") or len(content) > 8000),
+                    "result": content[:8000]
                 })
             elif kind == "model.chunk":
                 token = p.get("chunk") or ""
@@ -509,6 +557,8 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 if item.get("type") == "__COMPLETED__":
                     break
                 send_event(item)
+                if disconnected.is_set():
+                    break
             except queue.Empty:
                 if not worker_thread.is_alive():
                     break
@@ -517,56 +567,49 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b": ping\n\n")
                     self.wfile.flush()
                 except Exception:
+                    disconnected.set()
+                    runtime.cancel()
                     break
 
         event_bus.unsubscribe(on_runtime_event)
 
-        # Final response event
-        if exec_result["error"]:
-            send_event({"type": "error", "message": exec_result["error"]})
-            send_event({
-                "type": "done",
-                "result": f"Execution error: {exec_result['error']}",
-                "reply": f"Execution error: {exec_result['error']}",
-                "response": f"Execution error: {exec_result['error']}",
-                "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
-            })
-        else:
-            send_event({
-                "type": "step",
-                "step": {
-                    "tag": "COMPLETE",
-                    "label": "Turn completed successfully."
-                },
-                "label": "Turn completed successfully."
-            })
-            send_event({
-                "type": "done",
-                "result": exec_result["text"],
-                "reply": exec_result["text"],
-                "response": exec_result["text"],
-                "content": exec_result["text"],
-                "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default"
-            })
+        if disconnected.is_set():
+            # Keep the turn lock until tool execution reaches its cancellation
+            # boundary; another browser must not switch its active session.
+            worker_thread.join()
+            return
+
+        result = exec_result["text"]
+        status = self._turn_status(result, exec_result["error"])
+        if status == "failed":
+            send_event({"type": "error", "message": exec_result["error"] or result})
+        label = {"completed": "Turn completed successfully.", "failed": "Turn failed.",
+                 "paused": "Turn paused.", "cancelled": "Turn cancelled."}.get(status, "Turn ended.")
+        send_event({"type": "step", "step": {"tag": status.upper(), "label": label}, "label": label})
+        send_event({
+            "type": "done", "status": status,
+            "result": result, "reply": result, "response": result, "content": result,
+            "session_id": runtime.memory.active_session.session_id if runtime.memory.active_session else "default",
+        })
+
+    def _turn_status(self, result: str, error: str | None = None) -> str:
+        runtime = self.server.runtime
+        cancellation = getattr(runtime, "_cancellation_flag", None)
+        if cancellation is not None and cancellation.is_set():
+            return "cancelled"
+        if error or result.startswith(("Model request failed:", "Execution error:", "Stopped after ")):
+            return "failed"
+        session = getattr(runtime.memory, "active_session", None)
+        persisted = getattr(session, "last_status", None)
+        return persisted if persisted in ("completed", "failed", "paused", "cancelled") else "completed"
 
     def _handle_voice_stream(self, payload: dict[str, Any]) -> None:
-        """Omni Voice SSE Streaming Endpoint."""
-        # Stub for Voice stream to be implemented according to Omni Spec
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache, no-transform")
-        self.send_header("Connection", "close")
-        self._send_cors_headers()
-        self.end_headers()
-
-        # Send the initial stream event before forwarding live runtime events.
-        self.wfile.write(b"event: ready\ndata: {}\n\n")
-        self.wfile.flush()
+        """Execute a transcribed voice command through the normal task stream."""
+        self._handle_chat_sse({**payload, "prompt": payload.get("command") or payload.get("transcript") or payload.get("prompt", "")})
 
     def _handle_voice_command(self, payload: dict[str, Any]) -> None:
-        """Omni Voice Command Execution."""
-        # Stub for Voice command
-        self._send_json({"status": "ok", "message": "Command received"})
+        """Execute a transcribed command through Kratos's guarded runtime."""
+        self._handle_chat_sync({**payload, "prompt": payload.get("command") or payload.get("transcript") or payload.get("prompt", "")})
 
     def _handle_voice_panic(self, payload: dict[str, Any]) -> None:
         """Omni Voice Panic trigger."""
@@ -578,7 +621,44 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
+    def _handle_mcp_config(self, payload: dict[str, Any]) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "Wait for the active turn before changing tools."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            manager = self.server.runtime.mcp
+            action = payload.get("action")
+            name = payload.get("name", "")
+            if action == "configure":
+                manager.configure(name, payload.get("config", {}))
+            elif action == "toggle" and isinstance(payload.get("enabled"), bool):
+                manager.set_enabled(name, payload["enabled"])
+            elif action == "remove":
+                manager.remove(name)
+            elif action == "import" and isinstance(payload.get("path"), str):
+                manager.add_import(payload["path"])
+            elif action != "reconnect":
+                raise ValueError("Unsupported MCP management action")
+            self.server.runtime.reload_tools()
+            self._send_json({"servers": manager.overview()})
+        except (TypeError, ValueError) as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("MCP configuration failed")
+            self._send_json({"error": "MCP configuration failed; check service logs."}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+        finally:
+            self.server.turn_lock.release()
+
     def _handle_chat_sync(self, payload: dict[str, Any]) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "A Kratos turn is already running."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            self._execute_chat_sync(payload)
+        finally:
+            self.server.turn_lock.release()
+
+    def _execute_chat_sync(self, payload: dict[str, Any]) -> None:
         """Synchronous chat execution endpoint."""
         prompt = str(
             payload.get("prompt")
@@ -600,12 +680,19 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             agent_mode = True
 
         runtime = self.server.runtime
+        requested_session_id = payload.get("session_id")
+        if requested_session_id and runtime.memory:
+            if not runtime.memory.load_session(requested_session_id):
+                self._send_json({"error": "Session not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            runtime.activate_session()
         from ..brain.config import get_normal_mode_model
         normal_model = get_normal_mode_model()
         active_model = runtime.model_name if agent_mode else normal_model
         try:
             result = runtime.run_agent(prompt, agent_mode=agent_mode)
             self._send_json({
+                "status": self._turn_status(result),
                 "result": result,
                 "reply": result,
                 "response": result,
@@ -627,6 +714,113 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             self._send_json({"success": False, "error": "ACCESS DENIED // Invalid Passcode"}, status=HTTPStatus.UNAUTHORIZED)
 
     # ── REST API Handlers ──────────────────────────────────────────────────────
+
+    def _handle_changes(self, checkpoint: str = '', name: str = '') -> None:
+        review = getattr(self.server.runtime, 'change_review', None)
+        if review is None:
+            self._send_json({'error': 'Restart Studio to enable task checkpoints.'}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        try:
+            self._send_json(review.diff(checkpoint, name) if checkpoint else {'checkpoints': review.list()})
+        except ValueError as exc:
+            self._send_json({'error': str(exc)}, status=HTTPStatus.BAD_REQUEST)
+
+    def _handle_get_models(self) -> None:
+        from kratos_agent.brain.config import ModelCatalogUnavailable, get_model_catalog
+        try:
+            self._send_json({"models": get_model_catalog(timeout=5.0, strict=True),
+                             "model": self.server.runtime.model_name})
+        except ModelCatalogUnavailable as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def _handle_select_model(self, payload: dict[str, Any]) -> None:
+        from kratos_agent.brain.config import ModelCatalogUnavailable
+        from kratos_agent.core.model_selection import ModelSelectionBusy, validate_model_id
+        if not isinstance(payload, dict) or set(payload) != {"model"}:
+            self._send_json({"error": "Provide a model ID from the gateway catalog."}, status=HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            model = validate_model_id(payload["model"])
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "Wait for the active task before changing models."}, status=HTTPStatus.CONFLICT)
+            return
+        runtime = self.server.runtime
+        runtime_lock = getattr(runtime, "_turn_lock", self.server.turn_lock)
+        acquired = runtime_lock is self.server.turn_lock or runtime_lock.acquire(blocking=False)
+        response_status = HTTPStatus.OK
+        try:
+            if not acquired:
+                raise ModelSelectionBusy("Wait for the active task before changing models.")
+            runtime.set_model(model)
+            response = {"status": "ok", "model": runtime.model_name,
+                        "settings": runtime.generation_settings.status(runtime.model_name, runtime.model_metadata)}
+        except ModelSelectionBusy as exc:
+            response, response_status = {"error": str(exc)}, HTTPStatus.CONFLICT
+        except ModelCatalogUnavailable as exc:
+            response, response_status = {"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE
+        except ValueError as exc:
+            response, response_status = {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+        except OSError:
+            response = {"error": "Could not save the workspace model choice."}
+            response_status = HTTPStatus.INTERNAL_SERVER_ERROR
+        finally:
+            if acquired and runtime_lock is not self.server.turn_lock:
+                runtime_lock.release()
+            self.server.turn_lock.release()
+        self._send_json(response, status=response_status)
+
+    def _handle_generation_settings(self, payload: dict[str, Any]) -> None:
+        runtime = self.server.runtime
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({'error': 'Wait for the active task before changing model settings.'}, status=HTTPStatus.CONFLICT)
+            return
+        runtime_lock = getattr(runtime, '_turn_lock', self.server.turn_lock)
+        acquired = runtime_lock is self.server.turn_lock or runtime_lock.acquire(blocking=False)
+        try:
+            if not acquired:
+                self._send_json({'error': 'Wait for the active task before changing model settings.'}, status=HTTPStatus.CONFLICT)
+                return
+            status = runtime.generation_settings.update(runtime.model_name, runtime.model_metadata, payload)
+            runtime.brain.generation_model = runtime.model_name
+            runtime.brain.generation_options = status['options']
+            runtime.loop.inspection_limit = status['inspection_limit']
+            self._send_json(status)
+        except (ValueError, OSError) as exc:
+            self._send_json({'error': str(exc)}, status=HTTPStatus.BAD_REQUEST)
+        finally:
+            if acquired and runtime_lock is not self.server.turn_lock:
+                runtime_lock.release()
+            self.server.turn_lock.release()
+
+    def _handle_restore_changes(self, payload: dict[str, Any]) -> None:
+        review = getattr(self.server.runtime, 'change_review', None)
+        if review is None:
+            self._send_json({'error': 'Restart Studio to enable task checkpoints.'}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get('checkpoint'), str) or not isinstance(payload.get('paths'), list) or not all(isinstance(name, str) for name in payload['paths']):
+            self._send_json({'error': 'Provide a checkpoint and file paths.'}, status=HTTPStatus.BAD_REQUEST)
+            return
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({'error': 'Wait for the active task before restoring files.'}, status=HTTPStatus.CONFLICT)
+            return
+        runtime_lock = getattr(self.server.runtime, '_turn_lock', self.server.turn_lock)
+        acquired = runtime_lock is self.server.turn_lock or runtime_lock.acquire(blocking=False)
+        try:
+            if not acquired:
+                self._send_json({'error': 'Wait for the active task before restoring files.'}, status=HTTPStatus.CONFLICT)
+                return
+            self._send_json(review.restore(payload['checkpoint'], payload['paths']))
+        except ReviewConflict as exc:
+            self._send_json({'error': str(exc)}, status=HTTPStatus.CONFLICT)
+        except (ValueError, OSError) as exc:
+            self._send_json({'error': str(exc)}, status=HTTPStatus.BAD_REQUEST)
+        finally:
+            if acquired and runtime_lock is not self.server.turn_lock:
+                runtime_lock.release()
+            self.server.turn_lock.release()
 
     def _handle_get_stats(self) -> None:
         d1: D1DatabaseClient = self.server.d1_db
@@ -674,11 +868,21 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         self._send_json(sessions)
 
     def _handle_get_session_detail(self, session_id: str) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "A Kratos turn is already running."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            self._handle_get_session_detail_locked(session_id)
+        finally:
+            self.server.turn_lock.release()
+
+    def _handle_get_session_detail_locked(self, session_id: str) -> None:
         memory: AgenticMemory = self.server.memory
         if not memory.load_session(session_id):
             self._send_json({"error": f"Session {session_id} not found"}, status=HTTPStatus.NOT_FOUND)
             return
 
+        self.server.runtime.activate_session()
         session = memory.active_session
         if not session:
             self._send_json({"error": "Active session is None"}, status=HTTPStatus.NOT_FOUND)
@@ -699,10 +903,20 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_create_session(self, payload: dict[str, Any]) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "A Kratos turn is already running."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            self._handle_create_session_locked(payload)
+        finally:
+            self.server.turn_lock.release()
+
+    def _handle_create_session_locked(self, payload: dict[str, Any]) -> None:
         memory: AgenticMemory = self.server.memory
         title = payload.get("title", "Web Console Session")
         model = payload.get("model", "auto")
         session = memory.create_session(title=title, model=model)
+        self.server.runtime.activate_session()
         self._send_json({
             "id": session.session_id,
             "session_id": session.session_id,
@@ -714,6 +928,15 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         }, status=HTTPStatus.CREATED)
 
     def _handle_delete_session(self, session_id: str) -> None:
+        if not self.server.turn_lock.acquire(blocking=False):
+            self._send_json({"error": "A Kratos turn is already running."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            self._handle_delete_session_locked(session_id)
+        finally:
+            self.server.turn_lock.release()
+
+    def _handle_delete_session_locked(self, session_id: str) -> None:
         memory: AgenticMemory = self.server.memory
         success = memory.delete_session(session_id)
         if success:
@@ -796,11 +1019,15 @@ class KratosServer(ThreadingHTTPServer):
     ):
         self.d1_db = d1_db
         self.memory = memory
+        self.internal_token = os.getenv("KRATOS_INTERNAL_TOKEN", "")
+        self.turn_lock = threading.Lock()
         if runtime is None:
             from ..main import runtime as default_runtime
             self.runtime = default_runtime
         else:
             self.runtime = runtime
+        # Session management and execution must operate on the same memory owner.
+        self.memory = getattr(self.runtime, "memory", memory)
         super().__init__(server_address, RequestHandlerClass)
 
 
@@ -821,7 +1048,7 @@ def start_server(
         memory = AgenticMemory(d1_db=d1_db)
 
     server = None
-    for attempt_port in range(port, port + 10):
+    for attempt_port in range(port, port + (1 if os.getenv("KRATOS_STRICT_PORT") == "1" else 10)):
         try:
             server = KratosServer(
                 ("127.0.0.1", attempt_port),

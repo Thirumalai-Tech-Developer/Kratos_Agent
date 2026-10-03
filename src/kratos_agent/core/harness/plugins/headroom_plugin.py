@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,20 @@ logger = logging.getLogger(__name__)
 # Lazy import guard — headroom is optional
 # ---------------------------------------------------------------------------
 _headroom_available: bool | None = None
+
+
+@lru_cache(maxsize=32)
+def prepare_headroom_tokenizer(model: str) -> None:
+    """Resolve lazy tokenizer dependencies once, with an explicit estimate fallback."""
+    from headroom.tokenizers.registry import TokenizerRegistry
+    from headroom.tokenizers.estimator import EstimatingTokenCounter
+
+    counter = TokenizerRegistry.get(model)
+    try:
+        counter.count_text("Kratos tokenizer probe")
+    except ImportError:
+        TokenizerRegistry.register(model, tokenizer=EstimatingTokenCounter())
+        logger.info("Headroom tokenizer unavailable for %s; using estimated token counts.", model)
 
 
 def is_headroom_available() -> bool:
@@ -134,7 +149,10 @@ class HeadroomPlugin(HarnessPlugin):
 
         try:
             from headroom import compress
-            self._compress_fn = compress
+            # Kompress downloads an ML model and requires optional transformers.
+            # Keep deterministic compression usable in the base installation.
+            from functools import partial
+            self._compress_fn = partial(compress, kompress_model="disabled", compress_system_messages=False)
             logger.info("[HeadroomPlugin] Headroom compression engine loaded.")
 
             # Register ourselves as a shared service on the kernel
@@ -184,19 +202,20 @@ class HeadroomPlugin(HarnessPlugin):
             return messages, {"compressed": False, "reason": "headroom_unavailable" if not self.available else "empty_messages"}
 
         target_model = model or self._model_name
-        if not target_model:
-            return messages, {"compressed": False, "reason": "model_not_configured"}
         t0 = time.monotonic()
 
         try:
-            result = self._compress_fn(messages, model=target_model)
+            prepare_headroom_tokenizer(target_model or "claude-sonnet-4-5-20250929")
+            # Headroom has a built-in tokenizer default. Use it when Kratos has
+            # not selected a model yet, while preserving an explicit selection.
+            result = self._compress_fn(messages, model=target_model) if target_model else self._compress_fn(messages)
 
             tokens_saved = getattr(result, "tokens_saved", 0)
             ratio = getattr(result, "compression_ratio", 0.0)
             compressed_msgs = getattr(result, "messages", messages)
 
             # Update cumulative stats
-            input_tokens = getattr(result, "original_tokens", 0)
+            input_tokens = getattr(result, "tokens_before", getattr(result, "original_tokens", 0))
             output_tokens = input_tokens - tokens_saved if input_tokens else 0
 
             self.stats.total_calls += 1

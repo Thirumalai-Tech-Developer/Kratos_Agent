@@ -62,7 +62,8 @@ class StreamResponseTests(unittest.TestCase):
 
         streamed = []
         resp = adapter.complete(
-            {"messages": [{"role": "user", "content": "write app.py"}]},
+            {"messages": [{"role": "user", "content": "write app.py"}],
+             "tools": [{"type": "function", "function": {"name": "write_file", "parameters": {"type": "object"}}}]},
             on_chunk=streamed.append,
         )
 

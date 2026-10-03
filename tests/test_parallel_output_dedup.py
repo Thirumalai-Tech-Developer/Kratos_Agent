@@ -25,6 +25,9 @@ class MockToolRegistry:
     def schemas(self):
         return [{"name": "read_file"}]
 
+    def get(self, name):
+        return None
+
     def execute(self, call: ToolCall, allow_tool=None):
         self.executed.append(call.name)
         return ToolResult(

@@ -33,6 +33,14 @@ def assess_tool_risk(spec: ToolSpec, arguments: dict[str, Any], user_request: st
     action term and every concrete target supplied to the tool call.
     """
     action_text = f"{spec.name} {_argument_summary(arguments)}"
+    # Reading an exception's diagnostic property does not send a message.
+    # Keep method calls such as client.send(...) subject to the normal gate.
+    action_text = re.sub(r"(?i)\.message\b(?!\s*\()", ".diagnostic", action_text)
+    # PowerShell's formatting parameter is not a disk-formatting action.
+    action_text = re.sub(
+        r"(?i)(\bGet-Date\b[^;|&\n]*?)(?<!\w)-format\b",
+        r"\1-datepattern", action_text,
+    )
     hints = {str(key).lower(): value for key, value in (spec.annotations or {}).items()}
     destructive_hint = hints.get("destructivehint", hints.get("destructive_hint")) is True
     open_world_hint = hints.get("openworldhint", hints.get("open_world_hint")) is True

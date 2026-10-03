@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import threading
 import time
@@ -87,7 +88,8 @@ HELP_TEXT = """
   [bold cyan]/mode[/bold cyan] [dim][suggest|auto-edit|full-auto|sovereign][/dim] - Set Kratos approval mode
   [bold cyan]/plan[/bold cyan] [dim][on|off|<query>][/dim]           - Enter or exit Kratos Plan Mode
   [bold cyan]/harness[/bold cyan] [dim][status|mode|plugins|trace][/dim] - Kratos Harness presets & plugins manager
-  [bold cyan]/mcp[/bold cyan] [dim][status|reload|import <config>][/dim] - Manage local MCP server connections
+  [bold cyan]/mcp[/bold cyan] [dim][status|add|configure|import|check|enable|disable|remove|reload][/dim] - Manage MCP connections
+  [bold cyan]/lessons[/bold cyan] [dim][clear][/dim]         - Inspect or reset verified recovery memory
   [bold cyan]/session[/bold cyan] [dim][new|load|show|rm][/dim] - Manage isolated agentic memory sessions
   [bold cyan]/prompts[/bold cyan] [dim][query][/dim]        - Browse the project's engineering prompt library
   [bold cyan]/review[/bold cyan] [dim][target][/dim]         - Run multi-angle senior code review (alias: /code-review)
@@ -109,6 +111,9 @@ HELP_TEXT = """
   [bold cyan]/live[/bold cyan] [dim][status|reconnect][/dim]        - Inspect or manage Gemini Live multimodal session
   [bold cyan]/search[/bold cyan] [dim][web|tools|memory|github] <q>[/dim] - Query unified search & retrieval fabric
   [bold cyan]/context[/bold cyan]                 - Inspect the redacted assembled request, tools, tokens and trace
+  [bold cyan]/changes[/bold cyan]                 - List task checkpoints and edited files
+  [bold cyan]/diff[/bold cyan] [dim]<id|latest> <path>[/dim] - Review a file's changes from a task
+  [bold cyan]/undo[/bold cyan] [dim]<id|latest> <path> --yes[/dim] - Restore a selected file before that task
 
   [bold cyan]/debug[/bold cyan]                   - Inspect full execution/event trace from last turn
   [bold cyan]/debug live[/bold cyan]              - Toggle live step display on/off
@@ -182,7 +187,14 @@ class KratosCompleter(Completer):
         ("/harness plugins", "List all registered and active harness plugins"),
         ("/harness trace", "View recent execution trace and audit replay"),
         ("/mcp", "Inspect connected MCP servers and tools"),
+        ("/lessons", "Inspect verified recovery lessons"),
+        ("/lessons clear", "Reset recovery memory for this workspace"),
         ("/mcp import", "Import an MCP server configuration file"),
+        ("/mcp add", "Add an MCP URL with --name"),
+        ("/mcp check", "Check a selected MCP connection"),
+        ("/mcp enable", "Enable an MCP connection"),
+        ("/mcp disable", "Disable an MCP connection"),
+        ("/mcp remove", "Remove an MCP connection"),
         ("/reload", "Live hot-reload all source code, tools & skills"),
         ("/memory", "Inspect persistent agentic memory & executed steps"),
         ("/web", "Launch interactive Cloudflare D1 Web Console & Trace viewer"),
@@ -205,6 +217,9 @@ class KratosCompleter(Completer):
         ("/reset", "Reset multi-turn conversation memory"),
         ("/clear", "Clear terminal screen"),
         ("/help", "Show commands reference overview"),
+        ("/changes", "List task checkpoints and changed files"),
+        ("/diff", "Inspect task changes: /diff latest <path>"),
+        ("/undo", "Restore one task edit: /undo latest <path> --yes"),
         ("/exit", "Exit Kratos Agent"),
     ]
 
@@ -768,7 +783,8 @@ def handle_mcp_command(arg: str = ""):
     parts = arg.strip().split(maxsplit=1)
     subcmd = parts[0].lower() if parts else "status"
     target = parts[1].strip() if len(parts) > 1 else ""
-    if subcmd in {"import", "add"}:
+    if subcmd == "import":
+        target = target.strip('"\'')
         if not target:
             console.print("[yellow]Usage: /mcp import <path-to-mcp-config.json>[/yellow]\n")
             return
@@ -779,6 +795,23 @@ def handle_mcp_command(arg: str = ""):
             console.print(f"[bold red]Import failed:[/bold red] {type(exc).__name__}: {exc}\n")
             return
         console.print(f"[green]Imported MCP config. {count} server(s) are now configured for Kratos.[/green]\n")
+        return
+    if subcmd in {"add", "configure", "check", "enable", "disable", "remove"}:
+        from kratos_agent.mcp_cli import main as mcp_main
+        try:
+            # Preserve unquoted Windows paths; remove only token quote wrappers.
+            argv = [token.strip('"\'') for token in shlex.split(arg, posix=False)]
+            if "--workspace" in argv:
+                console.print("[red]MCP commands use the current CLI workspace.[/red]")
+                return
+            code = mcp_main([*argv, "--workspace", str(runtime.workspace)], announce_reconnect=False)
+            if code == 0 and subcmd != "check":
+                runtime.reload_tools()
+                console.print("[green]MCP configuration applied to this CLI session.[/green]\n")
+        except SystemExit:
+            return  # argparse reports syntax errors without exiting the interactive CLI.
+        except Exception as exc:
+            console.print(f"[red]MCP command failed: {escape(str(exc))}[/red]")
         return
     if subcmd in {"reload", "refresh"}:
         runtime.reload_tools()
@@ -798,7 +831,36 @@ def handle_mcp_command(arg: str = ""):
         console.print("[dim]No MCP servers configured.[/dim]")
     else:
         console.print(mcp_table)
-    console.print("[dim]Use /mcp import <path-to-config.json> to add a local MCP server configuration.[/dim]\n")
+    console.print("[dim]Add a URL: /mcp add https://example.com/mcp --name docs | Import: /mcp import <config>[/dim]\n")
+
+
+def handle_lessons_command(arg: str = ""):
+    """Show only fixed, verified recovery templates; never raw tool data."""
+    from kratos_agent.core.recovery_memory import TEMPLATES
+    store = runtime.loop.recovery_memory
+    if arg.strip().lower() == "clear":
+        try:
+            count = store.clear()
+        except OSError as exc:
+            console.print(f"[red]Could not clear recovery memory: {escape(str(exc))}[/red]")
+            return
+        console.print(f"[green]Cleared {count} recovery lesson(s) for this workspace.[/green]\n")
+        return
+    if arg.strip() and arg.strip().lower() != "status":
+        console.print("[yellow]" + escape("Usage: /lessons [clear]") + "[/yellow]\n")
+        return
+    lessons = store.entries()
+    if not lessons:
+        console.print("[dim]No verified recovery lessons yet. Lessons are saved after a corrected attempt and successful verification.[/dim]\n")
+        return
+    table = Table(title="Verified Recovery Lessons", border_style="cyan")
+    table.add_column("Scope")
+    table.add_column("Lesson")
+    table.add_column("Verified", justify="right")
+    for lesson in lessons:
+        table.add_row(f"{lesson['tool']} / {lesson['executor']}", TEMPLATES[lesson["strategy"]], str(lesson["verified_count"]))
+    console.print(table)
+    console.print(f"[dim]Stored in {escape(str(store.path))}. Up to three relevant lessons are recalled per request.[/dim]\n")
 
 
 def handle_accounts_command():
@@ -1976,6 +2038,44 @@ def start_interactive_cli():
                 console.print(Panel(HELP_TEXT, title="[bold gold1]Commands & Shortcuts[/bold gold1]", border_style="gold1"))
                 continue
 
+            if user_input.split(maxsplit=1)[0].lower() in ('/changes', '/diff', '/undo'):
+                parts = user_input.split(maxsplit=2)
+                command = parts[0].lower()
+                review = runtime.change_review
+                try:
+                    checkpoints = review.list()
+                    if command == '/changes':
+                        if not checkpoints:
+                            console.print('No task checkpoints yet.', markup=False)
+                        for checkpoint in checkpoints[:10]:
+                            console.print(f"{checkpoint['id']}  {checkpoint['label']}", markup=False)
+                            for change in checkpoint['changes']:
+                                console.print(f"  {'restored' if change['restored'] else change['kind']}: {change['path']}", markup=False)
+                        continue
+                    if len(parts) != 3:
+                        raise ValueError(f'Usage: {command} <checkpoint|latest> <path>' + (' --yes' if command == '/undo' else ''))
+                    checkpoint_id = checkpoints[0]['id'] if parts[1] == 'latest' and checkpoints else parts[1]
+                    path = parts[2].strip()
+                    if command == '/diff':
+                        data = review.diff(checkpoint_id, path.strip('"'))
+                        console.print('Binary file changed.' if data['binary'] else data['diff'], markup=False)
+                        if data['truncated']:
+                            console.print('Diff preview limited to 6,000 lines.', markup=False)
+                    else:
+                        if not path.endswith(' --yes'):
+                            raise ValueError('Review with /diff first, then append --yes to restore this file.')
+                        path = path[:-6].strip().strip('"')
+                        if not runtime._turn_lock.acquire(blocking=False):
+                            raise ValueError('Wait for the active task before restoring files.')
+                        try:
+                            review.restore(checkpoint_id, [path])
+                            console.print(f'Restored {path} to its state before the task.', markup=False)
+                        finally:
+                            runtime._turn_lock.release()
+                except (ValueError, OSError) as exc:
+                    console.print(str(exc), markup=False)
+                continue
+
             if user_input.lower() == "/reset":
                 messages.clear()
                 memory.clear()
@@ -2229,6 +2329,12 @@ def start_interactive_cli():
                 parts = user_input.split(maxsplit=1)
                 arg = parts[1] if len(parts) > 1 else ""
                 handle_mcp_command(arg)
+                continue
+
+            # /lessons [clear] — Verified recovery memory for this workspace
+            if user_input.lower() == "/lessons" or user_input.lower().startswith("/lessons "):
+                parts = user_input.split(maxsplit=1)
+                handle_lessons_command(parts[1] if len(parts) > 1 else "")
                 continue
 
             # /bg-run <prompt> — Background Kratos agent task

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 @font-face {
   font-family: 'Pixl';
-  src: url('/fonts/Pixl-D6OR.ttf') format('truetype'),
-       url('/fonts/Pixl-1awM.otf') format('opentype');
+  src: url('../public/fonts/Pixl-D6OR.ttf') format('truetype'),
+       url('../public/fonts/Pixl-1awM.otf') format('opentype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -141,7 +141,7 @@
 /* Subtle Animated Cyber Grid Background */
 .cyber-grid-bg {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(255, 0, 127, 0.05) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(0, 243, 255, 0.04) 1px, transparent 1px);
 }
@@ -293,58 +293,58 @@
 }
 
 /* Syntax Highlighting Colors - Vice City Cyberpunk Palette */
-.hljs-keyword, .hljs-selector-tag, .hljs-subst, .hljs-doctag { 
-  color: #ff1379 !important; 
-  font-weight: 600; 
+.hljs-keyword, .hljs-selector-tag, .hljs-subst, .hljs-doctag {
+  color: #ff1379 !important;
+  font-weight: 600;
 }
-.hljs-string, .hljs-title.class_, .hljs-section, .hljs-addition { 
-  color: #00ff9d !important; 
+.hljs-string, .hljs-title.class_, .hljs-section, .hljs-addition {
+  color: #00ff9d !important;
 }
-.hljs-number, .hljs-literal, .hljs-symbol { 
-  color: #f59e0b !important; 
+.hljs-number, .hljs-literal, .hljs-symbol {
+  color: #f59e0b !important;
 }
-.hljs-function, .hljs-title.function_, .hljs-title, .hljs-title.class_inherited__ { 
-  color: #00f0ff !important; 
-  font-weight: 600; 
+.hljs-function, .hljs-title.function_, .hljs-title, .hljs-title.class_inherited__ {
+  color: #00f0ff !important;
+  font-weight: 600;
   text-shadow: 0 0 6px rgba(0, 240, 255, 0.35);
 }
-.hljs-type, .hljs-class .hljs-title, .hljs-built_in { 
-  color: #38bdf8 !important; 
-  font-weight: 600; 
+.hljs-type, .hljs-class .hljs-title, .hljs-built_in {
+  color: #38bdf8 !important;
+  font-weight: 600;
 }
-.hljs-params, .hljs-variable { 
-  color: #e2e8f0 !important; 
+.hljs-params, .hljs-variable {
+  color: #e2e8f0 !important;
 }
-.hljs-comment, .hljs-quote, .hljs-deletion { 
-  color: #64748b !important; 
-  font-style: italic; 
+.hljs-comment, .hljs-quote, .hljs-deletion {
+  color: #64748b !important;
+  font-style: italic;
 }
-.hljs-operator, .hljs-meta, .hljs-meta .hljs-keyword { 
-  color: #ff7300 !important; 
+.hljs-operator, .hljs-meta, .hljs-meta .hljs-keyword {
+  color: #ff7300 !important;
 }
-.hljs-attr, .hljs-property, .hljs-variable.language_ { 
-  color: #38bdf8 !important; 
+.hljs-attr, .hljs-property, .hljs-variable.language_ {
+  color: #38bdf8 !important;
 }
-.hljs-tag, .hljs-name { 
-  color: #ff1379 !important; 
+.hljs-tag, .hljs-name {
+  color: #ff1379 !important;
 }
-.hljs-attribute { 
-  color: #ffaa00 !important; 
+.hljs-attribute {
+  color: #ffaa00 !important;
 }
-.hljs-punctuation { 
-  color: #94a3b8 !important; 
+.hljs-punctuation {
+  color: #94a3b8 !important;
 }
-.hljs-template-variable { 
-  color: #e2e8f0 !important; 
+.hljs-template-variable {
+  color: #e2e8f0 !important;
 }
-.hljs-bullet, .hljs-link { 
-  color: #00f0ff !important; 
+.hljs-bullet, .hljs-link {
+  color: #00f0ff !important;
 }
-.hljs-emphasis { 
-  font-style: italic; 
+.hljs-emphasis {
+  font-style: italic;
 }
-.hljs-strong { 
-  font-weight: 700; 
+.hljs-strong {
+  font-weight: 700;
 }
 
 /* Real-time Streaming Cursor */

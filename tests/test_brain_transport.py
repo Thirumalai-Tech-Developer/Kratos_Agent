@@ -82,6 +82,25 @@ def test_empty_stream_retries_same_model_as_json(mock_post):
     assert {call.kwargs["json"]["model"] for call in mock_post.call_args_list} == {"kratos-reasoning-v1"}
 
 
+@pytest.mark.parametrize('stream', [True, False])
+@patch('requests.Session.post')
+def test_repetitive_response_stops_before_callback_and_does_not_retry(mock_post, stream):
+    from kratos_agent.core.model_guard import RepetitiveOutputError
+    response = _response({'choices': [{'message': {'content': 'WebGL 2.0 (' * 80}}]})
+    response.iter_lines.return_value = [
+        'data: ' + json.dumps({'choices': [{'delta': {'content': 'WebGL 2.0 (' * 80}}]}),
+        'data: [DONE]',
+    ]
+    mock_post.return_value = response
+    chunks = []
+    with pytest.raises(RepetitiveOutputError):
+        BrainClient().complete('kratos-reasoning-v1', [{'role': 'user', 'content': 'check'}], stream=stream, on_chunk=chunks.append)
+    assert not chunks
+    assert mock_post.call_count == 1
+    if stream:
+        response.__exit__.assert_called_once()
+
+
 @patch("requests.Session.post")
 def test_structured_tool_calls_are_preserved_by_compatibility_client(mock_post):
     mock_post.return_value = _response({

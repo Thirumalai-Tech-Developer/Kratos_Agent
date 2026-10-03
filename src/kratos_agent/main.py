@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 from functools import wraps
@@ -18,6 +19,8 @@ from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
 from kratos_agent.core.context_pipeline import ContextBudget, ContextBuilder
+from kratos_agent.core.change_review import ChangeReview, checkpoint_turn
+from kratos_agent.core.generation_settings import GenerationSettings
 from kratos_agent.core.event_bus import event_bus
 from kratos_agent.core.event_store import EventStore
 from kratos_agent.core.harness import HarnessKernel
@@ -31,7 +34,7 @@ from kratos_agent.core.harness.plugins import (
 from kratos_agent.core.instruction_engine import InstructionEngine, InstructionModule
 from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.memory import memory
-from kratos_agent.core.prompt_builder import CORE_PROMPT_V2
+from kratos_agent.core.prompt_builder import CORE_PROMPT_V2, SPEECH_OUTPUT_RULE
 from kratos_agent.core.prompt_library import prompt_library
 from kratos_agent.core.model_adapter import KratosModelAdapter
 from kratos_agent.core.risk_policy import assess_tool_risk
@@ -88,7 +91,11 @@ def _serialize_turn(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
         with self._turn_lock:
-            return method(self, *args, **kwargs)
+            from kratos_agent.sdk.client import gateway_scope
+            session = getattr(self.memory, "active_session", None)
+            with gateway_scope(session_id=session.session_id if session else "",
+                               cancel=self._cancellation_flag):
+                return method(self, *args, **kwargs)
     return wrapped
 
 
@@ -186,10 +193,15 @@ Use `read_memory(memory_type=...)` to recall relevant past experiences, facts, a
 
 class KratosRuntime:
     """Composes replaceable instructions, context, tools, provider, loop and session trace."""
-    def __init__(self, model_name: str = DEFAULT_MODEL, workspace: Path | None = None) -> None:
+    def __init__(self, model_name: str | None = None, workspace: Path | None = None) -> None:
         self.workspace = (workspace or Path.cwd()).resolve()
-        self.model_name = model_name
+        from kratos_agent.core.model_selection import read_selected_model
+        self.model_name = model_name or read_selected_model(self.workspace) or get_default_model()
+        if self.model_name:
+            os.environ["KRATOS_MODEL"] = self.model_name
         self._turn_lock = threading.RLock()
+        self.change_review = ChangeReview(self.workspace)
+        self.generation_settings = GenerationSettings(self.workspace)
         self.skill_manager = skill_manager
         self.skill_manager.set_workspace(self.workspace)
         self.memory = memory
@@ -215,6 +227,8 @@ class KratosRuntime:
                 logger.warning("MCP server %s unavailable (%s); Kratos will continue startup.", server_name, status.get("error"))
         self.tools = self.tools_registry.specs()  # Existing CLI compatibility.
         self.brain = BrainClient()
+        self.brain.generation_model = self.model_name
+        self.brain.generation_options = self.generation_settings.status(self.model_name, self.model_metadata)['options']
         self.model = KratosModelAdapter(self.model_name, self.brain)
         self.agent = None  # The explicit AgentLoop replaces the opaque LangChain graph.
         self._history = self._restore_history()
@@ -224,6 +238,7 @@ class KratosRuntime:
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.loop.on_speech = self._speak_marked_text
+        self.loop.inspection_limit = self.generation_settings.status(self.model_name, self.model_metadata)['inspection_limit']
         self.subagents = SubagentManager(self._run_isolated)
         from kratos_agent.utils.tools import (
             set_parallel_subagent_runner,
@@ -282,6 +297,10 @@ class KratosRuntime:
         for plugin in [tools_plugin, memory_plugin, audit_plugin, creator_plugin, headroom_plugin]:
             self.harness.register_plugin(plugin, enable_immediately=True)
 
+        if (self.workspace / '.kratos/plugins/whatsapp-official/install.json').is_file():
+            from kratos_agent.core.harness.plugins.whatsapp_plugin import WhatsAppPlugin
+            self.harness.register_plugin(WhatsAppPlugin(self.workspace), enable_immediately=True)
+
         self.harness.apply_preset("standard")
 
     def _register_instruction_modules(self) -> None:
@@ -324,17 +343,16 @@ class KratosRuntime:
                 return f"COMPUTER CAPABILITIES: {json.dumps(cmap)}"
             except Exception:
                 return "COMPUTER CAPABILITIES: Not detected."
-                
+
         self.instructions.register(InstructionModule("computer-capabilities", "system", _get_computer_capabilities, 18))
-        
+
         self.instructions.register(InstructionModule("developer-workflow", "developer", lambda: (
-            "AUTONOMOUS EXECUTION PROTOCOL:\n"
-            "1. Focus directly on the user's explicit objective.\n"
-            "2. For multi-step missions, manage your tasks dynamically using `todo_write`.\n"
-            "3. Read the relevant installed skill before applying a specialist workflow.\n"
-            "4. Work through the plan, inspect the result, and use concrete evidence before claiming completion.\n"
-            "5. Run automated test suites only when the user asks for testing or verification; never claim an unrun check passed.\n"
-            "6. Directly execute required tools without conversational delay."
+            "Focus on the user's objective. For multi-step work, manage outcome-oriented tasks with todo_write. "
+            "Read a relevant installed skill before applying a specialist workflow. Execute required tools, "
+            "inspect their results, and require concrete evidence before claiming completion. "
+            "Run relevant existing checks when needed to verify a change or meet the user's requirements; "
+            "never claim an unrun check passed. A brief spoken acknowledgement may accompany the first tool call "
+            "for lengthy work. It must not replace execution. Follow the shared speech rule for the final answer."
         ), 20))
         self.instructions.register(InstructionModule("workspace", "project", lambda: f"Workspace: {self.workspace}", 30))
         def _get_skill_instructions() -> str:
@@ -410,7 +428,7 @@ class KratosRuntime:
             child_instructions = InstructionEngine()
             for section in self.instructions.build():
                 child_instructions.register(InstructionModule(section["name"], section["layer"], lambda content=section["content"]: content))
-            
+
             subagent_prompt = None
             try:
                 p_text = prompt_library.get_subagent_prompt(role)
@@ -427,7 +445,7 @@ class KratosRuntime:
                 except Exception as e:
                     logger.error("Failed to append subagent event: %s", e)
 
-            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, _subagent_emit, self.workspace)
+            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, _subagent_emit, self.workspace, self._cancellation_flag)
             result, _ = child_loop.run(history, self._allow_tool)
             return result
         finally:
@@ -450,22 +468,17 @@ class KratosRuntime:
         self.loop.tools = self.tools_registry
 
     def set_model(self, model_name: str) -> None:
-        configured_model = get_default_model()
-        if not configured_model:
-            raise ValueError("Set KRATOS_MODEL to the exact model ID served by the Kratos gateway.")
-        if model_name != configured_model:
-            raise ValueError(f"Model changes are disabled; Kratos is locked to '{configured_model}'.")
-        self.model_name = model_name
-        self.brain = BrainClient()
-        self.model = KratosModelAdapter(model_name, self.brain)
-        self.loop.model = self.model
-        if self.memory.active_session:
-            self.memory.active_session.model = model_name
-            self.memory.save()
+        from kratos_agent.core.model_selection import select_runtime_model
+        select_runtime_model(self, model_name)
 
     def apply_model_metadata(self, metadata: dict[str, Any] | None) -> None:
         """Apply advertised gateway context and output limits to the runtime."""
         self.model_metadata = metadata
+        if hasattr(self, 'generation_settings') and hasattr(self, 'brain'):
+            self.brain.generation_model = self.model_name
+            self.brain.generation_options = self.generation_settings.status(self.model_name, metadata)['options']
+            if hasattr(self, 'loop'):
+                self.loop.inspection_limit = self.generation_settings.status(self.model_name, metadata)['inspection_limit']
         if not metadata or not metadata.get("metadata_available"):
             return
 
@@ -604,6 +617,7 @@ class KratosRuntime:
         system_instruction = (
             "You are Kratos, an elite autonomous AI assistant operating with full capabilities.\n"
             "You answer questions directly, discuss architecture, analyze code, write snippets, and assist the user in Kratos's signature sharp persona.\n"
+            + SPEECH_OUTPUT_RULE
         )
 
         start_evt = RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": False, "model": normal_model})
@@ -657,6 +671,7 @@ class KratosRuntime:
         return result
 
     @_serialize_turn
+    @checkpoint_turn
     def run_agent(
         self,
         query: str,

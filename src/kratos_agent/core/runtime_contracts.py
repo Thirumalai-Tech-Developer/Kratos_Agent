@@ -85,6 +85,11 @@ class TerminalLatch:
         """Start a fresh task namespace when a new execution plan replaces the old one."""
         self._set.clear()
 
+    def begin_retry(self, task_id: str) -> None:
+        """Open a new attempt after explicitly resuming a failed execution."""
+        if self._set.get(task_id) == "FAILED":
+            self._set.pop(task_id)
+
     def try_set(self, task_id: str, status: str) -> bool:
         if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
             return True  # non-terminal, always allowed

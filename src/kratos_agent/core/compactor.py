@@ -15,6 +15,7 @@ def _try_headroom_compress(text: str) -> str:
     try:
         from kratos_agent.core.harness.plugins.headroom_plugin import (
             is_headroom_available,
+            prepare_headroom_tokenizer,
         )
         if is_headroom_available():
             from kratos_agent.brain.config import get_default_model
@@ -22,8 +23,9 @@ def _try_headroom_compress(text: str) -> str:
             model = get_default_model()
             if not model:
                 return text
+            prepare_headroom_tokenizer(model)
             msgs = [{"role": "user", "content": text}]
-            result = compress(msgs, model=model)
+            result = compress(msgs, model=model, kompress_model="disabled", compress_system_messages=False)
             compressed_msgs = getattr(result, "messages", msgs)
             if compressed_msgs:
                 return compressed_msgs[0].get("content", text)

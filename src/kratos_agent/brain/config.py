@@ -25,10 +25,15 @@ _cached_models: list[str] = []
 _cached_model_details: dict[str, dict[str, Any]] = {}
 _cache_timestamp: float = 0.0
 _catalog_last_attempt: float = 0.0
+_catalog_endpoint: str = ""
 _CACHE_TTL_SECONDS: float = 30.0
 _CATALOG_RETRY_DELAY_SECONDS: float = 5.0
 
 PUBLIC_MODELS: list[str] = []
+
+
+class ModelCatalogUnavailable(RuntimeError):
+    """The gateway could not confirm the models available for explicit selection."""
 
 
 def get_api_key(explicit_key: str | None = None) -> str:
@@ -369,15 +374,16 @@ def get_model_catalog(
     endpoint: str | None = None,
     timeout: float = 3.0,
     refresh: bool = False,
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
     """Fetch gateway models with normalized input/output modality flags.
 
-    The catalog is informational. Runtime requests still use only KRATOS_MODEL.
+    Runtime requests use only the explicitly selected KRATOS_MODEL.
     A missing modality declaration is reported as ``Unknown`` instead of being
     inferred from a model ID. If the endpoint is unavailable, the configured
     model is still returned with its text-chat baseline and unknown limits.
     """
-    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_last_attempt
+    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_last_attempt, _catalog_endpoint
 
     target_endpoint = endpoint or get_model_endpoint_url()
     now = time.time()
@@ -385,6 +391,7 @@ def get_model_catalog(
         not refresh
         and endpoint is None
         and _cache_timestamp
+        and (not strict or _catalog_endpoint == target_endpoint)
         and (now - _cache_timestamp) < _CACHE_TTL_SECONDS
     ):
         details = _cached_model_details
@@ -393,6 +400,7 @@ def get_model_catalog(
         and endpoint is None
         and _catalog_last_attempt
         and (now - _catalog_last_attempt) < _CATALOG_RETRY_DELAY_SECONDS
+        and not strict
     ):
         details = _cached_model_details
     else:
@@ -408,18 +416,37 @@ def get_model_catalog(
                 configured = get_default_model()
                 _cached_models = [configured] if configured and configured in model_ids else []
                 _cache_timestamp = now
+                _catalog_endpoint = target_endpoint
                 details = fetched_details
             else:
+                if strict:
+                    raise ModelCatalogUnavailable("The gateway model catalog is unavailable. Check provider connections and try again.")
                 details = _cached_model_details if endpoint is None else {}
+        except ModelCatalogUnavailable:
+            raise
+        except requests.Timeout as exc:
+            if strict:
+                raise ModelCatalogUnavailable("The gateway model catalog timed out. Try refreshing the model list.") from exc
+            details = _cached_model_details if endpoint is None else {}
         except Exception as exc:
+            if strict:
+                raise ModelCatalogUnavailable("Cannot read the gateway model catalog. Check that OmniRoute is running.") from exc
             logger.debug("Could not fetch Kratos model catalog: %s", exc)
             details = _cached_model_details if endpoint is None else {}
+        finally:
+            session.close()
 
     catalog = []
     configured_model = get_default_model()
     for model_id, metadata in details.items():
         entry = {
             "id": model_id,
+            "name": metadata.get("name") or metadata.get("display_name") or model_id,
+            "provider": metadata.get("provider") or metadata.get("owned_by") or model_id.partition("/")[0],
+            **({"available": metadata["available"]} if type(metadata.get("available")) is bool else {}),
+            **({"disabled_reason": metadata["disabled_reason"]} if isinstance(metadata.get("disabled_reason"), str) else {}),
+            "supported_parameters": metadata.get('supported_parameters', []),
+            "supports_temperature": metadata.get('supports_temperature'),
             **_model_modalities(metadata),
             **_model_limits(metadata),
             "metadata_available": True,
@@ -431,6 +458,9 @@ def get_model_catalog(
     if configured_model and not any(item["id"] == configured_model for item in catalog):
         fallback = {
             "id": configured_model,
+            "name": configured_model,
+            "provider": configured_model.partition("/")[0],
+            **({"available": False, "disabled_reason": "The gateway has not advertised this model."} if strict else {}),
             "input_modalities": ["text"],
             "output_modalities": ["text"],
             "supports_text_input": True,
@@ -479,8 +509,8 @@ def get_model(
         return []
 
     # Use cache if fresh and not forcing refresh (and using default endpoint)
-    if not refresh and endpoint is None and _cached_models and (now - _cache_timestamp) < _CACHE_TTL_SECONDS:
-        return list(_cached_models)
+    if not refresh and endpoint is None and _cached_model_details and (now - _cache_timestamp) < _CACHE_TTL_SECONDS:
+        return [configured_model] if configured_model in _cached_model_details else []
 
     session = requests.Session()
     session.trust_env = False
@@ -543,6 +573,10 @@ class BrainError(Exception):
     """Base error for Brain API calls."""
 
 
+class BrainToolCallError(BrainError):
+    """A rejected tool response may be corrected by the model before execution."""
+
+
 class BrainConnectionError(BrainError):
     """Raised when the Brain endpoint is unreachable."""
 
@@ -586,4 +620,4 @@ def get_max_parallel_workers() -> int:
     except ValueError:
         return 8
 
-
+PUBLIC_MODELS = get_available_models()

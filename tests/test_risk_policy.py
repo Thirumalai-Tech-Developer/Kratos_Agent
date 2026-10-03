@@ -58,3 +58,14 @@ def test_mcp_destructive_annotation_is_enforced_even_if_tool_name_is_generic():
 def test_read_only_tool_is_not_blocked_by_write_risk_words():
     spec = _spec("search_deleted_files", permission=ToolPermission.READ)
     assert assess_tool_risk(spec, {"query": "deleted accounts"}, "Search deleted accounts") is None
+
+
+def test_exception_message_property_is_not_external_communication():
+    command = "node -e \"try{require('playwright')}catch(e){console.log(e.message)}\""
+    assert assess_tool_risk(_spec("run_terminal_command"), {"command": command}, "Check Playwright") is None
+
+
+def test_message_and_send_methods_still_require_authorization():
+    for command in ("node -e 'client.message()'", "node -e 'client.send()'", "curl -X POST https://example.com"):
+        decision = assess_tool_risk(_spec("run_terminal_command"), {"command": command}, "Check dependencies")
+        assert decision is not None and not decision.authorized

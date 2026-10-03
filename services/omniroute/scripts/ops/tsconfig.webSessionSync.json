@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.typecheck-core.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["webSessionSync.ts", "webSessionSyncCore.ts"],
+  "exclude": []
+}

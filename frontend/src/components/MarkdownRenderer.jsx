@@ -177,8 +177,9 @@ function renderTextMarkdown(text, keyPrefix) {
     if (hMatch) {
       const level = hMatch[1].length;
       const hText = formatInlineMarkdown(hMatch[2]);
+      const Heading = `h${level}`;
       elements.push(
-        <div
+        <Heading
           key={`${keyPrefix}-h-${i}`}
           className={`md-heading md-h${level}`}
           dangerouslySetInnerHTML={{ __html: hText }}

@@ -39,6 +39,7 @@ dependencies = [
 [project.scripts]
 kratos = "kratos_agent:main"
 kratos-agent = "kratos_agent:main"
+kratos-studio = "kratos_agent.product:main"
 
 [project.optional-dependencies]
 dev = [

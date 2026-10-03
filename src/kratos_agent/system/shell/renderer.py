@@ -55,6 +55,15 @@ def render_command_argv(command: str, shell: ShellInfo | None = None) -> list[st
     sh = shell or get_current_shell()
 
     if sh.name in ("powershell", "pwsh"):
+        # Execute an explicitly wrapped PowerShell payload directly. Wrapping it
+        # in another shell expands $variables before the child can read them.
+        nested_ps = re.fullmatch(
+            r'''\s*(powershell|pwsh)(?:\.exe)?\s+(?:-NoProfile\s+)?-Command\s+(["'])(.*)\2\s*''',
+            command, re.IGNORECASE | re.DOTALL,
+        )
+        if nested_ps:
+            encoder = pwsh_encoded if nested_ps.group(1).lower() == "pwsh" else powershell_encoded
+            return encoder(nested_ps.group(3))
         # Do not let PowerShell parse an explicit nested cmd.exe command.
         nested_cmd = re.match(r"^\s*cmd(?:\.exe)?\s+(?:/d\s+)?/c\s+(.+)$", command, re.IGNORECASE | re.DOTALL)
         if nested_cmd:

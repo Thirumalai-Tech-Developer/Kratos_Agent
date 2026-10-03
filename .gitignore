@@ -4,13 +4,13 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+/build/
 /dist/
 frontend/dist/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -95,3 +95,5 @@ kratos_banner.jpg
 Thumbs.db
 desktop.ini
 scratch/
+dragonballz
+dragonballz-site

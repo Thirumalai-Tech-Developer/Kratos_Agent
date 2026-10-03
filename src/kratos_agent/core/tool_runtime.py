@@ -331,6 +331,13 @@ class ToolRegistry:
         # Normalize common parameter aliases across diverse LLM outputs
         schema = registered.spec.parameters or {}
         props = schema.get("properties", {})
+        # Some models repeat the tool-call envelope inside the arguments object.
+        # Preserve tools whose schema actually declares an arguments parameter.
+        if "arguments" not in props and set(call.arguments) == {"arguments"} and isinstance(call.arguments["arguments"], dict):
+            call.arguments = dict(call.arguments["arguments"])
+        # Provider bookkeeping is not a shell/tool parameter.
+        if "_nonce" not in props:
+            call.arguments.pop("_nonce", None)
         if "file_path" in props and "file_path" not in call.arguments:
             for alt in ("path", "target_file", "filepath", "filename", "file", "dest", "destination"):
                 if alt in call.arguments:
@@ -486,6 +493,13 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
             continue
         permission = _permission_for(name)
         params = item.get("parameters") or _signature_schema(handler)
+        if name == "run_terminal_command":
+            params = dict(params)
+            params["properties"] = dict(params.get("properties", {}))
+            params["properties"]["working_directory"] = {"type": "string", "description": "Process working directory; use the temporary directory for scratch scripts."}
+            params["properties"]["argv"] = {"type": "array", "items": {"type": "string"}, "description": "Direct process arguments instead of a shell command."}
+            params["required"] = []
+            params["additionalProperties"] = False
         registry.register(
             ToolSpec(name=name, description=item.get("description", ""), parameters=params, permission=permission),
             handler,

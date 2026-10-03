@@ -170,6 +170,7 @@ class TaskItem:
     inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     retry_count: int = 0
+    retry_required_tool: str | None = None
     max_retries: int = 3
     verification_state: str = "pending"  # "pending", "verified", "failed"
     cancellation_reason: str | None = None
@@ -272,6 +273,7 @@ class TaskItem:
             "inputs": dict(self.inputs),
             "outputs": dict(self.outputs),
             "retry_count": self.retry_count,
+            "retry_required_tool": self.retry_required_tool,
             "max_retries": self.max_retries,
             "verification_state": self.verification_state,
             "cancellation_reason": self.cancellation_reason,
@@ -305,6 +307,7 @@ class TaskItem:
             inputs=dict(data.get("inputs", {})),
             outputs=dict(data.get("outputs", {})),
             retry_count=int(data.get("retry_count", 0)),
+            retry_required_tool=data.get("retry_required_tool"),
             max_retries=int(data.get("max_retries", 3)),
             verification_state=str(data.get("verification_state", "pending")),
             cancellation_reason=data.get("cancellation_reason"),

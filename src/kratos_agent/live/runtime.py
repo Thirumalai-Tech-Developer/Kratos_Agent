@@ -243,13 +243,26 @@ class LiveRuntime:
         """Signals the background LiveRuntime thread to stop."""
         loop = self._loop
         thread = self._thread
-        if loop and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self.stop(), loop)
+        if loop and not loop.is_closed() and loop.is_running():
+            coroutine = self.stop()
             try:
-                future.result(timeout=5.0)
-            except Exception as exc:
-                logger.debug("Operation error suppressed: %s", exc)
-            loop.call_soon_threadsafe(loop.stop)
+                future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+            except RuntimeError:
+                coroutine.close()
+                if not loop.is_closed():
+                    raise
+            else:
+                try:
+                    future.result(timeout=5.0)
+                except Exception as exc:
+                    logger.debug("Operation error suppressed: %s", exc)
+            try:
+                loop.call_soon_threadsafe(loop.stop)
+            except RuntimeError:
+                # The background worker can finish and close its loop while
+                # the foreground is waiting for shutdown. Exit is idempotent.
+                if not loop.is_closed():
+                    raise
         if thread and thread is not threading.current_thread():
             thread.join(timeout=5.0)
             if not thread.is_alive():

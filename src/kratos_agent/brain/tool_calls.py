@@ -5,7 +5,26 @@ import logging
 import re
 from typing import Any
 
+from kratos_agent.brain.config import BrainToolCallError
+
 logger = logging.getLogger(__name__)
+
+
+def has_unparsed_tool_marker(text: str) -> bool:
+    """Recognize executable protocol fragments left after parsing complete calls."""
+    return bool(re.search(
+        r'<\s*/?\s*(?:[|\uff5c]\s*){1,2}DSML\b|'
+        r'<\s*(?:tool|tool_call)\s*>|call:[A-Za-z0-9_.-]+\s*\{|'
+        r'<[|\uff5c]tool\s*call\s*begin[|\uff5c]>|'
+        r'\{\s*"(?:name|function|tool)"\s*:\s*"[A-Za-z0-9_.-]+"',
+        text, re.IGNORECASE))
+
+
+def _tool_argument_payload(data: dict[str, Any], keys: tuple[str, ...], *, strict: bool) -> Any:
+    """Preserve explicitly supplied invalid arguments for strict validation."""
+    if strict:
+        return next((data[key] for key in keys if key in data), {})
+    return next((data[key] for key in keys if data.get(key)), {})
 
 
 def _clean_command_payload(cmd_str: str) -> str:
@@ -74,7 +93,7 @@ def _fallback_extract_tool_call(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_json_object(text: str, start_idx: int) -> tuple[dict[str, Any] | None, int, int]:
+def _extract_json_object(text: str, start_idx: int, strict: bool = False) -> tuple[dict[str, Any] | None, int, int]:
     """Extracts a JSON object starting from or after start_idx by balancing braces respecting string quotes."""
     idx = text.find("{", start_idx)
     if idx == -1:
@@ -107,6 +126,8 @@ def _extract_json_object(text: str, start_idx: int) -> tuple[dict[str, Any] | No
                         parsed = json.loads(raw_json)
                         return parsed, start_pos, i + 1
                     except Exception:
+                        if strict:
+                            return None, -1, -1
                         try:
                             # Normalize Windows backslashes in paths and unescaped backslashes
                             fixed_json = re.sub(r'([a-zA-Z]:[/\\][^"\n\r]*)', lambda m: m.group(0).replace('\\', '/'), raw_json)
@@ -128,7 +149,7 @@ def _extract_json_object(text: str, start_idx: int) -> tuple[dict[str, Any] | No
     return None, -1, -1
 
 
-def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
+def extract_tool_calls_from_text(text: str, strict: bool = False) -> tuple[str, list[dict[str, Any]]]:
     """Extract tool calls from Harmony, XML, Markdown JSON, and call:name{json} text."""
     tool_calls: list[dict[str, Any]] = []
     removed_spans: list[tuple[int, int]] = []
@@ -165,20 +186,23 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
             continue
         try:
             args = json.loads(m.group(2))
+            if strict and not isinstance(args, dict):
+                continue
             if name in VALID_TOOLS or name.isidentifier():
                 tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
                 removed_spans.append((m.start(), m.end()))
         except Exception as e:
             logger.debug("Failed to parse tool call args: %s", e)
 
-    # 1b. DeepSeek DSML <｜｜DSML｜｜ invoke name="...">...<｜｜DSML｜｜ parameter name="...">...</｜｜DSML｜｜ parameter> format:
+    # DSML accepts MCP names containing hyphens and ASCII/fullwidth separators.
+    marker = r'(?:[|｜]\s*){1,2}DSML\s*(?:[|｜]\s*){1,2}'
     dsml_invoke_pattern = re.compile(
-        r'<[｜|]{1,2}DSML[｜|]{1,2}\s*invoke\s+name=["\']?([a-zA-Z0-9_]+)["\']?\s*>([\s\S]*?)(?:</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>|(?=<[｜|]{1,2}DSML[｜|]{1,2}\s*invoke)|$)',
-        re.IGNORECASE
+        rf'<\s*{marker}invoke\s+name=["\']([a-zA-Z0-9_.-]+)["\']\s*>'
+        rf'([\s\S]*?)</\s*{marker}invoke\s*>', re.IGNORECASE,
     )
     dsml_param_pattern = re.compile(
-        r'<[｜|]{1,2}DSML[｜|]{1,2}\s*parameter\s+name=["\']?([a-zA-Z0-9_]+)["\']?[^>]*>([\s\S]*?)(?:</[｜|]{1,2}DSML[｜|]{1,2}\s*parameter>|(?=<[｜|]{1,2}DSML[｜|]{1,2}\s*parameter)|(?=</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>)|$)',
-        re.IGNORECASE
+        rf'<\s*{marker}parameter\s+name=["\']([a-zA-Z0-9_]+)["\']([^>]*)>'
+        rf'([\s\S]*?)</\s*{marker}parameter\s*>', re.IGNORECASE,
     )
     for m in dsml_invoke_pattern.finditer(text):
         if any(start <= m.start() < end for start, end in removed_spans):
@@ -186,45 +210,43 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
         tool_name = m.group(1)
         if tool_name.lower() in RESERVED_TOOL_NAMES or len(tool_name) < 2:
             continue
-        params_body = m.group(2)
+        params_body = m.group(2).strip()
         args: dict[str, Any] = {}
-        for p in dsml_param_pattern.finditer(params_body):
-            p_name = p.group(1)
-            p_val = p.group(2).strip()
-            # If value is valid JSON, parse it (e.g. objects, arrays, numbers)
-            if (p_val.startswith("{") and p_val.endswith("}")) or (p_val.startswith("[") and p_val.endswith("]")):
+        valid = True
+        parameters = list(dsml_param_pattern.finditer(params_body))
+        if strict and parameters:
+            residual = dsml_param_pattern.sub('', params_body).strip()
+            if residual:
+                valid = False
+        for parameter in parameters:
+            name, attrs, value = parameter.groups()
+            value = value.strip()
+            string_flag = re.search(r'string\s*=\s*["\'](true|false)["\']', attrs, re.IGNORECASE)
+            if string_flag and string_flag.group(1).lower() == 'true':
+                args[name] = value
+            elif string_flag or value.startswith(('{', '[')):
                 try:
-                    args[p_name] = json.loads(p_val)
-                    continue
-                except Exception as e:
-                    logger.debug("Failed to parse DSML parameter JSON: %s", e)
-            args[p_name] = p_val
+                    args[name] = json.loads(value)
+                except (ValueError, TypeError):
+                    valid = False
+                    break
+            else:
+                args[name] = value
+        if not parameters and params_body:
+            try:
+                args = json.loads(params_body)
+                valid = isinstance(args, dict)
+            except (ValueError, TypeError):
+                valid = False
+        if not valid:
+            continue
+        tool_calls.append({'name': tool_name, 'args': args})
+        removed_spans.append((m.start(), m.end()))
 
-        # Fallback: check if params body contains raw JSON object
-        if not args:
-            json_m = re.search(r'\{[\s\S]*?\}', params_body)
-            if json_m:
-                try:
-                    parsed = json.loads(json_m.group(0))
-                    if isinstance(parsed, dict):
-                        args = parsed
-                except Exception as e:
-                    logger.debug("Failed to parse DSML raw JSON fallback: %s", e)
-
-        if tool_name in VALID_TOOLS or tool_name.isidentifier():
-            tool_calls.append({"name": tool_name, "args": args})
-            start_span = m.start()
-            end_span = m.end()
-            close_m = re.search(r'</[｜|]{1,2}DSML[｜|]{1,2}\s*invoke>', text[m.start():])
-            if close_m:
-                end_span = m.start() + close_m.end()
-            pre_m = re.search(r'<[｜|]{1,2}DSML[｜|]{1,2}\s*calls>\s*$', text[:start_span], re.IGNORECASE)
-            if pre_m:
-                start_span = pre_m.start()
-            post_m = re.match(r'\s*</[｜|]{1,2}DSML[｜|]{1,2}\s*calls>', text[end_span:], re.IGNORECASE)
-            if post_m:
-                end_span += post_m.end()
-            removed_spans.append((start_span, end_span))
+    # Strip only DSML wrapper tags around successfully parsed invocations.
+    if tool_calls:
+        for wrapper in re.finditer(rf'</?\s*{marker}calls\s*>', text, re.IGNORECASE):
+            removed_spans.append((wrapper.start(), wrapper.end()))
 
     # 2. DeepSeek DSML / Standard <tool> format:
     # <tool>{"name": "...", "arguments": {...}}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>
@@ -237,15 +259,18 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
             break
         start_idx = m.start()
         brace_idx = m.start(1)
-        parsed_obj, json_start, json_end = _extract_json_object(text, brace_idx)
+        parsed_obj, json_start, json_end = _extract_json_object(text, brace_idx, strict=strict)
         if parsed_obj and isinstance(parsed_obj, dict):
             name = parsed_obj.get("name") or parsed_obj.get("function")
-            args = parsed_obj.get("arguments") or parsed_obj.get("parameters") or {}
+            args = _tool_argument_payload(parsed_obj, ("arguments", "parameters"), strict=strict)
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
                 except Exception as e:
                     logger.debug("Failed parsing tool arguments JSON: %s", e)
+            if strict and (not isinstance(args, dict) or not re.match(r'\s*</tool>', text[json_end:], re.IGNORECASE)):
+                pos = m.end()
+                continue
             if name and (name in VALID_TOOLS or name.isidentifier()) and name not in RESERVED_TOOL_NAMES:
                 tool_calls.append({"name": name, "args": args if isinstance(args, dict) else {}})
                 end_span = json_end
@@ -269,7 +294,7 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
         try:
             data = json.loads(m.group(1))
             name = data.get("name") or data.get("function") or data.get("tool")
-            args = data.get("arguments") or data.get("parameters") or data.get("args") or {}
+            args = _tool_argument_payload(data, ("arguments", "parameters", "args"), strict=strict)
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
@@ -291,10 +316,10 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
         if any(start <= m.start() < end for start, end in removed_spans):
             pos = m.end()
             continue
-        parsed_obj, json_start, end_span = _extract_json_object(text, m.start())
+        parsed_obj, json_start, end_span = _extract_json_object(text, m.start(), strict=strict)
         if parsed_obj and isinstance(parsed_obj, dict):
             name = parsed_obj.get("name") or parsed_obj.get("function") or parsed_obj.get("tool")
-            args = parsed_obj.get("arguments") or parsed_obj.get("parameters") or parsed_obj.get("args") or {}
+            args = _tool_argument_payload(parsed_obj, ("arguments", "parameters", "args"), strict=strict)
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
@@ -336,7 +361,7 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
             if inner.startswith("{"):
                 data = json.loads(inner)
                 name = data.get("name") or data.get("function")
-                args = data.get("arguments") or data.get("parameters") or {}
+                args = _tool_argument_payload(data, ("arguments", "parameters"), strict=strict)
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
@@ -387,7 +412,7 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
         if is_valid_tool:
             call_start = m.start()
             brace_start = m.end() - 1
-            parsed_args, json_start, json_end = _extract_json_object(text, brace_start)
+            parsed_args, json_start, json_end = _extract_json_object(text, brace_start, strict=strict)
             if parsed_args is not None and json_end > json_start:
                 tool_calls.append({"name": fn_name, "args": parsed_args})
                 removed_spans.append((call_start, json_end))
@@ -414,6 +439,8 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
             last_end = end
         clean_parts.append(text[last_end:])
         clean_text = "".join(clean_parts).strip()
+        if strict and has_unparsed_tool_marker(clean_text):
+            raise BrainToolCallError("The provider returned an incomplete or invalid tool call; the response was discarded before execution.")
         # Clean any remaining special tokens or commentary headers
         clean_text = re.sub(r'<\|[^|]*\|>', '', clean_text)
         clean_text = re.sub(r'<[｜|]{1,2}[^>]*[｜|]{1,2}>', '', clean_text)
@@ -422,6 +449,8 @@ def extract_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
         clean_text = re.sub(r'^(?:assistant\s*)?(?:commentary)?\s*', '', clean_text).strip()
 
     # Deduplicate identical tool calls
+    if strict and has_unparsed_tool_marker(clean_text):
+        raise BrainToolCallError("The provider returned an incomplete or invalid tool call; the response was discarded before execution.")
     unique_tool_calls = []
     seen = set()
     for tc in tool_calls:

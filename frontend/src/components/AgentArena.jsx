@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Send, Trash2, Zap, Sparkles, Terminal, User, ChevronDown, Eye, Wrench } from 'lucide-react';
+import { Send, Trash2, Zap, Sparkles, Terminal, User, ChevronDown, Eye, Wrench, Square, LoaderCircle } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
+import ToolActivity from './ToolActivity';
 
 function ReasoningAccordion({ reasoning, isThinking, duration }) {
   const [manuallyOpen, setManuallyOpen] = useState(false);
@@ -20,8 +21,8 @@ function ReasoningAccordion({ reasoning, isThinking, duration }) {
             🧠
           </span>
           <span className="tracking-wider uppercase font-pixl text-[11px]">
-            {isThinking 
-              ? 'Thinking process...' 
+            {isThinking
+              ? 'Thinking process...'
               : (duration ? `Thought for ${duration}s` : 'Reasoning Process')}
           </span>
           {isThinking && (
@@ -59,12 +60,17 @@ export default function AgentArena({
   inputPrompt,
   setInputPrompt,
   onSend,
+  onStop,
+  isStopping,
+  executionError,
   onClear,
   isExecuting,
   currentStep,
   activeTool,
   isAgentMode,
   modelName,
+  modelModality,
+  onOpenModelPicker,
   sessionId,
   onVisionMode,
   visionMode = 'none'
@@ -84,7 +90,7 @@ export default function AgentArena({
   };
 
   useEffect(() => {
-    if (messagesContainerRef.current) {
+    if (messages.length > 0 && messagesContainerRef.current) {
       messagesContainerRef.current.scrollTo({
         top: messagesContainerRef.current.scrollHeight,
         behavior: 'smooth'
@@ -92,8 +98,15 @@ export default function AgentArena({
     }
   }, [messages, currentStep]);
 
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+  }, [inputPrompt]);
+
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (inputPrompt.trim() && !isExecuting) {
         onSend();
@@ -102,10 +115,10 @@ export default function AgentArena({
   };
 
   return (
-    <div className="flex flex-col h-full w-full min-w-0 min-h-0 bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
-      
+    <div className="chat-panel flex flex-col h-full w-full min-w-0 min-h-0 bg-[#080411]/90 rounded-2xl border border-pink-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.6)]">
+
       {/* Arena Stream Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[#0d071a] border-b border-pink-500/15">
+      <div className="chat-panel-header flex-shrink-0 flex items-center justify-between px-4 py-3 bg-[#0d071a] border-b border-pink-500/15">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500/80"></span>
@@ -114,7 +127,7 @@ export default function AgentArena({
           </div>
           <div className="h-3 w-px bg-white/10 mx-1"></div>
           <span className="font-code text-xs font-semibold tracking-wider text-slate-300 truncate">
-            AGENT STREAM // <span className="text-pink-400 font-bold">{sessionId ? `SESSION: ${sessionId.slice(0, 16)}...` : 'READY'}</span>
+            Conversation · <span className="text-pink-400 font-bold">{sessionId ? `Session ${sessionId.slice(-8)}` : 'READY'}</span>
           </span>
         </div>
 
@@ -125,88 +138,47 @@ export default function AgentArena({
               {typeof activeTool === 'string' ? activeTool : activeTool.name || activeTool.tool || 'TOOL RUNNING'}
             </span>
           )}
-          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-code bg-black/50 border border-slate-700/80 text-cyan-300">
-            Model: <strong className="text-white font-pixl">{modelName || 'Auto'}</strong>
-          </span>
+          <button type="button" className="chat-model-picker" onClick={onOpenModelPicker} disabled={isExecuting}
+            aria-label={`Change model. Current model: ${modelName || 'Auto'}`} aria-haspopup="dialog"
+            title={isExecuting ? 'Finish or stop the current task to change models' : 'Change model'}>
+            <span>Model:</span><strong>{modelName || 'Auto'}</strong><span className="model-modality-label">{modelModality || 'Capabilities not reported'}</span><ChevronDown size={14} />
+          </button>
           <span className={`px-2 py-0.5 rounded text-[10px] font-pixl font-bold tracking-wider ${
-            isExecuting 
-              ? 'bg-pink-500/20 border border-pink-500/50 text-pink-300 animate-pulse' 
+            isExecuting
+              ? 'bg-pink-500/20 border border-pink-500/50 text-pink-300 animate-pulse'
               : 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
           }`}>
-            {isExecuting ? 'PROCESSING' : 'READY'}
+            {isStopping ? 'STOPPING' : (isExecuting ? 'PROCESSING' : 'READY')}
           </span>
         </div>
       </div>
 
       {/* Messages Stream */}
-      <div 
+      <div
         ref={messagesContainerRef}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0"
       >
         {messages.length === 0 ? (
-          /* Welcome Card with Generated Banner */
-          <div className="relative rounded-2xl overflow-hidden border border-pink-500/30 glass-panel p-6 sm:p-8 max-w-3xl mx-auto my-auto shadow-2xl">
-            {/* Background Graphic */}
-            <div className="relative h-48 sm:h-64 -mx-6 sm:-mx-8 -mt-6 sm:-mt-8 mb-6 overflow-hidden rounded-t-2xl">
-              <img 
-                src="/kratos_banner.jpg" 
-                alt="Kratos Agent Vice City" 
-                className="w-full h-full object-cover object-center transform hover:scale-105 transition duration-700"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0d071a] via-[#0d071a]/40 to-transparent"></div>
-              <div className="absolute bottom-4 left-6 sm:left-8">
-                <span className="px-2.5 py-0.5 rounded text-[10px] font-rajdhani font-bold uppercase tracking-widest bg-pink-600/80 text-white shadow-md">
-                  Autonomous Protocol
-                </span>
-                <h2 className="font-orbitron font-black text-2xl sm:text-3xl text-white tracking-wider mt-1 drop-shadow-md">
-                  KRATOS <span className="text-vice-pink neon-text-pink">AGENT</span> VI
-                </h2>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-300 leading-relaxed font-sans mb-6">
-              Welcome to the Kratos Agent console. Plan multi-step tasks, use configured tools, and review session history and execution events.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 hover:border-pink-500/40 transition">
-                <div className="flex items-center gap-2 mb-1.5 text-pink-400 font-rajdhani font-bold text-xs uppercase tracking-wider">
-                  <Zap className="w-4 h-4" />
-                  <span>Autonomous Loop</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Inspects files, executes shell commands, updates code, and verifies results automatically.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 hover:border-cyan-500/40 transition">
-                <div className="flex items-center gap-2 mb-1.5 text-cyan-400 font-rajdhani font-bold text-xs uppercase tracking-wider">
-                  <Terminal className="w-4 h-4" />
-                  <span>Connected Tools</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Use browser, terminal, and desktop tools through Kratos's configured runtimes.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 hover:border-amber-500/40 transition">
-                <div className="flex items-center gap-2 mb-1.5 text-amber-400 font-rajdhani font-bold text-xs uppercase tracking-wider">
-                  <Sparkles className="w-4 h-4" />
-                  <span>Cloudflare D1</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Explore saved sessions, turns, and execution events in the console.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 text-center text-xs font-rajdhani text-slate-400">
-              Click a demo shortcut above, type <code className="inline-code">/vision screen</code>, or enter an instruction below.
+          <div className="workspace-welcome">
+            <div className="welcome-symbol"><Sparkles size={26} /></div>
+            <span className="welcome-eyebrow">YOUR WORK, WITH AN AGENT</span>
+            <h1>What would you like to build?</h1>
+            <p>Turn an idea into a plan, work through a project, or get a clear answer. Kratos keeps the conversation and tools in one place.</p>
+            <div className="welcome-suggestions">
+              {[
+                [Terminal, 'Explore a project', 'Review the workspace and explain its architecture.'],
+                [Wrench, 'Fix an issue', 'Help me investigate a problem in this project.'],
+                [Zap, 'Plan a task', 'Help me make a practical implementation plan.'],
+              ].map(([Icon, title, prompt]) => (
+                <button key={title} onClick={() => { setInputPrompt(prompt); textareaRef.current?.focus(); }}>
+                  <Icon size={19} /><strong>{title}</strong><span>Start a conversation →</span>
+                </button>
+              ))}
             </div>
           </div>
         ) : (
           messages.map((msg, index) => (
-            <div 
+            <div
               key={index}
               className={`flex gap-2.5 sm:gap-3.5 w-full min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
             >
@@ -214,9 +186,9 @@ export default function AgentArena({
               {msg.role !== 'user' && (
                 <div className="flex-shrink-0 mt-1">
                   <div className="relative">
-                    <img 
-                      src="/kratos_badge.png" 
-                      alt="Kratos" 
+                    <img
+                      src="./kratos_badge.png"
+                      alt="Kratos"
                       className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-pink-500/40 shadow-[0_0_12px_rgba(255,0,127,0.3)]"
                     />
                   </div>
@@ -225,8 +197,8 @@ export default function AgentArena({
 
               {/* Message Bubble */}
               <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 overflow-hidden rounded-2xl p-3.5 sm:p-5 shadow-xl ${
-                msg.role === 'user' 
-                  ? 'bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 text-slate-100 rounded-tr-sm' 
+                msg.role === 'user'
+                  ? 'bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 text-slate-100 rounded-tr-sm'
                   : 'glass-card border-slate-700/60 text-slate-100 rounded-tl-sm'
               }`}>
                 {/* Role Header */}
@@ -259,12 +231,18 @@ export default function AgentArena({
                 )}
 
                 {/* Content */}
+                {msg.role !== 'user' && <ToolActivity activities={msg.tools} />}
                 <div className="prose prose-invert max-w-none text-sm leading-relaxed min-w-0 w-full overflow-x-auto break-words">
-                  <MarkdownRenderer 
-                    content={msg.content} 
-                    isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user' && !msg.isThinking} 
+                  <MarkdownRenderer
+                    content={msg.content}
+                    isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user' && !msg.isThinking}
                   />
                 </div>
+                {['cancelled', 'failed', 'paused', 'interrupted'].includes(msg.status) && (
+                  <p className={`turn-status turn-${msg.status}`} role="status">
+                    {msg.status === 'cancelled' ? 'Stopped by you. Existing changes were kept.' : msg.status === 'failed' ? 'This task failed.' : msg.status === 'paused' ? 'This task is paused.' : 'Response interrupted; completion could not be confirmed.'}
+                  </p>
+                )}
               </div>
 
               {/* User Avatar */}
@@ -298,7 +276,7 @@ export default function AgentArena({
       </div>
 
       {/* Input Dock */}
-      <div className="flex-shrink-0 p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
+      <div className="composer-dock flex-shrink-0 p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
         <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1" aria-label="Vision controls">
           <span className="inline-flex items-center gap-1.5 mr-1 text-[11px] font-code text-cyan-300">
             <Eye className="w-3.5 h-3.5" />
@@ -329,8 +307,10 @@ export default function AgentArena({
           <span className="ml-auto text-[10px] font-code text-slate-500">type /vision [mode]</span>
         </div>
         {visionError && <p role="status" className="mb-2 px-1 text-xs text-rose-300">{visionError}</p>}
+        {executionError && <p role="status" className="execution-error">{executionError}</p>}
+        {isStopping && <p role="status" className="execution-notice">Stopping… waiting for the running operation to exit.</p>}
         <div className="relative flex items-end gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-700/80 focus-within:border-pink-500/60 focus-within:shadow-[0_0_20px_rgba(255,0,127,0.25)] transition duration-200">
-          
+
           <div className="pb-2.5 pl-2 text-pink-400 font-code text-xs select-none flex items-center gap-1">
             <span className="text-pink-400 font-bold font-pixl">kratos</span>
             <span className="text-cyan-400">❯</span>
@@ -341,7 +321,7 @@ export default function AgentArena({
             value={inputPrompt}
             onChange={(e) => setInputPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Command Kratos Agent... (e.g. 'Audit project architecture and report status')"
+            placeholder="Describe what you want to do…" aria-label="Task instruction"
             rows={1}
             disabled={isExecuting}
             className="flex-1 bg-transparent border-0 resize-none py-2 px-1 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-0 max-h-32 min-h-[40px] font-sans"
@@ -352,6 +332,7 @@ export default function AgentArena({
             {messages.length > 0 && (
               <button
                 onClick={onClear}
+                disabled={isExecuting}
                 className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800/60 transition"
                 title="Clear current stream"
               >
@@ -359,7 +340,17 @@ export default function AgentArena({
               </button>
             )}
 
-            <button
+            {isExecuting ? <button
+              type="button"
+              onClick={onStop}
+              disabled={isStopping}
+              className="stop-execution"
+              aria-label={isStopping ? 'Stopping task' : 'Stop task'}
+              title="Stop the current task. Changes already made are kept."
+            >
+              {isStopping ? <LoaderCircle className="animate-spin" size={15} /> : <Square size={14} fill="currentColor" />}
+              <span>{isStopping ? 'Stopping…' : 'Stop'}</span>
+            </button> : <button
               onClick={onSend}
               disabled={!inputPrompt.trim() || isExecuting}
               className={`px-4 py-2 rounded-lg font-rajdhani font-bold text-xs tracking-wider flex items-center gap-1.5 transition duration-200 ${
@@ -368,9 +359,9 @@ export default function AgentArena({
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             >
-              <span>{isExecuting ? 'DISPATCHING...' : 'DISPATCH'}</span>
+              <span>Send</span>
               <Send className="w-3.5 h-3.5" />
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -385,7 +376,7 @@ export default function AgentArena({
           <div className="flex items-center gap-1.5 ml-auto">
             <span className="text-slate-500">MODE:</span>
             <span className={`font-bold tracking-wider ${isAgentMode ? 'text-pink-400' : 'text-cyan-400'}`}>
-              {isAgentMode ? 'AGENT TASK MODE' : 'DIRECT CHAT'}
+              {isAgentMode ? 'Agent mode' : 'Direct chat'}
             </span>
           </div>
         </div>

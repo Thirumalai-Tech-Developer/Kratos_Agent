@@ -210,6 +210,7 @@ class McpManager:
         self.servers: dict[str, McpServerConfig] = {}
         self.import_paths: list[Path] = []
         self._local_names: set[str] = set()
+        self._removed_names: set[str] = set()
         self.status: dict[str, dict[str, Any]] = {}
         self.load()
 
@@ -218,12 +219,14 @@ class McpManager:
         self.servers = {}
         self.import_paths = []
         self._local_names = set()
+        self._removed_names = set()
         self.status = {}
         if self.config_path.exists():
             try:
                 data = json.loads(self.config_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 raise ValueError(f"Cannot read MCP config {self.config_path}: {type(exc).__name__}") from exc
+            self._removed_names = {name for name in data.get("removedServers", []) if isinstance(name, str)}
             raw_imports = data.get("imports", [])
             if isinstance(raw_imports, list):
                 self.import_paths = [Path(item).expanduser().resolve() for item in raw_imports if isinstance(item, str)]
@@ -245,10 +248,12 @@ class McpManager:
         ):
             if default_server and default_server.name not in self.servers:
                 self.servers[default_server.name] = default_server
+        for name in self._removed_names:
+            self.servers.pop(name, None)
 
     def save(self) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"imports": [str(path) for path in self.import_paths], "mcpServers": {}}
+        data = {"imports": [str(path) for path in self.import_paths], "removedServers": sorted(self._removed_names), "mcpServers": {}}
         for name, server in self.servers.items():
             if name not in self._local_names:
                 continue
@@ -265,7 +270,45 @@ class McpManager:
                 if value is not None:
                     raw[key] = value
             data["mcpServers"][name] = raw
-        self.config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary = self.config_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(self.config_path)
+
+    def configure(self, name: str, raw: Mapping[str, Any]) -> None:
+        """Install or update an explicitly supplied MCP connection."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("MCP server name is required")
+        normalized = _safe_name(name)
+        if any(other != name and _safe_name(other) == normalized for other in self.servers):
+            raise ValueError("MCP server name collides with another tool namespace")
+        configured = McpServerConfig.from_mapping(name, raw)
+        self.servers[name] = configured
+        self._removed_names.discard(name)
+        self._local_names.add(name)
+        self.save()
+
+    def set_enabled(self, name: str, enabled: bool) -> None:
+        if name not in self.servers:
+            raise ValueError("MCP server not found")
+        self.servers[name].enabled = enabled
+        self._local_names.add(name)
+        self.save()
+
+    def remove(self, name: str) -> None:
+        if name not in self.servers:
+            raise ValueError("MCP server not found")
+        self.servers.pop(name)
+        self._local_names.discard(name)
+        self._removed_names.add(name)
+        self.save()
+
+    def overview(self) -> list[dict[str, Any]]:
+        """Connection status without command arguments, tokens or secret values."""
+        return [{"name": name, "enabled": server.enabled,
+                 "transport": server.transport or "stdio",
+                 "status": self.status.get(name, {"state": "not_connected"}),
+                 "env_keys": sorted(server.env), "header_keys": sorted(server.headers)}
+                for name, server in self.servers.items()]
 
     @staticmethod
     def _extract_servers(data: Mapping[str, Any], project: str | None = None) -> Mapping[str, Any]:
@@ -345,6 +388,8 @@ class McpManager:
         if path.is_dir():
             candidates = [path / ".mcp.json", path / "mcp.json"]
             path = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+        if not path.is_file():
+            raise ValueError("MCP import file does not exist")
         if path not in self.import_paths:
             self.import_paths.append(path)
             self.save()

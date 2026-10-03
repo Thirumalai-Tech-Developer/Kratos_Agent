@@ -26,6 +26,8 @@ class BrainClient:
     def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or get_endpoint_url()
         self.sdk = KratosClient(self.endpoint_url)
+        self.generation_options = {}
+        self.generation_model = None
 
     @property
     def session(self):
@@ -43,6 +45,8 @@ class BrainClient:
         """Build a Kratos SDK request using the local gateway's chat contract."""
         request = self.sdk.build_request(model, messages, system_instruction, stream=stream, tools=tools)
         request.update(get_model_request_options(model))
+        if self.generation_model is None or self.generation_model == model:
+            request.update(self.generation_options)
         return request
 
     def complete_with_sdk(
@@ -99,6 +103,7 @@ class BrainClient:
                 request,
                 stream=stream,
                 on_chunk=on_chunk,
+                task_id=task_id or None,
                 max_retries=max_retries if max_retries is not None else get_max_retries(),
                 timeout=timeout if timeout is not None else get_request_timeout(),
             )

@@ -33,10 +33,10 @@ export default function TraceReplay({ events, onInspectPayload, isLoading }) {
 
   return (
     <div className="flex flex-col h-full min-h-0 glass-panel rounded-2xl border border-pink-500/20 overflow-hidden shadow-xl p-4 sm:p-6">
-      
+
       {/* Top Toolbar */}
       <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-white/10">
-        
+
         {/* Filter Chips */}
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map((f) => (
