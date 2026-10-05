@@ -48,6 +48,7 @@ function harness(options: {
   const injections: Array<{ target: { tabId: number }; files: string[]; world?: string }> = [];
   const badges: string[] = [];
   const titles: string[] = [];
+  const messages: Array<{ authIdentity: string }> = [];
   let timersScheduled = 0;
   const context = createContext({
     SYNC_CONFIG: {
@@ -79,7 +80,8 @@ function harness(options: {
     chrome: {
       tabs: {
         query: async () => options.tabs || [],
-        sendMessage: async (id: number) => {
+        sendMessage: async (id: number, message: { authIdentity: string }) => {
+          messages.push(message);
           if (options.missingContentScript) throw new Error("Content script unavailable");
           return options.snapshots?.[id] || { storage: {}, userAgent: "Original tab UA" };
         },
@@ -112,6 +114,7 @@ function harness(options: {
     injections,
     badges,
     titles,
+    messages,
     timersScheduled: () => timersScheduled,
   };
 }
@@ -141,6 +144,30 @@ test("Cookie sessions sync from the original Chrome even when provider tabs are 
   ]);
   assert.equal(browser.badges.at(-1), "1");
   assert.match(browser.titles.at(-1)!, /1\/1.*synced/);
+});
+
+test("Session and analytics cookie renewal preserve account identity; account changes do not", async () => {
+  const cookies = {
+    "claude.ai": [
+      claudeCookie,
+      { name: "user_id", value: "account-a", domain: ".claude.ai" },
+      { name: "analytics", value: "first", domain: ".claude.ai" },
+    ],
+  };
+  const browser = harness({
+    providers: ["claude-web"],
+    tabs: [{ id: 1, url: "https://claude.ai/new" }],
+    cookies,
+  });
+  await browser.scan();
+  const first = browser.messages.at(-1)!.authIdentity;
+  cookies["claude.ai"][0] = { ...claudeCookie, value: "renewed-session" };
+  cookies["claude.ai"][2].value = "renewed-analytics";
+  await browser.scan();
+  assert.equal(browser.messages.at(-1)!.authIdentity, first);
+  cookies["claude.ai"][1].value = "account-b";
+  await browser.scan();
+  assert.notEqual(browser.messages.at(-1)!.authIdentity, first);
 });
 
 test("Missing content scripts do not prevent authenticated cookie-only sync", async () => {

@@ -178,7 +178,10 @@ def gateway_service(args: argparse.Namespace, env: dict[str, str]) -> ManagedSer
     node = shutil.which("node")
     if not node:
         raise RuntimeError("Node.js is required by the bundled gateway")
+    gateway_env = dict(env)
     if args.dev:
+        # Keep dev's routing cache separate from the standalone production build.
+        gateway_env.setdefault("NEXT_DIST_DIR", ".build/kratos-dev")
         gateway_command = [node, "scripts/dev/run-next.mjs", "dev"]
         gateway_cwd = GATEWAY
     else:
@@ -186,7 +189,7 @@ def gateway_service(args: argparse.Namespace, env: dict[str, str]) -> ManagedSer
         if not (gateway_cwd / "server-ws.mjs").is_file():
             raise RuntimeError("Bundled gateway build is missing. Run kratos-studio setup first.")
         gateway_command = [node, "server-ws.mjs"]
-    return ManagedService("OmniRoute", gateway_command, gateway_cwd, env, log_dir / "gateway.log")
+    return ManagedService("OmniRoute", gateway_command, gateway_cwd, gateway_env, log_dir / "gateway.log")
 
 
 def browser_sync_service(args: argparse.Namespace, env: dict[str, str]) -> ManagedService | None:

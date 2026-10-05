@@ -14,14 +14,20 @@ type Discovery = {
   readModelPicker: (document: Document, provider: string) => BrowserModel[] | undefined;
   createModelTracker: (document: Document) => {
     capture: (context: CaptureContext) => BrowserModel[] | undefined;
+    observe: () => void;
   };
+  accountIdentity: (storage: Record<string, string>) => string;
 };
 function fixture(html: string) {
   const dom = new JSDOM(html, { url: "https://chat.qwen.ai/" });
   dom.window.HTMLElement.prototype.getClientRects = function () {
     return [{ width: 100, height: 20 }] as unknown as DOMRectList;
   };
-  const context = createContext({ document: dom.window.document });
+  const context = createContext({
+    document: dom.window.document,
+    atob: (value: string) => Buffer.from(value, "base64").toString("binary"),
+    URL,
+  });
   runInContext(source, context, { filename: "modelDiscovery.js" });
   return {
     dom,
@@ -48,6 +54,43 @@ test("Picker captures actual labels, access states and explicit modalities", () 
     assert.equal(JSON.stringify(models[1].inputModalities), '["text","image"]');
     assert.equal(models[2].free, false);
     assert.equal(models[3].selectable, false);
+  } finally {
+    f.dom.window.close();
+  }
+});
+
+test("Same-account conversation navigation retains the discovered model list", () => {
+  const f = fixture(picker);
+  try {
+    const tracker = f.discovery.createModelTracker(f.document);
+    const initial = {
+      provider: "qwen-browser",
+      pageKey: "https://chat.qwen.ai/",
+      authKey: "account-a",
+    };
+    assert.equal(tracker.capture(initial)?.length, 4);
+    f.document.body.innerHTML = "";
+    f.dom.reconfigure({ url: "https://chat.qwen.ai/c/new-conversation?mode=chat" });
+    tracker.observe();
+    assert.equal(tracker.capture({ ...initial, pageKey: f.dom.window.location.href })?.length, 4);
+    assert.equal(tracker.capture({ ...initial, pageKey: "https://other.example/" })?.length, 0);
+  } finally {
+    f.dom.window.close();
+  }
+});
+
+test("Account identity survives token renewal but distinguishes users", () => {
+  const f = fixture("");
+  const token = (sub: string, exp: number) =>
+    `header.${Buffer.from(JSON.stringify({ sub, exp, iss: "qwen" })).toString("base64url")}.signature`;
+  try {
+    const first = f.discovery.accountIdentity({ token: token("account-a", 100) });
+    assert.equal(first, f.discovery.accountIdentity({ token: token("account-a", 200) }));
+    assert.notEqual(first, f.discovery.accountIdentity({ token: token("account-b", 200) }));
+    assert.equal(
+      f.discovery.accountIdentity({ token: "opaque-session-a" }),
+      f.discovery.accountIdentity({ token: "opaque-session-b" })
+    );
   } finally {
     f.dom.window.close();
   }

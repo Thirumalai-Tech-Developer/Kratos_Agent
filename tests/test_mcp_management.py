@@ -1,8 +1,11 @@
+import asyncio
 import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 
-from kratos_agent.core.mcp_runtime import McpManager
+from kratos_agent.core.mcp_runtime import McpManager, McpServerConfig
 
 
 def manager(tmp_path):
@@ -50,3 +53,29 @@ def test_overview_excludes_credentials_and_command_arguments(tmp_path):
     for secret in ["secret-argument", "secret-value", "secret-token"]:
         assert secret not in overview
     assert "API_KEY" in overview
+
+
+@pytest.mark.parametrize("delay_at", ["connection", "operation"])
+def test_mcp_deadline_covers_connection_and_request(tmp_path, monkeypatch, delay_at):
+    mcp = manager(tmp_path)
+    closed = []
+
+    async def list_tools():
+        if delay_at == "operation":
+            await asyncio.sleep(0.1)
+        return SimpleNamespace(tools=[])
+
+    @asynccontextmanager
+    async def client(server):
+        try:
+            if delay_at == "connection":
+                await asyncio.sleep(0.1)
+            yield SimpleNamespace(list_tools=list_tools)
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(mcp, "_client", client)
+    server = McpServerConfig(name="slow", command="test-only", timeout_seconds=0.01)
+    with pytest.raises(TimeoutError):
+        mcp._sync_sdk(server, "list_tools")
+    assert closed == [True]

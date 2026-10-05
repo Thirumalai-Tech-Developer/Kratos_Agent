@@ -1,6 +1,33 @@
 # Web provider integration status
 
-Updated 2026-10-02. This records observed behavior, not a guarantee that a browser session or a free quota will remain valid. No cookie, token, or session identifier is stored here.
+Updated 2026-10-05. This records observed behavior, not a guarantee that a browser session or a free quota will remain valid. No cookie, token, or session identifier is stored here.
+
+## Latest live verification — 2026-10-05
+
+Studio is running from the integration checkout with `--dev`. Its previous development cache returned HTML 404 responses for `/v1/chat/completions` before any provider execution. A fresh, separate `.build/kratos-dev` cache restored the JSON inference route; the launcher now uses that development directory by default and preserves an explicit `NEXT_DIST_DIR` override. The production standalone directory remains `.build/next/standalone`.
+
+Each result below comes from one short arithmetic request to the explicitly named consumer model. The diagnostic timeout was 35–40 seconds. No paid API fallback or account rotation was used.
+
+| Provider and model | Observed result | Interpretation |
+| --- | --- | --- |
+| DeepSeek — `ds-web/deepseek-v4-pro` | HTTP 200, correct nonempty answer | Passed the live reply check |
+| Perplexity — `pplx-web/pplx-auto` | HTTP 200, correct nonempty answer | Passed the live reply check |
+| Gemini — `gemini-web/gemini-3.7-flash` | First request: HTTP 200, nonempty answer, exact answer check failed; follow-up: HTTP 400 `bad_request` | Not verified as reliable inference |
+| Qwen — `qwb/qwen3.7-plus` | Diagnostic timeout | No answer verified within 40 seconds |
+| Dola — `db/dola-speed` | HTTP 429 | Upstream rate limit remains active |
+| Z.ai — `zw/x-preview-l` | Diagnostic timeout | No answer verified within 40 seconds |
+| Kimi — `kimi-web/k3` | HTTP 401, `invalid_api_key` | Stored session rejected |
+| Claude — `cw/claude-fable-5` | HTTP 403 | Stored session or upstream access rejected |
+| Grok — `gw/fast` | Diagnostic timeout | No answer verified within 35 seconds |
+| Meta AI — `ms-web/muse-spark` | Diagnostic timeout | No answer verified within 35 seconds |
+
+These results supersede the historical observations below. A configured connection or synchronized cookie does not prove successful inference. Other imported providers have not passed a fresh live inference check in this run. Consumer sessions still require normal sign-in or human verification when the provider requests it, and automatic synchronization preserves quotas, cooldowns and bans.
+
+The agent now validates complete JSON tool schemas before execution, including nested types and constraints, and repairs stale bundled tool parameter types from their handler signatures. Optional MCP startup, initialization and requests share the configured deadline. Extension version 1.1.1 preserves model observations through normal conversation navigation and session renewal, while observed account changes and explicit sign-out invalidate them. Reload an already installed unpacked extension once to activate the update.
+
+After restarting the idle agent, its authenticated health endpoint returned `status: ok` and `busy: false`. GitDiagram, computer-use, OpenPets and Context7 connected. GitNexus reported `TimeoutError` during dependency startup and Composio reported `ValueError`; these optional failures did not prevent the agent from serving requests.
+
+## Historical production verification — 2026-10-02
 
 The webpack production gateway build completed successfully. `kratos-studio run --cli --workspace .` reached the interactive prompt with `ds-web/deepseek-v4-pro`. On that rebuilt gateway, DeepSeek and Claude each returned a correct nonempty arithmetic answer. Meta AI timed out within 40 seconds, and Grok returned HTTP 403. The test CLI was then exited normally.
 
@@ -16,7 +43,7 @@ The webpack production gateway build completed successfully. `kratos-studio run 
 
 The 2026-10-02 Qwen/Dola source changes passed 51 focused tests, core type checking, and scoped ESLint. Live source checks found Qwen's imported session signed out (HTTP 401); sending on the consumer page displayed an age-confirmation dialog. Dola returned HTTP 429. These are account/provider blockers, so neither check establishes working inference. The changed sources still require a production rebuild before Studio uses them. The scope is free consumer web access; these changes do not add a paid API fallback.
 
-## Last live observations before the current rebuild
+## Historical live observations — 2026-10-02
 
 | Provider | Last observed result | Current status |
 | --- | --- | --- |
@@ -37,4 +64,4 @@ Other imported accounts include LMArena, HuggingChat, Poe, v0, ZenMux Free, and 
 
 ## Verification gate
 
-After the standalone gateway build completes, start Studio from this worktree and test a short request through each configured model. Count only a nonempty answer or a clear upstream error as a verified outcome; do not treat a successful login or HTTP 200 alone as working inference. Keep provider rate limits and site terms intact.
+After a standalone gateway rebuild, start Studio from this worktree and test a short request through each configured model. Record whether the answer is nonempty and correct, or whether the upstream reports an explicit error; do not treat a successful login or HTTP 200 alone as working inference. Development checks above exercise current source and do not establish that an older production build includes these changes. Keep provider rate limits and site terms intact.

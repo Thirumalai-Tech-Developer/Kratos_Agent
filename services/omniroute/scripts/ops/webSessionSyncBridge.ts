@@ -67,7 +67,7 @@ export async function prepareExtension(workspace: string, configs: TokenExtracti
   const manifest = {
     manifest_version: 3,
     name: "Kratos automatic browser session sync",
-    version: "1.1.0",
+    version: "1.1.1",
     description:
       "Sync renewed sessions from your original signed-in Chrome tabs to your local Kratos gateway.",
     permissions: ["cookies", "alarms", "scripting"],

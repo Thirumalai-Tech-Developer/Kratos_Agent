@@ -12,12 +12,27 @@ import inspect
 import json
 import re
 import time
+import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
+
+from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
+from jsonschema.validators import validator_for
+from referencing import Registry
+from referencing.exceptions import NoSuchResource, Unresolvable
 
 from .runtime_contracts import ToolCall, ToolPermission, ToolResult, ToolSpec
+
+
+def _reject_external_schema(uri: str):
+    """Tool schemas may reference their own definitions, never fetch remote data."""
+    raise NoSuchResource(ref=uri)
+
+
+_LOCAL_SCHEMA_REGISTRY = Registry(retrieve=_reject_external_schema)
 
 
 @dataclass
@@ -328,8 +343,13 @@ class ToolRegistry:
         # Standardize call.name to registered canonical tool name for consistent logging & lifecycle tracking
         call.name = registered.spec.name
 
+        if not isinstance(call.arguments, dict):
+            return ToolResult(call.call_id, call.name, "Tool arguments must be an object.", is_error=True)
+
         # Normalize common parameter aliases across diverse LLM outputs
-        schema = registered.spec.parameters or {}
+        schema = registered.spec.parameters if registered.spec.parameters is not None else {}
+        if not isinstance(schema, dict) or not isinstance(schema.get("properties", {}), dict):
+            return ToolResult(call.call_id, call.name, "Invalid tool parameter schema.", is_error=True)
         props = schema.get("properties", {})
         # Some models repeat the tool-call envelope inside the arguments object.
         # Preserve tools whose schema actually declares an arguments parameter.
@@ -409,7 +429,23 @@ class ToolRegistry:
     def _validate(spec: ToolSpec, arguments: dict[str, Any]) -> tuple[bool, str]:
         if not isinstance(arguments, dict):
             return False, "Tool arguments must be an object."
-        schema = spec.parameters or {}
+        schema = spec.parameters if spec.parameters is not None else {}
+        if not isinstance(schema, dict):
+            return False, "Invalid tool parameter schema."
+        try:
+            validator_class = validator_for(schema, default=Draft202012Validator)
+            validator_class.check_schema(schema)
+            # JSON decoders and Python handlers can otherwise accept NaN/Infinity.
+            json.dumps(arguments, allow_nan=False)
+            validator = validator_class(schema, registry=_LOCAL_SCHEMA_REGISTRY, format_checker=FormatChecker())
+            error = next(validator.iter_errors(arguments), None)
+        except SchemaError:
+            return False, "Invalid tool parameter schema."
+        except Unresolvable:
+            return False, "Tool schema reference cannot be resolved locally."
+        except (TypeError, ValueError, RecursionError):
+            return False, "Tool arguments or schema cannot be validated as JSON."
+
         required = schema.get("required", [])
         properties = schema.get("properties", {})
         missing = [name for name in required if name not in arguments]
@@ -418,6 +454,9 @@ class ToolRegistry:
             return False, f"Missing required arguments: {', '.join(missing)}"
         if unknown and schema.get("additionalProperties") is False:
             return False, f"Unknown arguments: {', '.join(unknown)}"
+        if error is not None:
+            # Do not include argument values (which may contain credentials) in errors.
+            return False, f"Invalid tool arguments at {error.json_path}: failed {error.validator} validation."
         return True, "allowed"
 
     def _forbidden_target(self, call: ToolCall) -> tuple[bool, str]:
@@ -492,7 +531,16 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
         if handler is None:
             continue
         permission = _permission_for(name)
-        params = item.get("parameters") or _signature_schema(handler)
+        inferred = _signature_schema(handler)
+        declared = item.get("parameters")
+        params = json.loads(json.dumps(declared)) if declared else inferred
+        # Older generated manifests flattened every parameter to string. Repair
+        # those types from the bundled handler while retaining descriptions and limits.
+        for argument, inferred_schema in inferred["properties"].items():
+            prop = params.get("properties", {}).get(argument)
+            if prop and prop.get("type") == "string" and inferred_schema.get("type") != "string" and ("type" in inferred_schema or "anyOf" in inferred_schema):
+                prop.pop("type", None)
+                prop.update({key: value for key, value in inferred_schema.items() if key != "description"})
         if name == "run_terminal_command":
             params = dict(params)
             params["properties"] = dict(params.get("properties", {}))
@@ -527,10 +575,35 @@ def _permission_for(name: str) -> ToolPermission:
 
 def _signature_schema(handler: Callable[..., Any]) -> dict[str, Any]:
     properties, required = {}, []
+    try:
+        annotations = get_type_hints(handler)
+    except (NameError, TypeError):
+        annotations = {}
     for parameter in inspect.signature(handler).parameters.values():
         if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
             continue
-        properties[parameter.name] = {"type": "string", "description": parameter.name.replace("_", " ")}
+        annotation = annotations.get(parameter.name, parameter.annotation)
+        if annotation is inspect.Parameter.empty or isinstance(annotation, str):
+            annotation = type(parameter.default) if parameter.default is not inspect.Parameter.empty else Any
+        properties[parameter.name] = {**_annotation_schema(annotation), "description": parameter.name.replace("_", " ")}
         if parameter.default is inspect.Parameter.empty:
             required.append(parameter.name)
     return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
+
+
+def _annotation_schema(annotation: Any) -> dict[str, Any]:
+    primitive = {str: "string", int: "integer", float: "number", bool: "boolean", type(None): "null"}
+    if annotation in primitive:
+        return {"type": primitive[annotation]}
+    origin, arguments = get_origin(annotation), get_args(annotation)
+    if origin in (Union, types.UnionType):
+        return {"anyOf": [_annotation_schema(value) for value in arguments]}
+    if origin is Annotated:
+        return _annotation_schema(arguments[0])
+    if origin is Literal:
+        return {"enum": list(arguments)}
+    if origin is list or annotation is list:
+        return {"type": "array", "items": _annotation_schema(arguments[0]) if arguments else {}}
+    if origin is dict or annotation is dict:
+        return {"type": "object", "additionalProperties": _annotation_schema(arguments[1]) if len(arguments) > 1 else {}}
+    return {}

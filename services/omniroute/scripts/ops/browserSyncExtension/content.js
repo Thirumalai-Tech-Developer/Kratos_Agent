@@ -39,7 +39,10 @@
     const observed = models?.capture({
       provider: message.provider,
       pageKey: location.href,
-      authKey: JSON.stringify([message.authIdentity || null, storage]),
+      authKey: JSON.stringify([
+        message.authIdentity || null,
+        globalThis.__kratosModelDiscovery?.accountIdentity(storage) || null,
+      ]),
       signedOut: message.provider === "qwen-browser" && !Object.values(storage).some(Boolean),
     });
     reply({

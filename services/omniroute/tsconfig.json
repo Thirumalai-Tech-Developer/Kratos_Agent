@@ -41,7 +41,9 @@
     ".next-playwright/dev/types/**/*.ts",
     ".build/next/types/**/*.ts",
     ".build/next/dev/types/**/*.ts",
-    ".build/next/dev/dev/types/**/*.ts"
+    ".build/next/dev/dev/types/**/*.ts",
+    ".build/kratos-dev/types/**/*.ts",
+    ".build/kratos-dev/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

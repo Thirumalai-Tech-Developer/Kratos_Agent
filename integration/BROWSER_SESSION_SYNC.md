@@ -76,13 +76,21 @@ free quota are currently available; check inference separately through the gatew
 
 ## Model discovery and workspace selection
 
-Extension version 1.1.0 observes model choices in each provider's normal model
+Extension version 1.1.1 observes model choices in each provider's normal model
 menu and successful same-origin `/api/models` responses. It does not send chats
 to discover models. Choices are stored with the encrypted browser session; a
 model-only change also triggers synchronization. Signing out clears an observed
 catalog, while closing a menu preserves it. Paid or disabled choices are excluded
 from executable discovery, and unknown protocol identifiers are retained only as
 observations until the transport can route them.
+
+Conversation path, query and fragment changes within the same provider origin
+preserve the observed catalog. Renewed session, clearance and analytics cookies
+also preserve it. Stable account cookie values and identity claims in already
+declared storage tokens detect account changes without treating each token
+renewal as a new account. An observed account change, provider origin change or
+explicit sign-out clears the catalog. Opaque credentials alone cannot identify
+an account change, so discovery is not an authorization or session-validity check.
 
 Click the **Model** badge in the full-screen workspace to search the gateway
 catalog and select the next request's model. The server validates the choice and

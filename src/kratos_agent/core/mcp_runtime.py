@@ -7,6 +7,7 @@ startup.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -454,7 +455,13 @@ class McpManager:
                 return self._format_result(result)
 
         from kratos_agent.utils.async_runner import run_coroutine
-        return run_coroutine(run())
+
+        async def bounded() -> Any:
+            # SDK read timeouts do not necessarily cover package startup/handshake.
+            async with asyncio.timeout(float(server.timeout_seconds)):
+                return await run()
+
+        return run_coroutine(bounded())
 
     @asynccontextmanager
     async def _client(self, server: McpServerConfig):

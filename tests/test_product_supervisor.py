@@ -1,6 +1,7 @@
 import os
 import socket
 import sys
+from argparse import Namespace
 
 import pytest
 
@@ -47,3 +48,19 @@ def test_cli_startup_timeout_default_and_override(monkeypatch, tmp_path):
 
     assert captured[0].startup_timeout == 600
     assert captured[1].startup_timeout == 30
+
+
+@pytest.mark.parametrize("dev,override,expected", [(True, None, ".build/kratos-dev"), (True, ".build/custom", ".build/custom"), (False, None, None)])
+def test_studio_development_cache_is_separate_from_production(monkeypatch, tmp_path, dev, override, expected):
+    gateway = tmp_path / "gateway"
+    (gateway / "node_modules/next").mkdir(parents=True)
+    standalone = gateway / ".build/next/standalone"
+    standalone.mkdir(parents=True)
+    (standalone / "server-ws.mjs").write_text("")
+    monkeypatch.setattr(product, "GATEWAY", gateway)
+    monkeypatch.setattr(product.shutil, "which", lambda name: "test-node")
+    env = {"NEXT_DIST_DIR": override} if override else {}
+    service = product.gateway_service(Namespace(workspace=tmp_path, dev=dev), env)
+    assert service.env.get("NEXT_DIST_DIR") == expected
+    assert env == ({"NEXT_DIST_DIR": override} if override else {})
+    assert service.cwd == (gateway if dev else standalone)

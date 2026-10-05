@@ -71,7 +71,13 @@ async function capture(provider, tabs) {
       expires: cookie.expirationDate ?? -1,
     }));
     const cookieIdentity = JSON.stringify(
-      cookies.map((cookie) => [cookie.name, cookie.value]).sort()
+      // Session/clearance/analytics cookies rotate without changing accounts.
+      cookies
+        .filter((cookie) =>
+          /^(?:c_user|uid|user_?id|account_?id|lastActiveOrg)$/i.test(cookie.name)
+        )
+        .map((cookie) => [cookie.name, cookie.value])
+        .sort()
     );
     const authBytes = await crypto.subtle.digest(
       "SHA-256",
@@ -186,7 +192,9 @@ chrome.runtime.onInstalled.addListener(async () => {
         files: ["modelDiscovery.js", "content.js"],
       });
       await chrome.scripting.executeScript({
-        target: { tabId: tab.id }, files: ["modelObserver.js"], world: "MAIN",
+        target: { tabId: tab.id },
+        files: ["modelObserver.js"],
+        world: "MAIN",
       });
       if (provider.id === "muse-spark-web")
         await chrome.scripting.executeScript({

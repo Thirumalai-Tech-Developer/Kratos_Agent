@@ -234,6 +234,41 @@
     return false;
   }
 
+  function accountIdentity(storage) {
+    const identities = [];
+    for (const [key, raw] of Object.entries(storage)) {
+      if (typeof raw !== "string" || raw.length > 65536) continue;
+      try {
+        let token = raw;
+        if (raw.startsWith('"') || raw.startsWith("{")) token = JSON.parse(raw);
+        let claims;
+        if (token && typeof token === "object") {
+          claims = token;
+          token = token.access_token || token.token;
+        }
+        if (typeof token === "string" && token.split(".").length === 3) {
+          const encoded = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+          claims = JSON.parse(atob(encoded));
+        }
+        // These are identity hints, not token verification or authorization.
+        const id = claims?.sub ?? claims?.user_id ?? claims?.uid ?? claims?.account_id;
+        if (["string", "number"].includes(typeof id) && String(id).length <= 256)
+          identities.push([key, String(claims.iss || ""), String(id)]);
+      } catch {
+        /* Opaque tokens cannot establish an account identity. */
+      }
+    }
+    return JSON.stringify(identities.sort());
+  }
+
+  function pageOrigin(pageKey) {
+    try {
+      return new URL(pageKey).origin;
+    } catch {
+      return pageKey;
+    }
+  }
+
   function createModelTracker(document) {
     let context;
     let models;
@@ -242,7 +277,7 @@
       if (
         context &&
         (context.provider !== next.provider ||
-          context.pageKey !== next.pageKey ||
+          pageOrigin(context.pageKey) !== pageOrigin(next.pageKey) ||
           context.authKey !== next.authKey)
       )
         models = everObserved ? [] : undefined;
@@ -286,5 +321,9 @@
     };
   }
 
-  globalThis.__kratosModelDiscovery = Object.freeze({ readModelPicker, createModelTracker });
+  globalThis.__kratosModelDiscovery = Object.freeze({
+    readModelPicker,
+    createModelTracker,
+    accountIdentity,
+  });
 })();
