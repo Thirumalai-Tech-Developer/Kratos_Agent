@@ -43,3 +43,11 @@ kratosApiRecorder.dispose(); // Stop, remove the panel/API; then paste again to 
 Console code cannot observe every browser request. Workers, other iframe execution contexts, opaque CORS responses, browser-injected credentials, cached references to native functions, existing silent sockets, or encrypted/compressed binary protocols can hide bodies. The recorder captures traffic after installation. It does not recover earlier requests or survive a reload.
 
 If a needed request is missing, DevTools **Network** can provide a separate HAR export, while its **WS** view can show WebSocket messages. Browser HAR exports may include sensitive data; review them before attaching them.
+
+## Qwen capture support
+
+The October 6 Qwen recording confirmed `qwen3.7-plus`, `/api/v2/chats/new`, and `/api/v2/chat/completions`. Kratos uses those normal authenticated requests for this model, with the session already imported by Browser Sync. It stops reading when the answer phase reports `status: "finished"`; Qwen does not need to send `[DONE]`. Repeated thinking summaries are deduplicated and input/output token counts are mapped to the completion format.
+
+The `qwen-ui-qwen3.7-plus` picker alias maps to the same protocol ID. Other observed picker choices keep the existing browser transport. A recording of one model does not establish the IDs, attachment format, or API availability of other models. This API path supports text messages and retains the ten-answer conversation handoff. Login, challenge and quota errors remain explicit; it does not retry them through another account or transport.
+
+Recordings redact authorization data. They diagnose the protocol but cannot replace the live signed-in credentials. After session expiry, the Browser Sync extension must be connected to the running receiver and a signed-in original browser tab.

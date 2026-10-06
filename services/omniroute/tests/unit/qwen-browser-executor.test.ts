@@ -67,7 +67,7 @@ after(() => resetDbInstance());
 test("cancelled browser body reads release the Qwen conversation lock promptly", async () => {
   __setBrowserBackedChatOverrideForTesting(async () => new Promise(() => {}));
   const controller = new AbortController();
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   const pending = executor.execute({ ...input(), signal: controller.signal });
   setImmediate(() => controller.abort());
   const result = await Promise.race([
@@ -108,7 +108,7 @@ test("Qwen Browser restores private auth and returns nonempty JSON", async () =>
     request = req;
     return capture();
   });
-  const result = await new QwenBrowserExecutor().execute(input());
+  const result = await new QwenBrowserExecutor({ transport: "ui" }).execute(input());
   assert.equal(result.status, 200);
   assert.equal(request?.submitButtonSelector, 'button[aria-label="Send"]:not([disabled])');
   assert.equal((await result.json()).choices[0].message.content, "Hello");
@@ -137,7 +137,9 @@ test("a captured Qwen picker model is routed without replacing it with the defau
       },
     },
   };
-  const result = await new QwenBrowserExecutor().execute(candidate);
+  const result = await new QwenBrowserExecutor({
+    fetch: async () => assert.fail("UI-only model ids must not become guessed API ids"),
+  }).execute(candidate);
   assert.equal(result.status, 200);
   assert.equal((await result.json()).model, candidate.model);
   assert.ok(request?.beforeSubmit);
@@ -190,7 +192,7 @@ test("captured locked or paid Qwen entries fail before browser submission", asyn
     { id: "qwen-ui-locked", name: "Locked model", selectable: false, free: true },
     { id: "qwen-ui-paid", name: "Paid model", selectable: true, free: false },
   ]) {
-    const result = await new QwenBrowserExecutor().execute({
+    const result = await new QwenBrowserExecutor({ transport: "ui" }).execute({
       ...input(),
       model: model.id,
       credentials: { ...input().credentials, providerSpecificData: { browserModels: [model] } },
@@ -202,7 +204,7 @@ test("captured locked or paid Qwen entries fail before browser submission", asyn
 test("an observed empty Qwen picker does not resurrect its historical default", async () => {
   __setBrowserBackedChatOverrideForTesting(async () => assert.fail("must not submit"));
   for (const browserModels of [[], [{ malformed: true }]]) {
-    const result = await new QwenBrowserExecutor().execute({
+    const result = await new QwenBrowserExecutor({ transport: "ui" }).execute({
       ...input(),
       credentials: { ...input().credentials, providerSpecificData: { browserModels } },
     });
@@ -222,7 +224,7 @@ test("raw bearer token plus separate session metadata is supported", async () =>
     apiKey: "Bearer test-token",
     providerSpecificData: { cookie: "token=test-token", userAgent: "Test Browser" },
   } as typeof request.credentials;
-  assert.equal((await new QwenBrowserExecutor().execute(request)).status, 200);
+  assert.equal((await new QwenBrowserExecutor({ transport: "ui" }).execute(request)).status, 200);
 });
 
 test("Qwen age verification is an actionable error instead of empty output", async () => {
@@ -235,7 +237,7 @@ test("Qwen age verification is an actionable error instead of empty output", asy
       "application/json"
     )
   );
-  const result = await new QwenBrowserExecutor().execute(input());
+  const result = await new QwenBrowserExecutor({ transport: "ui" }).execute(input());
   assert.equal(result.status, 403);
   assert.equal((await result.json()).error.code, "qwen_browser_age_verification_required");
 });
@@ -247,12 +249,15 @@ test("named token cookie can restore bearer state", async () => {
   });
   const request = input();
   request.credentials.apiKey = "token=cookie-token; refresh_token=test-refresh";
-  assert.equal((await new QwenBrowserExecutor().execute(request)).status, 200);
+  assert.equal((await new QwenBrowserExecutor({ transport: "ui" }).execute(request)).status, 200);
 });
 
 test("streamed response has answer deltas, stop and DONE without thinking-as-text", async () => {
   __setBrowserBackedChatOverrideForTesting(async () => capture());
-  const result = await new QwenBrowserExecutor().execute({ ...input(), stream: true });
+  const result = await new QwenBrowserExecutor({ transport: "ui" }).execute({
+    ...input(),
+    stream: true,
+  });
   assert.equal(result.headers.get("content-type"), "text/event-stream");
   const text = await result.text();
   assert.match(text, /"content":"Hello"/);
@@ -269,7 +274,7 @@ for (const [name, body] of [
 ]) {
   test(`${name} response is an error, never empty success`, async () => {
     __setBrowserBackedChatOverrideForTesting(async () => capture(body));
-    const result = await new QwenBrowserExecutor().execute(input());
+    const result = await new QwenBrowserExecutor({ transport: "ui" }).execute(input());
     assert.equal(result.status, 502);
     assert.ok((await result.json()).error.message);
   });
@@ -283,7 +288,7 @@ test("login and challenge errors are explicit and never leak upstream secrets", 
     __setBrowserBackedChatOverrideForTesting(async () =>
       capture(String(body), Number(status), "text/html")
     );
-    const result = await new QwenBrowserExecutor().execute(input());
+    const result = await new QwenBrowserExecutor({ transport: "ui" }).execute(input());
     assert.equal(result.status, status);
     const text = await result.text();
     assert.match(text, Number(status) === 401 ? /sign in|expired/i : /challenge|captcha/i);
@@ -295,7 +300,7 @@ test("unsupported model, vision, tools and missing auth fail before browser subm
   __setBrowserBackedChatOverrideForTesting(async () => {
     assert.fail("must not submit");
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   assert.equal((await executor.execute({ ...input(), model: "invented-model" })).status, 400);
   assert.equal((await executor.execute({ ...input(), credentials: {} })).status, 401);
   assert.equal(
@@ -331,7 +336,7 @@ test("reuse conversation through ten completed answers then handoff summary to f
     requests.push(req);
     return capture(response(`answer ${requests.length}`));
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   const messages = [{ role: "user", content: "Remember my project Alpha" }];
   for (let turn = 0; turn < 11; turn++) {
     assert.equal((await executor.execute(input(messages))).status, 200);
@@ -357,7 +362,7 @@ test("failed responses do not count toward ten completed answers", async () => {
     requests.push(req);
     return failures ? capture("", 429) : capture();
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   for (let i = 0; i < 12; i++) assert.equal((await executor.execute(input())).status, 429);
   failures = false;
   assert.equal((await executor.execute(input())).status, 200);
@@ -370,7 +375,7 @@ test("different client conversation prefixes do not share provider chat", async 
     requests.push(req);
     return capture();
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   await executor.execute(input([{ role: "user", content: "Project A" }]));
   await executor.execute(input([{ role: "user", content: "Project B" }]));
   assert.equal(requests[1].chatPageUrl, "https://chat.qwen.ai");
@@ -383,7 +388,7 @@ test("identical stateless opening prompts do not join an unrelated prior chat", 
     requests.push(req);
     return capture();
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   await executor.execute(input());
   await executor.execute(input());
   assert.equal(requests[1].chatPageUrl, "https://chat.qwen.ai");
@@ -399,7 +404,7 @@ test("explicit client session serializes overlapping calls to one conversation",
     firstFinished = true;
     return capture();
   });
-  const executor = new QwenBrowserExecutor();
+  const executor = new QwenBrowserExecutor({ transport: "ui" });
   const request = { ...input(), body: { ...input().body, metadata: { session_id: "client-A" } } };
   const results = await Promise.all([executor.execute(request), executor.execute(request)]);
   assert.deepEqual(

@@ -5,8 +5,9 @@ import { BaseExecutor, type ExecuteInput, type ProviderCredentials } from "./bas
 import { browserBackedChat, withAbort } from "../services/browserBackedChat.ts";
 import { buildErrorBody } from "../utils/error.ts";
 import { hasBrowserModelCatalog, resolveBrowserModel } from "../utils/browserModels.ts";
+import { captureQwenApi } from "./qwen-browser-api.ts";
 
-// Clean implementation from browser observations made on 2026-10-01.
+// Clean implementation from browser observations made on 2026-10-01 and 2026-10-06.
 // Retired qwen-web/qw identities and their provenance guards remain separate.
 export const QWEN_BROWSER_MODEL = "qwen3.7-plus";
 export const QWEN_BROWSER_MAX_TURNS = 10;
@@ -21,6 +22,7 @@ type QwenAuth = { token: string; cookie: string; userAgent?: string };
 type Exchange = { question: string; answer: string };
 type Conversation = {
   chatId: string;
+  responseId?: string;
   completed: number;
   exchanges: Exchange[];
   summary: string;
@@ -88,6 +90,7 @@ export interface ParsedQwenBrowserResponse {
   content: string;
   reasoning: string;
   chatId: string;
+  responseId: string;
   finished: boolean;
   chunks: Array<{ content?: string; reasoning_content?: string }>;
   usage?: JsonRecord;
@@ -100,10 +103,12 @@ export function parseQwenBrowserResponse(body: string): ParsedQwenBrowserRespons
     content: "",
     reasoning: "",
     chatId: "",
+    responseId: "",
     finished: false,
     chunks: [],
     upstreamError: false,
   };
+  let summarySnapshot = "";
   for (const event of body.split(/\r?\n\r?\n/)) {
     const data = event
       .split(/\r?\n/)
@@ -124,7 +129,21 @@ export function parseQwenBrowserResponse(body: string): ParsedQwenBrowserRespons
     if (frame.error) parsed.upstreamError = true;
     const created = record(frame["response.created"]);
     if (UUID_PATTERN.test(text(created.chat_id))) parsed.chatId = text(created.chat_id);
-    if (Object.keys(record(frame.usage)).length) parsed.usage = record(frame.usage);
+    const responseId = text(created.response_id) || text(frame.response_id);
+    if (UUID_PATTERN.test(responseId)) parsed.responseId = responseId;
+    if (Object.keys(record(frame.usage)).length) {
+      const usage = record(frame.usage);
+      parsed.usage = {
+        ...usage,
+        ...(typeof usage.input_tokens === "number" ? { prompt_tokens: usage.input_tokens } : {}),
+        ...(typeof usage.output_tokens === "number"
+          ? { completion_tokens: usage.output_tokens }
+          : {}),
+        ...(usage.output_tokens_details
+          ? { completion_tokens_details: usage.output_tokens_details }
+          : {}),
+      };
+    }
     if (!Array.isArray(frame.choices)) continue;
     for (const value of frame.choices) {
       const choice = record(value);
@@ -136,9 +155,23 @@ export function parseQwenBrowserResponse(body: string): ParsedQwenBrowserRespons
           parsed.chunks.push({ content });
         }
         if (delta.status === "finished" || choice.finish_reason === "stop") parsed.finished = true;
-      } else if (delta.phase === "thinking_summary" && content) {
-        parsed.reasoning += content;
-        parsed.chunks.push({ reasoning_content: content });
+      } else if (delta.phase === "thinking_summary") {
+        const thought = record(record(delta.extra).summary_thought).content;
+        const snapshot = Array.isArray(thought)
+          ? thought.filter((value) => typeof value === "string").join("\n")
+          : "";
+        const addition = snapshot
+          ? snapshot === summarySnapshot
+            ? ""
+            : snapshot.startsWith(summarySnapshot)
+              ? snapshot.slice(summarySnapshot.length)
+              : `\n${snapshot}`
+          : content;
+        if (snapshot) summarySnapshot = snapshot;
+        if (addition) {
+          parsed.reasoning += addition;
+          parsed.chunks.push({ reasoning_content: addition });
+        }
       }
     }
   }
@@ -246,12 +279,12 @@ export async function selectQwenModel(page: Page, modelName: string): Promise<vo
   }
 }
 
-/** UI transport: the provider page computes its own per-request WAF headers. */
+/** Captured API transport for known protocol ids; UI selection for other observed models. */
 export class QwenBrowserExecutor extends BaseExecutor {
   private readonly conversations = new Map<string, Conversation>();
   private readonly locks = new Map<string, Promise<void>>();
 
-  constructor() {
+  constructor(private readonly options: { transport?: "auto" | "ui"; fetch?: typeof fetch } = {}) {
     super("qwen-browser", { baseUrl: ORIGIN });
   }
 
@@ -297,12 +330,22 @@ export class QwenBrowserExecutor extends BaseExecutor {
     });
     const chained = previous.then(() => lock);
     this.locks.set(key, chained);
-    await previous;
     try {
+      await withAbort(previous, input.signal);
       return await this.submit(input, auth, messages, key, modelName);
+    } catch {
+      return error(
+        input.signal?.aborted ? 499 : 502,
+        input.signal?.aborted
+          ? "Qwen Browser request was cancelled."
+          : "Qwen Browser request could not complete.",
+        input.signal?.aborted ? "qwen_browser_cancelled" : "qwen_browser_transport_error"
+      );
     } finally {
       release!();
-      if (this.locks.get(key) === chained) this.locks.delete(key);
+      void chained.then(() => {
+        if (this.locks.get(key) === chained) this.locks.delete(key);
+      });
     }
   }
 
@@ -331,7 +374,10 @@ export class QwenBrowserExecutor extends BaseExecutor {
       .filter((message) => message.role === "system" || message.role === "developer")
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n\n");
-    const initial = messages.map((message) => `${message.role}: ${message.content}`).join("\n\n");
+    const initial =
+      messages.length === 1 && messages[0].role === "user"
+        ? question
+        : messages.map((message) => `${message.role}: ${message.content}`).join("\n\n");
     const userMessage = rotate
       ? [system, handoff(conversation!), `Current user request:\n${question}`]
           .filter(Boolean)
@@ -339,37 +385,62 @@ export class QwenBrowserExecutor extends BaseExecutor {
       : conversation
         ? question
         : initial;
-    let captured;
+    let raw = "";
+    let status = 502;
+    let apiChatId = "";
+    let retryAfter: string | null = null;
+    const useApi =
+      this.options.transport !== "ui" &&
+      [QWEN_BROWSER_MODEL, `qwen-ui-${QWEN_BROWSER_MODEL}`].includes(input.model);
     const signal = AbortSignal.any([
       ...(input.signal ? [input.signal] : []),
       AbortSignal.timeout(60_000),
     ]);
     try {
-      captured = await withAbort(
-        browserBackedChat({
-          poolKey: `qwen-browser-${key}`,
-          chatUrl: CHAT_URL,
-          chatPageUrl: conversation && !rotate ? `${ORIGIN}/c/${conversation.chatId}` : ORIGIN,
+      if (useApi) {
+        const captured = await captureQwenApi({
+          fetcher: this.options.fetch || globalThis.fetch,
+          auth,
+          model: QWEN_BROWSER_MODEL,
           userMessage,
-          cookieString: auth.cookie,
-          cookieDomain: ".qwen.ai",
-          localStorage: { token: auth.token },
-          localStorageOrigin: ORIGIN,
-          userAgent: auth.userAgent,
-          chatUrlMatchDomain: "chat.qwen.ai",
-          inputSelector: "textarea",
-          submitButtonSelector: 'button[aria-label="Send"]:not([disabled])',
-          verificationChallengeText: "Confirm your age to continue",
-          verificationChallengeMessage:
-            "Qwen requires age verification before it will send the chat request.",
-          streamCompletion: { phase: "answer", status: "finished" },
-          beforeSubmit: (page) => selectQwenModel(page, modelName),
-          postSubmitWaitMs: 30_000,
           signal,
-          reuseContext: true,
-        }),
-        signal
-      );
+          ...(conversation && !rotate
+            ? { chatId: conversation.chatId, parentId: conversation.responseId }
+            : {}),
+        });
+        raw = captured.body;
+        status = captured.status;
+        apiChatId = captured.chatId;
+        retryAfter = captured.retryAfter;
+      } else {
+        const captured = await withAbort(
+          browserBackedChat({
+            poolKey: `qwen-browser-${key}`,
+            chatUrl: CHAT_URL,
+            chatPageUrl: conversation && !rotate ? `${ORIGIN}/c/${conversation.chatId}` : ORIGIN,
+            userMessage,
+            cookieString: auth.cookie,
+            cookieDomain: ".qwen.ai",
+            localStorage: { token: auth.token },
+            localStorageOrigin: ORIGIN,
+            userAgent: auth.userAgent,
+            chatUrlMatchDomain: "chat.qwen.ai",
+            inputSelector: "textarea",
+            submitButtonSelector: 'button[aria-label="Send"]:not([disabled])',
+            verificationChallengeText: "Confirm your age to continue",
+            verificationChallengeMessage:
+              "Qwen requires age verification before it will send the chat request.",
+            streamCompletion: { phase: "answer", status: "finished" },
+            beforeSubmit: (page) => selectQwenModel(page, modelName),
+            postSubmitWaitMs: 30_000,
+            signal,
+            reuseContext: true,
+          }),
+          signal
+        );
+        raw = captured.body.toString("utf8");
+        status = captured.status;
+      }
     } catch {
       if (signal.aborted && !input.signal?.aborted)
         return error(
@@ -381,24 +452,29 @@ export class QwenBrowserExecutor extends BaseExecutor {
         input.signal?.aborted ? 499 : 502,
         input.signal?.aborted
           ? "Qwen Browser request was cancelled."
-          : "Qwen Browser could not open the signed-in chat session.",
+          : "Qwen Browser could not complete the signed-in chat request.",
         "qwen_browser_transport_error"
       );
     }
     if (input.signal?.aborted)
       return error(499, "Qwen Browser request was cancelled.", "qwen_browser_cancelled");
-    const raw = captured.body.toString("utf8");
-    if (captured.status !== 200) return browserError(captured.status, raw);
+    if (status !== 200) {
+      const result = browserError(status, raw);
+      if (result.status === 429 && retryAfter) result.headers.set("Retry-After", retryAfter);
+      return result;
+    }
     const parsed = parseQwenBrowserResponse(raw);
     if (
       !parsed.content.trim() ||
       !parsed.finished ||
       parsed.upstreamError ||
-      !(parsed.chatId || (!rotate && conversation?.chatId))
+      !(parsed.chatId || apiChatId || (!rotate && conversation?.chatId)) ||
+      (useApi && (!parsed.responseId || (parsed.chatId && parsed.chatId !== apiChatId)))
     )
       return browserError(502, raw);
     const updated: Conversation = {
-      chatId: parsed.chatId || conversation!.chatId,
+      chatId: parsed.chatId || apiChatId || conversation!.chatId,
+      responseId: parsed.responseId || undefined,
       completed: rotate ? 1 : (conversation?.completed || 0) + 1,
       exchanges: [
         ...(rotate ? [] : conversation?.exchanges || []),
