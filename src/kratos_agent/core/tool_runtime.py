@@ -552,6 +552,8 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
             ToolSpec(name=name, description=item.get("description", ""), parameters=params, permission=permission),
             handler,
         )
+    from kratos_agent.jobs.tools import register_job_tools
+    register_job_tools(registry, workspace)
     return registry
 
 

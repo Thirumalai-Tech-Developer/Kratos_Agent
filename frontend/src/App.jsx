@@ -9,8 +9,9 @@ import WorkspaceCommands from './components/WorkspaceCommands';
 import ChangesReview from './components/ChangesReview';
 import ModelSettings from './components/ModelSettings';
 import ModelPicker from './components/ModelPicker';
+import JobsWorkspace from './components/JobsWorkspace';
 import { AgentAuthModal, TechSpecsModal, PayloadModal } from './components/Modals';
-import { Gamepad2, MessageSquare, Zap, Database, FileDiff } from 'lucide-react';
+import { Gamepad2, MessageSquare, Zap, Database, FileDiff, Briefcase } from 'lucide-react';
 
 import { apiFetch } from './api';
 import { modelModalityLabel, normalizeModelCatalog } from './modelCatalog';
@@ -699,6 +700,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
     { id: 'activity', label: 'View activity', run: () => { setActiveTab('traces'); fetchEvents(); } },
     { id: 'changes', label: 'Review task changes', detail: 'Inspect diffs and restore files from task checkpoints', run: () => setActiveTab('changes') },
     { id: 'data', label: 'Open data explorer', run: () => setActiveTab('sql') },
+    { id: 'jobs', label: 'AI & ML job applications', detail: 'Find matching roles and manage auto-apply', run: () => setActiveTab('jobs') },
     { id: 'refresh', label: 'Refresh workspace', run: refreshAll },
     { id: 'settings', label: 'Model and execution settings', detail: 'Temperature, thinking effort, and inspection budget', run: () => setSettingsOpen(true) },
     { id: 'model', label: 'Change model', detail: 'Browse models from connected providers', run: () => setModelPickerOpen(true), disabled: isExecuting },
@@ -791,8 +793,11 @@ function parseThinkTags(rawContent, currentReasoning = '') {
               <span>Data</span>
             </button>
             <button onClick={() => setActiveTab('changes')} className={`px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 whitespace-nowrap ${activeTab === 'changes' ? 'bg-purple-600/30 border border-purple-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}><FileDiff className="w-4 h-4" /><span>Changes</span></button>
+            <button onClick={() => setActiveTab('jobs')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-pixl font-bold flex items-center gap-2 whitespace-nowrap ${activeTab === 'jobs' ? 'bg-gradient-to-r from-pink-600/30 to-slate-900 border border-pink-500 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}>
+              <Briefcase className="w-4 h-4" /><span>Jobs</span>
+            </button>
           </div>
-
           {/* Live Multimodal Perception Bar */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 py-1.5 px-3 rounded-xl bg-slate-900/80 border border-white/10 text-xs font-rajdhani whitespace-nowrap">
             <div className="flex items-center gap-1.5">
@@ -852,6 +857,7 @@ function parseThinkTags(rawContent, currentReasoning = '') {
 
       {/* Main Workspace Layout */}
       <main className="workspace-main flex-1 min-h-0 w-full max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3.5 overflow-hidden flex flex-col min-w-0">
+        {activeTab === 'jobs' && <JobsWorkspace />}
         {activeTab === 'changes' && <ChangesReview isExecuting={isExecuting} />}
         {activeTab === 'arena' && (
           <div className="flex-1 min-h-0 h-full flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 w-full min-w-0 overflow-hidden">

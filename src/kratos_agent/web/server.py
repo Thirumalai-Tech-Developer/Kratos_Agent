@@ -112,7 +112,28 @@ class KratosWebHandler(BaseHTTPRequestHandler):
             path = parsed.path
 
             # REST API Routes
-            if path == "/api/health":
+            if path == "/api/jobs/evidence":
+                params = urllib.parse.parse_qs(parsed.query)
+                job = self.server.jobs.store.job(params.get("job_id", [""])[0])
+                relative = job.get("receipt", {}).get("screenshot", "")
+                folder = (self.server.jobs.store.root / "evidence").resolve()
+                file = (self.server.jobs.store.root / relative).resolve()
+                if not relative or file.parent != folder or file.suffix != ".png" or not file.is_file():
+                    self._send_json({"error": "Evidence not found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                content = file.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Cache-Control", "no-store")
+                self._send_cors_headers()
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            elif path == "/api/jobs":
+                self._send_json(self.server.jobs.status())
+                return
+            elif path == "/api/health":
                 self._send_json({"status": "ok", "service": "kratos", "busy": self.server.turn_lock.locked()})
                 return
             elif path == "/api/stats":
@@ -207,6 +228,9 @@ class KratosWebHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         content_length = int(self.headers.get("Content-Length", 0))
+        if path.startswith("/api/jobs") and content_length > 15_000_000:
+            self._send_json({"error": "Job profile uploads must be under 15 MB"}, status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
         body = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
         try:
@@ -223,6 +247,24 @@ class KratosWebHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+        if path.startswith("/api/jobs"):
+            try:
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a job configuration object")
+                if path == "/api/jobs/config":
+                    result = self.server.jobs.configure(payload)
+                elif path == "/api/jobs/control":
+                    result = self.server.jobs.command(payload.get("action", ""), payload.get("job_id", ""), payload.get("note", ""))
+                else:
+                    self._send_json({"error": "Not Found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json(result)
+            except (ValueError, TypeError, KeyError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except Exception:
+                logger.exception("Job endpoint failed")
+                self._send_json({"error": "Job operation failed; check the runtime log"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if path == "/api/settings":
             self._handle_generation_settings(payload)
             return
@@ -1029,6 +1071,13 @@ class KratosServer(ThreadingHTTPServer):
         # Session management and execution must operate on the same memory owner.
         self.memory = getattr(self.runtime, "memory", memory)
         super().__init__(server_address, RequestHandlerClass)
+        from kratos_agent.jobs.manager import get_manager
+        self.jobs = get_manager(Path(getattr(self.runtime, "workspace", Path.cwd())))
+
+    def server_close(self):
+        if getattr(self, "jobs", None):
+            self.jobs.close()
+        super().server_close()
 
 
 def start_server(

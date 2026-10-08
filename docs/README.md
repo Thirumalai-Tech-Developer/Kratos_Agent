@@ -18,6 +18,7 @@ These are the maintained references for the current Kratos-only runtime. The rep
 - [Tools and data](tools-and-data.md): MCP, skills, memory, and data boundaries.
 - [Security policy](SECURITY.md): risk and action boundaries.
 - [Web API](web-api.md): local Python API and Cloudflare services.
+- [AI and ML job applications](JOBS.md): free discovery feeds, applicant profiles, auto-apply and receipts.
 - [Cloudflare D1 setup](cloudflare_d1_setup.md): optional database configuration.
 
 ## Voice, frontend, and builds
