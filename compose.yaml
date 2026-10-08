@@ -1,0 +1,35 @@
+name: kratos-studio
+services:
+  kratos:
+    image: kratos-studio:local
+    build:
+      context: ${KRATOS_BUILD_CONTEXT:-.}
+      dockerfile: Dockerfile
+      args:
+        KRATOS_PORT: ${KRATOS_PORT:-21128}
+        OMNIROUTE_BUILD_WORKERS: ${OMNIROUTE_BUILD_WORKERS:-1}
+    container_name: kratos-studio
+    init: true
+    restart: unless-stopped
+    # Linux host networking preserves Studio's existing loopback-only routes.
+    # Both services bind 127.0.0.1; access from your PC uses an SSH tunnel.
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      KRATOS_PORT: ${KRATOS_PORT:-21128}
+      KRATOS_AGENT_PORT: ${KRATOS_AGENT_PORT:-7860}
+      NEXT_PUBLIC_BASE_URL: http://127.0.0.1:${KRATOS_PORT:-21128}
+      BASE_URL: http://127.0.0.1:${KRATOS_PORT:-21128}
+    volumes:
+      - ${KRATOS_WORKSPACE_PATH:-./data/workspace}:/workspace
+      - ${KRATOS_HOME_PATH:-./data/home}:/home/kratos
+    shm_size: 1gb
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
