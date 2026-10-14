@@ -10,10 +10,15 @@ Supports:
 from __future__ import annotations
 
 import logging
+
 logger = logging.getLogger(__name__)
 
+import hashlib
+import json
 import os
+import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -46,6 +51,17 @@ class D1DatabaseClient:
         self._session = requests.Session()
         self._session.trust_env = False  # Avoid corporate proxy interference
         self._schema_initialized = False
+        self._schema_lock = threading.RLock()
+        self._remote_lock = threading.RLock()
+        self._sync_lock = threading.Lock()
+        self._sync_wake = threading.Event()
+        self._closed = threading.Event()
+        self._sync_thread = None
+        self._remote_schema_initialized = False
+        self._remote_retry_at = 0.0
+        self._remote_schema = []
+        # Bind pending writes to the database, never to the secret API token.
+        self._remote_target = hashlib.sha256(f'{self.account_id}/{self.database_id}'.encode()).hexdigest()
 
     @property
     def is_remote(self) -> bool:
@@ -66,30 +82,100 @@ class D1DatabaseClient:
     # ── SQL Execution ──────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
-        """Executes a SQL query and returns rows as dictionaries."""
+        """Persist writes locally and sync them without holding up a model turn."""
         if not self._schema_initialized:
             self.init_schema()
-
-        if self.is_remote:
+        params = params or []
+        from .execution_control import current_cancel_event
+        in_turn = current_cancel_event() is not None
+        read = sql.lstrip().upper().startswith(('SELECT', 'PRAGMA', 'EXPLAIN'))
+        if not read:
+            result = self._execute_local(sql, params, enqueue=self.is_remote)
+            self._start_sync()
+            return result
+        # Turn execution and unsynced records use the durable local copy. In
+        # particular, Stop must not wait for a cloud query or lose the last turn.
+        pending = self._execute_local('SELECT id FROM _kratos_d1_outbox WHERE target = ? LIMIT 1', [self._remote_target])
+        self._start_sync()
+        if self.is_remote and not in_turn and not pending and time.monotonic() >= self._remote_retry_at:
             try:
-                return self._execute_remote(sql, params or [])
+                self._init_remote_schema()
+                return self._execute_remote(sql, params)
             except Exception:
-                # Log and fallback gracefully to local mirror on network or remote error
-                return self._execute_local(sql, params or [])
-        else:
-            return self._execute_local(sql, params or [])
+                self._remote_retry_at = time.monotonic() + 30
+        return self._execute_local(sql, params)
+
+    def _init_remote_schema(self):
+        with self._remote_lock:
+            if self._remote_schema_initialized:
+                return
+            for statement in self._remote_schema:
+                self._execute_remote(statement, [])
+            self._remote_schema_initialized = True
+
+    @property
+    def has_pending_writes(self):
+        if not self._schema_initialized:
+            self.init_schema()
+        return bool(self._execute_local('SELECT id FROM _kratos_d1_outbox WHERE target = ? LIMIT 1', [self._remote_target]))
+
+    def _start_sync(self):
+        if not self.is_remote or self._closed.is_set():
+            return
+        with self._sync_lock:
+            if self._sync_thread is None or not self._sync_thread.is_alive():
+                self._sync_thread = threading.Thread(target=self._sync_remote, name='kratos-d1-sync', daemon=True)
+                self._sync_thread.start()
+            self._sync_wake.set()
+
+    def _sync_remote(self):
+        while not self._closed.is_set():
+            self._sync_wake.wait(30)
+            self._sync_wake.clear()
+            if self._closed.is_set():
+                return
+            remaining = self._remote_retry_at - time.monotonic()
+            if remaining > 0 and self._closed.wait(remaining):
+                return
+            while not self._closed.is_set():
+                try:
+                    rows = self._execute_local('SELECT * FROM _kratos_d1_outbox WHERE target = ? ORDER BY id LIMIT 1', [self._remote_target])
+                    if not rows:
+                        break
+                    job = rows[0]
+                    self._init_remote_schema()
+                    # Retrying a lost HTTP acknowledgement must not insert the
+                    # same uniquely identified event or turn twice.
+                    statement = re.sub(r'^\s*INSERT\s+INTO\b', 'INSERT OR IGNORE INTO', job['sql'], count=1, flags=re.IGNORECASE)
+                    self._execute_remote(statement, json.loads(job['params_json']))
+                    if self._closed.is_set():
+                        return
+                    self._execute_local('DELETE FROM _kratos_d1_outbox WHERE id = ?', [job['id']])
+                    self._remote_retry_at = 0.0
+                except Exception as exc:
+                    logger.debug('D1 sync deferred (%s); records remain in the local outbox', type(exc).__name__)
+                    self._remote_retry_at = time.monotonic() + 30
+                    break
+
+    def close(self):
+        """Stop background sync; pending records remain available after restart."""
+        self._closed.set()
+        self._sync_wake.set()
+        if self._sync_thread is not None:
+            self._sync_thread.join(timeout=0.5)
 
     def _execute_remote(self, sql: str, params: list[Any]) -> list[dict[str, Any]]:
         payload = {
             "sql": sql,
             "params": params,
         }
-        resp = self._session.post(
-            self.endpoint_url,
-            headers=self._get_headers(),
-            json=payload,
-            timeout=15.0,
-        )
+        with self._remote_lock:
+            resp = self._session.post(
+                self.endpoint_url,
+                headers=self._get_headers(),
+                json=payload,
+                timeout=5.0,
+            )
         if resp.status_code != 200:
             raise RuntimeError(f"Cloudflare D1 HTTP {resp.status_code}: {resp.text[:300]}")
 
@@ -106,7 +192,7 @@ class D1DatabaseClient:
         # Return results of the primary statement block
         return result_blocks[0].get("results", [])
 
-    def _execute_local(self, sql: str, params: list[Any]) -> list[dict[str, Any]]:
+    def _execute_local(self, sql: str, params: list[Any], *, enqueue=False) -> list[dict[str, Any]]:
         conn = sqlite3.connect(self.local_db_path)
         try:
             conn.row_factory = sqlite3.Row
@@ -115,6 +201,9 @@ class D1DatabaseClient:
             if sql.strip().upper().startswith(("SELECT", "PRAGMA")):
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
+            if enqueue:
+                cursor.execute('INSERT INTO _kratos_d1_outbox (target, sql, params_json) VALUES (?, ?, ?)',
+                               [self._remote_target, sql, json.dumps(params)])
             conn.commit()
             return []
         finally:
@@ -131,6 +220,10 @@ class D1DatabaseClient:
     # ── Schema Initialization ──────────────────────────────────────────────────
 
     def init_schema(self, schema_file: Path | None = None) -> bool:
+        with self._schema_lock:
+            return self._init_local_schema(schema_file)
+
+    def _init_local_schema(self, schema_file: Path | None = None) -> bool:
         """Initializes tables and indices from d1_schema.sql."""
         path = schema_file or DEFAULT_SCHEMA_PATH
         if not path.exists():
@@ -145,19 +238,16 @@ class D1DatabaseClient:
             cursor = conn.cursor()
             for stmt in statements:
                 cursor.execute(stmt)
+            cursor.execute('''CREATE TABLE IF NOT EXISTS _kratos_d1_outbox
+                              (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL,
+                               sql TEXT NOT NULL, params_json TEXT NOT NULL)''')
             conn.commit()
         finally:
             conn.close()
 
-        # If Cloudflare D1 credentials are set, also initialize remote D1 tables
-        if self.is_remote:
-            try:
-                for stmt in statements:
-                    self._execute_remote(stmt, [])
-            except Exception as exc:
-                logger.debug("Operation error suppressed: %s", exc)
-
+        self._remote_schema = statements
         self._schema_initialized = True
+        self._start_sync()
         return True
 
     # ── Statistics & Diagnostic Health ─────────────────────────────────────────
@@ -185,6 +275,7 @@ class D1DatabaseClient:
 
         return {
             "mode": mode,
+            "pending_sync": len(self._execute_local('SELECT id FROM _kratos_d1_outbox WHERE target = ?', [self._remote_target])),
             "is_remote": self.is_remote,
             "is_healthy": is_healthy,
             "database_id": self.database_id or "(local mirror)",

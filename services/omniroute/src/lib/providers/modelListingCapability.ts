@@ -33,12 +33,12 @@ export function providerUsesCuratedModelsOnly(providerId: string): boolean {
  * static registry for dashboard / `/v1/models` / Test All listing. Static rows
  * remain offline fallback only when synced is empty.
  *
- * Cursor and browser-discovered Qwen use their complete observed pickers. Other providers keep
+ * Cursor, browser-discovered Qwen and Antigravity use their complete observed catalogs. Other providers keep
  * coverage-style static preservation (e.g. command-code uncovered static ids).
  */
 export function providerUsesExclusiveSyncedListing(providerId: string): boolean {
   const id = providerId.trim().toLowerCase();
-  return id === "cursor" || id === "cu" || id === "qwen-browser" || id === "qwb";
+  return ["cursor", "cu", "qwen-browser", "qwb", "agy", "antigravity"].includes(id);
 }
 
 /**

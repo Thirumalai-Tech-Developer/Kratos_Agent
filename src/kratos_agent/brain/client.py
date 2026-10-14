@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 class BrainClient:
     """Legacy application-facing API backed only by KratosClient."""
 
-    def __init__(self, endpoint_url: str | None = None):
+    def __init__(self, endpoint_url: str | None = None, *, provider: str | None = None,
+                 account_id: str | None = None, configured_model: str | None = None):
         self.endpoint_url = endpoint_url or get_endpoint_url()
-        self.sdk = KratosClient(self.endpoint_url)
+        self.sdk = KratosClient(self.endpoint_url, provider=provider, account_id=account_id,
+                               configured_model=configured_model)
         self.generation_options = {}
         self.generation_model = None
 
@@ -107,7 +109,8 @@ class BrainClient:
                 max_retries=max_retries if max_retries is not None else get_max_retries(),
                 timeout=timeout if timeout is not None else get_request_timeout(),
             )
-            calls = [{"id": call.id, "name": call.name, "args": call.arguments} for call in response.tool_calls]
+            calls = [{"id": call.id, "name": call.name, "args": call.arguments,
+                      **({"provider_items": call.provider_items} if call.provider_items else {})} for call in response.tool_calls]
             duration_ms = (time.monotonic() - started) * 1000
             metrics.ttft_ms = metrics.ttft_ms or duration_ms
             metrics.generation_ms = duration_ms

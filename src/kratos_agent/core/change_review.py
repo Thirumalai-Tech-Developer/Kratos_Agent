@@ -10,30 +10,69 @@ import subprocess
 import threading
 import time
 import uuid
-from pathlib import Path
 from functools import wraps
+from pathlib import Path
 
 
-def checkpoint_turn(method):
-    """Capture edits even when a turn fails; capture problems must not block a turn."""
-    @wraps(method)
-    def wrapped(self, query, *args, **kwargs):
-        pending = None
-        review = getattr(self, 'change_review', None)
-        if review is not None:
+class _TurnCheckpoint:
+    def __init__(self, runtime, query):
+        self.review = getattr(runtime, 'change_review', None)
+        session = getattr(getattr(runtime, 'memory', None), 'active_session', None)
+        self.session_id = getattr(session, 'session_id', None)
+        self.query = query
+        self.pending = None
+        self.attempted = False
+        self.lock = threading.Lock()
+
+    def capture(self):
+        with self.lock:
+            if self.attempted or self.review is None:
+                return
+            self.attempted = True
             try:
-                session = getattr(self.memory, 'active_session', None)
-                pending = review.begin(query, getattr(session, 'session_id', None))
+                self.pending = self.review.begin(self.query, self.session_id)
+            except InterruptedError:
+                raise
             except Exception as exc:
                 logging.getLogger(__name__).warning('Task checkpoint unavailable: %s', exc)
+
+    def finish(self):
+        if self.pending is not None:
+            try:
+                self.review.finish(self.pending)
+            except Exception as exc:
+                logging.getLogger(__name__).warning('Task change review unavailable: %s', exc)
+
+
+def capture_before_tool(runtime):
+    """Capture one shared baseline before an approved tool can modify the workspace."""
+    from .execution_control import current_cancel_event
+    cancel = current_cancel_event()
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('Checkpoint cancelled by user')
+    checkpoint = getattr(runtime, '_turn_checkpoint', None)
+    if checkpoint is not None:
+        checkpoint.capture()
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('Checkpoint cancelled by user')
+
+
+def checkpoint_turn(method=None, *, defer=False):
+    """Capture edits even when a turn fails; capture problems must not block a turn."""
+    if method is None:
+        return lambda func: checkpoint_turn(func, defer=defer)
+    @wraps(method)
+    def wrapped(self, query, *args, **kwargs):
+        checkpoint = _TurnCheckpoint(self, query)
+        previous = getattr(self, '_turn_checkpoint', None)
+        self._turn_checkpoint = checkpoint
         try:
+            if not defer:
+                checkpoint.capture()
             return method(self, query, *args, **kwargs)
         finally:
-            if pending is not None:
-                try:
-                    review.finish(pending)
-                except Exception as exc:
-                    logging.getLogger(__name__).warning('Task change review unavailable: %s', exc)
+            self._turn_checkpoint = previous
+            checkpoint.finish()
     return wrapped
 
 
@@ -76,19 +115,40 @@ class ChangeReview:
                 checked.add(ancestor)
         return target
 
-    def _files(self) -> set[str]:
+    @staticmethod
+    def _check_cancel():
+        from .execution_control import current_cancel_event
+        cancel = current_cancel_event()
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError('Checkpoint cancelled by user')
+
+    def _files(self, *, cancellable=False) -> set[str]:
         try:
-            result = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.'],
-                                    cwd=self.workspace, capture_output=True, timeout=10, check=True)
-            names = result.stdout.decode('utf-8', errors='surrogateescape').split('\0')
+            command = ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.']
+            if cancellable:
+                from .execution_control import collect_command_output
+                self._check_cancel()
+                process = subprocess.Popen(command, cwd=self.workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                output = collect_command_output(process, timeout=10)
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, command)
+            else:
+                output = subprocess.run(command, cwd=self.workspace, capture_output=True, timeout=10, check=True).stdout
+            names = output.decode('utf-8', errors='surrogateescape').split('\0')
+        except InterruptedError:
+            raise
         except (OSError, subprocess.SubprocessError):
             names = []
             for root, dirs, files in os.walk(self.workspace, followlinks=False):
+                if cancellable:
+                    self._check_cancel()
                 dirs[:] = [d for d in dirs if d.lower() not in self.EXCLUDED and not (Path(root) / d).is_symlink()]
                 names.extend((Path(root) / name).relative_to(self.workspace).as_posix() for name in files)
         eligible = set()
         checked = set()
         for name in names:
+            if cancellable:
+                self._check_cancel()
             if name:
                 try:
                     if self._path(name, checked).is_file():
@@ -129,6 +189,7 @@ class ChangeReview:
 
     def begin(self, label: str, session_id: str | None = None) -> dict:
         with self.lock:
+            self._check_cancel()
             if self.store.exists():
                 finished = sorted((item for item in self.store.iterdir() if (item / 'manifest.json').is_file()),
                                   key=lambda item: item.stat().st_mtime, reverse=True)
@@ -140,13 +201,13 @@ class ChangeReview:
                             child.unlink()
                     if not any(obsolete.iterdir()):
                         obsolete.rmdir()
-            names = self._files()
+            names = self._files(cancellable=True)
             checkpoint = uuid.uuid4().hex
             directory = self._directory(checkpoint)
-            directory.mkdir(parents=True, exist_ok=False)
             baseline, skipped, total = {}, [], 0
             checked = set()
             for name in sorted(names):
+                self._check_cancel()
                 try:
                     data = self._read(name, checked)
                     if data is None:
@@ -159,6 +220,8 @@ class ChangeReview:
                     baseline[name] = {'hash': digest, 'data': data, 'mode': self._path(name, checked).stat().st_mode}
                 except (ValueError, OSError):
                     skipped.append(name)
+            self._check_cancel()
+            directory.mkdir(parents=True, exist_ok=False)
             return {'id': checkpoint, 'created_at': time.time(), 'label': label[:160],
                     'session_id': session_id, 'baseline': baseline, 'known': names, 'skipped': skipped}
 

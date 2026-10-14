@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import logging
+
 logger = logging.getLogger(__name__)
 
+import hashlib
+import json
 import os
+import tempfile
+import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -26,8 +32,8 @@ _cached_model_details: dict[str, dict[str, Any]] = {}
 _cache_timestamp: float = 0.0
 _catalog_last_attempt: float = 0.0
 _catalog_endpoint: str = ""
-_CACHE_TTL_SECONDS: float = 30.0
-_CATALOG_RETRY_DELAY_SECONDS: float = 5.0
+_catalog_cache_key: str = ""
+_catalog_lock = threading.RLock()
 
 PUBLIC_MODELS: list[str] = []
 
@@ -43,6 +49,14 @@ def get_api_key(explicit_key: str | None = None) -> str:
     return os.getenv("KRATOS_API_KEY", "")
 
 
+def get_model_provider() -> str:
+    from .account_store import account_store
+    provider = (os.getenv("KRATOS_MODEL_PROVIDER") or account_store.read().get("provider", "gateway")).lower().strip()
+    if provider not in {"gateway", "chatgpt", "chatgpt-web", "browser-web"}:
+        raise ValueError("KRATOS_MODEL_PROVIDER must be gateway, chatgpt, chatgpt-web or browser-web")
+    return provider
+
+
 def authenticate(explicit_key: str | None = None) -> dict[str, str]:
     key = explicit_key or get_api_key()
     headers = {
@@ -56,11 +70,19 @@ def authenticate(explicit_key: str | None = None) -> dict[str, str]:
 
 def get_base_url() -> str:
     """Returns the configured local Kratos gateway base URL."""
+    if get_model_provider() == "chatgpt":
+        return "https://api.openai.com/v1"
+    if get_model_provider() in {"chatgpt-web", "browser-web"}:
+        return "https://chatgpt.com"
     return (os.getenv("KRATOS_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
 
 
 def get_endpoint_url() -> str:
     """Returns the local Kratos gateway chat-completions URL."""
+    if get_model_provider() == "chatgpt":
+        return "https://api.openai.com/v1/responses"
+    if get_model_provider() in {"chatgpt-web", "browser-web"}:
+        return "https://chatgpt.com"
     direct_url = os.getenv("KRATOS_CHAT_ENDPOINT")
     if direct_url:
         return direct_url
@@ -72,6 +94,10 @@ def get_endpoint_url() -> str:
 
 def get_model_endpoint_url() -> str:
     """Returns the local Kratos gateway model-listing URL."""
+    if get_model_provider() == "chatgpt":
+        return "https://api.openai.com/v1/models"
+    if get_model_provider() in {"chatgpt-web", "browser-web"}:
+        return "https://chatgpt.com/backend-api/models"
     direct_url = os.getenv("KRATOS_MODEL_ENDPOINT")
     if direct_url:
         return direct_url
@@ -83,6 +109,11 @@ def get_model_endpoint_url() -> str:
 
 def get_default_model() -> str:
     """Returns the explicitly configured Kratos model ID."""
+    if os.getenv("KRATOS_RUNTIME_MODEL"):
+        return os.environ["KRATOS_RUNTIME_MODEL"].strip()
+    if get_model_provider() in {"chatgpt", "chatgpt-web", "browser-web"}:
+        from .account_store import account_store
+        return account_store.selected_model(get_model_provider())
     return os.getenv("KRATOS_MODEL", "").strip()
 
 
@@ -375,70 +406,103 @@ def get_model_catalog(
     timeout: float = 3.0,
     refresh: bool = False,
     strict: bool = False,
+    cache_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch gateway models with normalized input/output modality flags.
+    """Read saved gateway models; only explicit refresh replaces a known catalog.
 
     Runtime requests use only the explicitly selected KRATOS_MODEL.
     A missing modality declaration is reported as ``Unknown`` instead of being
     inferred from a model ID. If the endpoint is unavailable, the configured
     model is still returned with its text-chat baseline and unknown limits.
     """
-    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_last_attempt, _catalog_endpoint
+    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_last_attempt, _catalog_endpoint, _catalog_cache_key
+
+    if endpoint is None and get_model_provider() in {"chatgpt-web", "browser-web"}:
+        from .chatgpt_web import chatgpt_web_accounts
+        configured = get_default_model()
+        try:
+            models = chatgpt_web_accounts.models(timeout=timeout, refresh=refresh)
+        except BrainError as exc:
+            if strict:
+                raise ModelCatalogUnavailable(str(exc)) from exc
+            logger.debug("Browser model catalog unavailable: %s", exc)
+            return []
+        return [{**item, "is_configured": item["id"] == configured, "metadata_available": True, "provider": item["id"].split("/")[0]}
+                for item in models]
+
+    if endpoint is None and get_model_provider() == "chatgpt":
+        from .chatgpt_auth import chatgpt_accounts
+        configured = get_default_model()
+        return [{"id": item["id"], "display_name": item.get("display_name", item["id"]),
+                 **_model_modalities(item), **_model_limits(item), "metadata_available": True,
+                 "is_configured": item["id"] == configured, "provider": "chatgpt", "access_verified": False}
+                for item in chatgpt_accounts.models(timeout=timeout)]
 
     target_endpoint = endpoint or get_model_endpoint_url()
-    now = time.time()
-    if (
-        not refresh
-        and endpoint is None
-        and _cache_timestamp
-        and (not strict or _catalog_endpoint == target_endpoint)
-        and (now - _cache_timestamp) < _CACHE_TTL_SECONDS
-    ):
-        details = _cached_model_details
-    elif (
-        not refresh
-        and endpoint is None
-        and _catalog_last_attempt
-        and (now - _catalog_last_attempt) < _CATALOG_RETRY_DELAY_SECONDS
-        and not strict
-    ):
-        details = _cached_model_details
-    else:
-        if endpoint is None:
-            _catalog_last_attempt = now
-        session = requests.Session()
-        session.trust_env = False
-        try:
-            response = session.get(target_endpoint, headers=authenticate(), timeout=timeout)
-            if response.status_code == 200:
-                model_ids, fetched_details = _extract_model_catalog(response.json())
-                _cached_model_details = fetched_details
-                configured = get_default_model()
-                _cached_models = [configured] if configured and configured in model_ids else []
-                _cache_timestamp = now
-                _catalog_endpoint = target_endpoint
-                details = fetched_details
+    cache_path = _gateway_catalog_cache_path(cache_path)
+    target_key = _gateway_catalog_cache_key(target_endpoint)
+    fetched = False
+    with _catalog_lock:
+        if not refresh and _cache_timestamp and _catalog_cache_key == target_key:
+            details = _cached_model_details
+        else:
+            saved = None if refresh else _read_gateway_catalog_cache(cache_path, target_endpoint)
+            if saved is not None:
+                _restore_gateway_catalog_cache(saved, target_endpoint)
+                details = _cached_model_details
             else:
-                if strict:
-                    raise ModelCatalogUnavailable("The gateway model catalog is unavailable. Check provider connections and try again.")
-                details = _cached_model_details if endpoint is None else {}
-        except ModelCatalogUnavailable:
-            raise
-        except requests.Timeout as exc:
-            if strict:
-                raise ModelCatalogUnavailable("The gateway model catalog timed out. Try refreshing the model list.") from exc
-            details = _cached_model_details if endpoint is None else {}
-        except Exception as exc:
-            if strict:
-                raise ModelCatalogUnavailable("Cannot read the gateway model catalog. Check that OmniRoute is running.") from exc
-            logger.debug("Could not fetch Kratos model catalog: %s", exc)
-            details = _cached_model_details if endpoint is None else {}
-        finally:
-            session.close()
+                _catalog_last_attempt = time.time()
+                session = requests.Session()
+                session.trust_env = False
+                try:
+                    response = session.get(target_endpoint, headers=authenticate(), timeout=timeout)
+                    if response.status_code == 200:
+                        model_ids, fetched_details = _extract_model_catalog(response.json())
+                        _cached_model_details = fetched_details
+                        configured = get_default_model()
+                        _cached_models = [configured] if configured and configured in model_ids else []
+                        _cache_timestamp = time.time()
+                        _catalog_endpoint = target_endpoint
+                        _catalog_cache_key = target_key
+                        details = fetched_details
+                        fetched = True
+                    else:
+                        if strict:
+                            raise ModelCatalogUnavailable("The gateway model catalog is unavailable. Check provider connections and try again.")
+                        details = _cached_model_details if _catalog_cache_key == target_key else {}
+                except ModelCatalogUnavailable:
+                    raise
+                except requests.Timeout as exc:
+                    if strict:
+                        raise ModelCatalogUnavailable("The gateway model catalog timed out. Try refetching the model list.") from exc
+                    details = _cached_model_details if _catalog_cache_key == target_key else {}
+                except Exception as exc:
+                    if strict:
+                        raise ModelCatalogUnavailable("Cannot read the gateway model catalog. Check that OmniRoute is running.") from exc
+                    logger.debug("Could not fetch Kratos model catalog: %s", exc)
+                    details = _cached_model_details if _catalog_cache_key == target_key else {}
+                finally:
+                    session.close()
+        catalog = _normalized_gateway_catalog(details, strict=strict)
+        if fetched or (not refresh and _cache_timestamp and _catalog_cache_key == target_key
+                       and _read_gateway_catalog_cache(cache_path, target_endpoint) is None):
+            _save_gateway_catalog_cache(cache_path, target_endpoint, catalog)
+        return catalog
 
+
+def _normalized_gateway_catalog(details: dict[str, dict[str, Any]], *, strict: bool) -> list[dict[str, Any]]:
     catalog = []
     configured_model = get_default_model()
     for model_id, metadata in details.items():
+        # Saved rows are already normalized. Preserve Unknown modality flags;
+        # an empty normalized modality list is not a new provider declaration.
+        modalities = (
+            {key: metadata.get(key) for key in (
+                "input_modalities", "output_modalities", "supports_text_input",
+                "supports_image_input", "modality_label")}
+            if metadata.get("metadata_available") is True and "modality_label" in metadata
+            else _model_modalities(metadata)
+        )
         entry = {
             "id": model_id,
             "name": metadata.get("name") or metadata.get("display_name") or model_id,
@@ -447,7 +511,7 @@ def get_model_catalog(
             **({"disabled_reason": metadata["disabled_reason"]} if isinstance(metadata.get("disabled_reason"), str) else {}),
             "supported_parameters": metadata.get('supported_parameters', []),
             "supports_temperature": metadata.get('supports_temperature'),
-            **_model_modalities(metadata),
+            **modalities,
             **_model_limits(metadata),
             "metadata_available": True,
             "is_configured": model_id == configured_model,
@@ -479,9 +543,148 @@ def get_model_catalog(
     return catalog
 
 
+def _gateway_catalog_cache_key(endpoint: str) -> str:
+    return hashlib.sha256((endpoint + '\0' + json.dumps(authenticate(), sort_keys=True)).encode()).hexdigest()
+
+
+def _gateway_catalog_cache_path(path: Path | None = None) -> Path:
+    if path is not None:
+        return Path(path)
+    override = os.getenv("KRATOS_CATALOG_CACHE_PATH")
+    return Path(override) if override else Path.cwd() / ".kratos" / "gateway-model-catalog.json"
+
+
+def _restore_gateway_catalog_cache(rows: list[dict[str, Any]], endpoint: str) -> None:
+    global _cached_model_details, _cached_models, _cache_timestamp, _catalog_endpoint, _catalog_cache_key
+    _cached_model_details = {row["id"]: dict(row) for row in rows}
+    configured = get_default_model()
+    _cached_models = [configured] if configured in _cached_model_details else []
+    _cache_timestamp = time.time()
+    _catalog_endpoint = endpoint
+    _catalog_cache_key = _gateway_catalog_cache_key(endpoint)
+
+
+def _read_gateway_catalog_cache(path: Path | None, endpoint: str) -> list[dict[str, Any]] | None:
+    if path is None:
+        return None
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(saved, dict) or saved.get("key") != _gateway_catalog_cache_key(endpoint):
+            return None
+        rows = saved.get("models")
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("id"), str)
+            or not row["id"] or row.get("metadata_available") is not True for row in rows
+        ):
+            return None
+        return rows
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _save_gateway_catalog_cache(path: Path | None, endpoint: str, rows: list[dict[str, Any]]) -> None:
+    if path is None:
+        return
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        saved = {'version': 1, 'key': _gateway_catalog_cache_key(endpoint), 'saved_at': time.time(),
+                 'models': [row for row in rows if row.get('metadata_available')]}
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(saved, handle, ensure_ascii=False)
+        temporary.replace(path)
+    except (OSError, ValueError, TypeError):
+        logger.debug('Gateway catalog cache could not be saved')
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                logger.debug('Gateway catalog cache temporary file could not be removed')
+
+
+def get_runtime_model_catalog(
+    timeout: float = 3.0, refresh: bool = False, strict: bool = False, cache_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Show gateway models together with saved extension connections.
+
+    Browser metadata is captured at connection time; opening the picker never
+    starts a browser request. Expired sessions are reported when used or refreshed
+    in the extension, without hiding other providers.
+    """
+    from .account_store import account_store
+    from .web_providers import WEB_PROVIDERS
+
+    state = account_store.read()
+    active_provider = get_model_provider()
+    configured = get_default_model()
+    active_account = os.getenv("KRATOS_RUNTIME_ACCOUNT_ID") or state.get("active_web_account", "")
+    # A failed first lookup must not be saved as a successful empty catalog.
+    # The outer strict flag controls whether a missing combined catalog raises.
+    kwargs = {"timeout": timeout, "refresh": refresh, "strict": True}
+    if active_provider != "gateway":
+        base = (os.getenv("KRATOS_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+        kwargs["endpoint"] = os.getenv("KRATOS_MODEL_ENDPOINT") or f"{base}/models"
+    gateway_error = None
+    target_endpoint = kwargs.get("endpoint") or get_model_endpoint_url()
+    cache_path = _gateway_catalog_cache_path(cache_path)
+    catalog_cached = False
+    with _catalog_lock:
+        gateway = None if refresh else _read_gateway_catalog_cache(cache_path, target_endpoint)
+        if gateway is not None:
+            _restore_gateway_catalog_cache(gateway, target_endpoint)
+            catalog_cached = True
+        else:
+            try:
+                gateway = get_model_catalog(**kwargs, cache_path=cache_path)
+                _save_gateway_catalog_cache(cache_path, target_endpoint, gateway)
+            except ModelCatalogUnavailable as exc:
+                gateway = _read_gateway_catalog_cache(cache_path, target_endpoint)
+                gateway, gateway_error = gateway if gateway is not None else [], exc
+                catalog_cached = bool(gateway)
+    catalog = []
+    for entry in gateway:
+        if not entry.get("metadata_available"):
+            continue
+        cached = {"catalog_cached": True} if catalog_cached else {}
+        if gateway_error:
+            cached["catalog_notice"] = str(gateway_error)
+        catalog.append({**entry, **cached, "connection_provider": "gateway", "connection_label": "OmniRoute",
+                        "selection_key": "gateway:" + entry["id"],
+                        "is_configured": active_provider == "gateway" and entry["id"] == configured})
+    for account_id, record in state.get("web_accounts", {}).items():
+        provider_id = record.get("provider_id", "chatgpt-web")
+        if not record.get("storage_state") or provider_id not in WEB_PROVIDERS:
+            continue
+        route = "chatgpt-web" if provider_id == "chatgpt-web" else "browser-web"
+        label = WEB_PROVIDERS[provider_id]["name"] + " · browser"
+        for model in record.get("models", []):
+            if not isinstance(model, dict) or not isinstance(model.get("id"), str):
+                continue
+            entry = {**model, **_model_modalities({"supports_text_input": True, **model}), **_model_limits(model),
+                     "name": model.get("display_name") or model["id"],
+                     "provider": provider_id, "provider_name": label, "metadata_available": True,
+                     "connection_provider": route, "connection_account_id": account_id,
+                     "connection_label": label, "catalog_cached": True,
+                     "selection_key": route + ":" + account_id + ":" + model["id"],
+                     "is_configured": active_provider == route and account_id == active_account
+                                      and model["id"] == configured}
+            if gateway_error:
+                entry["catalog_notice"] = str(gateway_error)
+            catalog.append(entry)
+    if strict and gateway_error and not catalog:
+        raise gateway_error
+    return catalog
+
+
 def get_model_request_options(model_id: str | None = None) -> dict[str, Any]:
     """Return cached gateway generation settings without making a network call."""
+    if get_model_provider() in {"chatgpt", "chatgpt-web", "browser-web"}:
+        return {}
     target_model = model_id or get_default_model()
+    if _catalog_cache_key != _gateway_catalog_cache_key(get_model_endpoint_url()):
+        return {}
     metadata = _cached_model_details.get(target_model)
     if not metadata:
         return {}
@@ -499,37 +702,12 @@ def get_model(
     timeout: float = 3.0,
     refresh: bool = False,
 ) -> list[str]:
-    """Return only the configured Kratos model when the gateway advertises it."""
-    global _cached_models, _cache_timestamp, _cached_model_details
-
-    target_endpoint = endpoint or get_model_endpoint_url()
-    now = time.time()
-    configured_model = get_default_model()
-    if not configured_model:
+    """Return the configured model from the saved catalog."""
+    configured = get_default_model()
+    if not configured:
         return []
-
-    # Use cache if fresh and not forcing refresh (and using default endpoint)
-    if not refresh and endpoint is None and _cached_model_details and (now - _cache_timestamp) < _CACHE_TTL_SECONDS:
-        return [configured_model] if configured_model in _cached_model_details else []
-
-    session = requests.Session()
-    session.trust_env = False
-    header = authenticate()
-    try:
-        result = session.get(target_endpoint, headers=header, timeout=timeout)
-        if result.status_code == 200:
-            result_json = result.json()
-            model_list, model_details = _extract_model_catalog(result_json)
-            if model_list:
-                _cache_timestamp = now
-                _cached_model_details = model_details
-                _cached_models = [configured_model] if configured_model in model_list else []
-                return list(_cached_models)
-    except Exception as exc:
-        logger.debug("Operation error suppressed: %s", exc)
-
-    # If fetch failed, fall back to cached models if available
-    return [configured_model] if configured_model else []
+    rows = get_model_catalog(endpoint=endpoint, timeout=timeout, refresh=refresh)
+    return [configured] if any(row["id"] == configured for row in rows) else []
 
 
 def fetch_models(endpoint: str | None = None, timeout: float = 3.0, refresh: bool = False) -> list[str]:
@@ -550,6 +728,8 @@ def get_normal_mode_model() -> str:
 def get_request_timeout() -> float:
     """Returns the request timeout in seconds."""
     raw = os.getenv("KRATOS_TIMEOUT")
+    if not raw and get_model_provider() in {"chatgpt-web", "browser-web"}:
+        return 240.0
     if raw:
         try:
             return max(1.0, float(raw))
@@ -620,4 +800,5 @@ def get_max_parallel_workers() -> int:
     except ValueError:
         return 8
 
-PUBLIC_MODELS = get_available_models()
+# Compatibility constant only. Importing configuration must never start a
+# browser operation or require an authenticated account; catalog reads are lazy.

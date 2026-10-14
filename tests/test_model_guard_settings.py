@@ -81,16 +81,20 @@ def test_capability_settings_persist_and_unsupported_options_are_rejected(tmp_pa
 
 
 def test_generation_options_are_sent_only_for_selected_model(monkeypatch):
+    monkeypatch.setenv('KRATOS_MODEL_PROVIDER', 'gateway')
+    monkeypatch.setenv('KRATOS_RUNTIME_MODEL', 'model')
     monkeypatch.setenv('KRATOS_MODEL', 'model')
     client = BrainClient('http://127.0.0.1:9999/v1/chat/completions')
     client.generation_options = {'temperature': 0.2, 'reasoning_effort': 'high'}
     client.generation_model = 'model'
     assert client.build_envelope('model', [])['temperature'] == 0.2
     monkeypatch.setenv('KRATOS_MODEL', 'other-model')
+    monkeypatch.setenv('KRATOS_RUNTIME_MODEL', 'other-model')
     assert 'temperature' not in client.build_envelope('other-model', [])
 
 
-def test_loop_stops_duplicate_inspections_with_all_tool_results_recorded(tmp_path):
+def test_bounded_loop_stops_duplicate_inspections_with_all_tool_results_recorded(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRATOS_AUTONOMOUS_RECOVERY", "0")
     model = MagicMock()
     model.complete.side_effect = [ModelResponse(text='', tool_calls=[ToolCall('read_file', {'file_path': 'app.py'}, call_id=f'call{i}')], finish_reason='tool_calls') for i in range(8)]
     tools = MagicMock()
@@ -156,3 +160,47 @@ def test_invalid_saved_values_do_not_break_runtime(tmp_path):
     assert settings.status('model', {})['inspection_limit'] == 12
     settings.values['model'] = []
     assert settings.update('model', {}, {'inspection_limit': 8})['inspection_limit'] == 8
+
+
+def test_persistent_recovery_changes_approach_without_reexecuting_blocked_reads(tmp_path):
+    from kratos_agent.core.tool_runtime import ToolRegistry
+    from kratos_agent.core.runtime_contracts import ToolPermission, ToolSpec
+
+    source = tmp_path / "app.py"
+    source.write_text("old contents", encoding="utf8")
+    executed = []
+    tools = ToolRegistry()
+    params = {"type": "object", "properties": {"file_path": {"type": "string"}},
+              "required": ["file_path"], "additionalProperties": False}
+    def read_file(file_path):
+        executed.append("read_file")
+        return (tmp_path / file_path).read_text(encoding="utf8")
+    def edit_file(file_path):
+        executed.append("edit_file")
+        (tmp_path / file_path).write_text("fixed contents", encoding="utf8")
+        return "Updated file"
+    tools.register(ToolSpec("read_file", "Read a file", params, ToolPermission.READ), read_file)
+    tools.register(ToolSpec("edit_file", "Fix the isolated file", params, ToolPermission.WRITE), edit_file)
+    model = MagicMock()
+    model.complete.side_effect = [
+        *[ModelResponse(tool_calls=[ToolCall("read_file", {"file_path": "app.py"})]) for _ in range(6)],
+        ModelResponse(tool_calls=[ToolCall("edit_file", {"file_path": "app.py"})]),
+        ModelResponse(text="File fixed.")
+    ]
+    events = []
+    loop = AgentLoop(context=ContextBuilder(), instructions=SimpleNamespace(build=lambda: []),
+                     tools=tools, model=model, emit=events.append, workspace=tmp_path)
+    loop.cancellation_flag.wait = MagicMock(return_value=False)
+    with patch("kratos_agent.core.agent_loop.formulate_agent_plan", return_value=None):
+        answer, history = loop.run([ChatMessage("user", "Fix app.py")],
+                                   allow_tool=lambda *args: (True, "allowed"), max_steps=10)
+    assert answer == "File fixed."
+    assert source.read_text(encoding="utf8") == "fixed contents"
+    assert executed == ["read_file"] * 3 + ["edit_file"]
+    assert any(event.kind == EventKind.RETRY and event.payload.get("strategy") == "fresh_plan"
+               for event in events)
+    assert any(request.args[0].get("tool_recovery_protocol") == "fresh_plan"
+               for request in model.complete.call_args_list)
+    assert not any(event.kind == EventKind.TURN_FAILED for event in events)
+    assert any(message.role == "tool" and "blocked" in message.content.lower()
+               for message in history)

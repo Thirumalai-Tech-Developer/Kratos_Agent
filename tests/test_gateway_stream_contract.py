@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from kratos_agent.brain.config import BrainError
+from kratos_agent.brain.config import BrainError, BrainTimeoutError
 from kratos_agent.sdk.client import KratosClient
 
 
@@ -29,7 +29,7 @@ class Stream:
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv('KRATOS_MODEL', 'configured-combo')
-    return KratosClient(max_retries=2)
+    return KratosClient(provider='gateway', configured_model='configured-combo', max_retries=2)
 
 
 @pytest.mark.parametrize('text_api', [False, True])
@@ -49,7 +49,7 @@ def test_sse_error_is_not_silently_accepted(client):
         {'choices': [{'delta': {'content': 'partial'}}]},
         {'error': {'message': 'upstream failed'}}, '[DONE]',
     ]))
-    with pytest.raises(BrainError, match='stream error'):
+    with pytest.raises(BrainError, match='interrupted'):
         client.complete({'model': 'configured-combo'})
     assert client.session.post.call_count == 1
 
@@ -145,7 +145,8 @@ def test_cancel_interrupts_silent_upstream_after_sse_headers(monkeypatch):
     server = ThreadingHTTPServer(('127.0.0.1', 0), SilentHandler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
-    client = KratosClient(endpoint_url=f'http://127.0.0.1:{server.server_port}/v1/chat/completions', timeout=5, max_retries=0)
+    client = KratosClient(endpoint_url=f'http://127.0.0.1:{server.server_port}/v1/chat/completions',
+                          provider='gateway', configured_model='configured-combo', timeout=5, max_retries=0)
 
     def request():
         try:
@@ -164,6 +165,124 @@ def test_cancel_interrupts_silent_upstream_after_sse_headers(monkeypatch):
         assert len(errors) == 1 and 'cancelled' in str(errors[0])
     finally:
         release.set()
+        server.shutdown()
+        server.server_close()
+        client.session.close()
+
+
+@pytest.mark.parametrize('cancel_scope', [False, True])
+def test_sse_heartbeat_cannot_extend_request_deadline(cancel_scope):
+    from kratos_agent.sdk.client import gateway_scope
+
+    headers_sent = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    errors = []
+
+    class HeartbeatHandler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.flush()
+            headers_sent.set()
+            try:
+                while not release.wait(0.03):
+                    self.wfile.write(b': keepalive\n\n')
+                    self.wfile.flush()
+            except OSError:
+                pass
+            self.close_connection = True
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), HeartbeatHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    client = KratosClient(endpoint_url=f'http://127.0.0.1:{server.server_port}/v1/chat/completions',
+                          provider='gateway', configured_model='configured-combo', timeout=0.3, max_retries=0)
+
+    def request():
+        try:
+            with gateway_scope(cancel=threading.Event() if cancel_scope else None):
+                client.complete({'model': 'configured-combo'})
+        except BrainError as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=request, daemon=True)
+    worker.start()
+    try:
+        assert headers_sent.wait(2)
+        assert finished.wait(1.5), 'upstream heartbeats kept the request pending after its deadline'
+        assert len(errors) == 1
+        assert isinstance(errors[0], BrainTimeoutError)
+    finally:
+        release.set()
+        worker.join(2)
+        server.shutdown()
+        server.server_close()
+        client.session.close()
+
+
+@pytest.mark.parametrize('text_api', [False, True])
+def test_short_sse_reply_finishes_before_gateway_closes_connection(text_api):
+    """A completed reply smaller than requests' buffer must leave pending state."""
+    headers_sent = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    results = []
+    errors = []
+
+    class KeepOpenHandler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            self.wfile.write(b'data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+            self.wfile.flush()
+            headers_sent.set()
+            release.wait(5)
+            self.close_connection = True
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), KeepOpenHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    client = KratosClient(endpoint_url=f'http://127.0.0.1:{server.server_port}/v1/chat/completions',
+                          provider='gateway', configured_model='configured-combo', timeout=4, max_retries=0)
+
+    def request():
+        try:
+            if text_api:
+                results.append(''.join(client.stream_text({'model': 'configured-combo'})))
+            else:
+                results.append(client.complete({'model': 'configured-combo'}).text)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=request, daemon=True)
+    worker.start()
+    try:
+        assert headers_sent.wait(2)
+        assert finished.wait(1), 'complete SSE reply stayed buffered while the gateway connection was open'
+        assert not errors
+        assert results == ['OK']
+    finally:
+        release.set()
+        worker.join(5)
         server.shutdown()
         server.server_close()
         client.session.close()

@@ -12,6 +12,21 @@ import pytest
 from kratos_agent import product
 
 
+@pytest.fixture(autouse=True)
+def isolated_gateway_environment(tmp_path, monkeypatch):
+    """Lifecycle mocks exercise the gateway branch with private temporary state."""
+    from kratos_agent.brain import account_store as accounts_module
+
+    auth_dir = tmp_path / "auth"
+    monkeypatch.setenv("KRATOS_AUTH_DIR", str(auth_dir))
+    monkeypatch.setattr(accounts_module, "account_store", accounts_module.AccountStore(auth_dir))
+    monkeypatch.setenv("KRATOS_MODEL_PROVIDER", "gateway")
+    for name in ("KRATOS_RUNTIME_MODEL", "KRATOS_RUNTIME_ACCOUNT_ID", "KRATOS_MODEL",
+                 "KRATOS_API_KEY", "OMNIROUTE_API_KEY", "ROUTER_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KRATOS_CATALOG_CACHE_PATH", str(tmp_path / "catalog.json"))
+
+
 def arguments(workspace, **overrides):
     values = dict(workspace=workspace, data_dir=None, port=20228, agent_port=7860,
                   dev=False, cli=True, no_browser=False, startup_timeout=20)

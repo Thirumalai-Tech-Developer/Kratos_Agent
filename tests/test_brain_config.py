@@ -1,5 +1,7 @@
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from kratos_agent.brain.config import (
     DEFAULT_BASE_URL,
     DEFAULT_CHAT_ENDPOINT,
@@ -24,6 +26,8 @@ class BrainConfigTests(unittest.TestCase):
         keys = (
             "KRATOS_BASE_URL", "KRATOS_CHAT_ENDPOINT", "KRATOS_MODEL_ENDPOINT",
             "KRATOS_MODEL", "KRATOS_TIMEOUT", "KRATOS_MAX_RETRIES",
+            "KRATOS_MODEL_PROVIDER", "KRATOS_RUNTIME_MODEL", "KRATOS_RUNTIME_ACCOUNT_ID",
+            "KRATOS_CATALOG_CACHE_PATH",
             "KRATOS_API_KEY", "BRAIN_BASE_URL", "CHAT_BASE_URL", "OMNIROUTE_BASE_URL",
             "CHAT_ENDPOINT", "BRAIN_CHAT_URL", "KRATOS_API_URL", "OMNIROUTE_CHAT_URL",
             "MODEL_ENDPOINT", "BRAIN_MODEL_URL", "BRAIN_MODEL", "OMNIROUTE_MODEL",
@@ -34,8 +38,12 @@ class BrainConfigTests(unittest.TestCase):
         for k in keys:
             self.orig_env[k] = os.environ.get(k)
             os.environ.pop(k, None)
+        os.environ["KRATOS_MODEL_PROVIDER"] = "gateway"
+        self.catalog_directory = tempfile.TemporaryDirectory(prefix="kratos-catalog-test-")
+        os.environ["KRATOS_CATALOG_CACHE_PATH"] = str(Path(self.catalog_directory.name) / "catalog.json")
 
     def tearDown(self):
+        self.catalog_directory.cleanup()
         for k, v in self.orig_env.items():
             if v is not None:
                 os.environ[k] = v

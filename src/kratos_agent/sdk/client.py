@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -18,6 +19,7 @@ from types import MappingProxyType
 from typing import Any
 
 import requests
+from .http_transport import CancellableHTTPAdapter, cancellable_post
 from kratos_agent.core.model_guard import OutputGuard, repetitive_output, RepetitiveOutputError
 
 from kratos_agent.brain.config import (
@@ -102,10 +104,38 @@ def _close_stream_on_cancel(response: requests.Response):
 class KratosStreamError(BrainError):
     """An incomplete response, preserved for diagnostics and never executable."""
 
-    def __init__(self, message: str, partial_text: str = "") -> None:
+    def __init__(self, message: str, partial_text: str = "", *, status: int | None = None, recoverable: bool = False) -> None:
         super().__init__(message)
         self.partial_text = partial_text
         self.request_id = _request_context.get().get("X-Request-Id", "")
+        self.status = status
+        self.recoverable = recoverable
+
+
+def _gateway_stream_error(event: dict, partial_text: str = "") -> KratosStreamError:
+    """Classify gateway SSE errors without copying upstream secrets into the UI."""
+    error = event.get('error')
+    values = error if isinstance(error, dict) else {}
+    status = next((value for value in (values.get('status'), values.get('status_code'), values.get('code'), event.get('status'))
+                   if type(value) is int and 400 <= value <= 599), None)
+    detail = str(values.get('message', error) or '').lower()
+    code = str(values.get('code', '')).lower()
+    if status is None:
+        if any(term in detail or term in code for term in ('rate limit', 'rate_limit', 'resource_exhausted', 'quota')):
+            status = 429
+        elif any(term in detail or term in code for term in ('unauthorized', 'authentication', 'invalid token', 'invalid api key')):
+            status = 401
+        elif code in {'unavailable', 'internal', 'server_error'}:
+            status = 503
+    message = {
+        400: 'The selected model provider rejected the request (HTTP 400).',
+        401: 'The selected model provider requires a valid login (HTTP 401).',
+        403: 'The selected model provider denied access (HTTP 403).',
+        404: 'The selected model is unavailable from its provider (HTTP 404).',
+        429: 'The selected model provider is rate-limited (HTTP 429).',
+    }.get(status, 'The selected model provider interrupted the response.')
+    return KratosStreamError(message, partial_text, status=status,
+                             recoverable=status is None or status in {408, 429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +143,7 @@ class KratosToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    provider_items: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,16 +164,40 @@ class KratosClient:
         api_key: str | None = None,
         max_retries: int | None = None,
         timeout: float | None = None,
+        provider: str | None = None,
+        account_id: str | None = None,
+        configured_model: str | None = None,
     ) -> None:
+        from kratos_agent.brain.config import get_model_provider
+        from kratos_agent.brain.account_store import account_store
+        self.provider = provider or get_model_provider()
+        if self.provider not in {"gateway", "chatgpt", "chatgpt-web", "browser-web"}:
+            raise ValueError("Unknown model connection")
+        self.configured_model = configured_model
+        state = account_store.read()
+        account_id = account_id or os.getenv("KRATOS_RUNTIME_ACCOUNT_ID")
+        self.chatgpt_account_id = (account_id or state.get("active_account", "")) if self.provider == "chatgpt" else ""
+        self.chatgpt_web_account_id = (account_id or state.get("active_web_account", "")) if self.provider in {"chatgpt-web", "browser-web"} else ""
         self.endpoint_url = (endpoint_url or get_endpoint_url()).strip()
         self.api_key = api_key if api_key is not None else get_api_key()
         self.max_retries = max(0, get_max_retries() if max_retries is None else int(max_retries))
         self.timeout = timeout if timeout is not None else get_request_timeout()
         self.session = requests.Session()
         self.session.trust_env = False
-        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=0)
+        adapter = CancellableHTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=0)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
+
+    @contextmanager
+    def _post(self, *args, **kwargs):
+        _check_cancelled()
+        try:
+            with cancellable_post(self.session, _cancel_context.get(), *args, **kwargs) as response:
+                yield response
+                _check_cancelled()
+        except (OSError, requests.RequestException):
+            _check_cancelled()
+            raise
 
     def complete(
         self,
@@ -181,14 +236,36 @@ class KratosClient:
     ) -> KratosCompletion:
         """Complete one request, returning validated text and native tool calls."""
         request_payload = dict(payload)
+        self._check_active_connection()
         self._require_configured_model(request_payload.get("model"))
         should_stream = bool(request_payload.get("stream", True) if stream is None else stream)
         request_payload["stream"] = should_stream
         retries = self.max_retries if max_retries is None else max(0, int(max_retries))
         req_timeout = self.timeout if timeout is None else timeout
 
+        if self.provider in {"chatgpt-web", "browser-web"}:
+            from kratos_agent.brain.chatgpt_web import chatgpt_web_accounts
+            return chatgpt_web_accounts.complete(self, request_payload, req_timeout, on_chunk, _cancel_context.get(),
+                                                session_id=_request_context.get().get("x-session-id", ""))
+
+        if self.provider == "chatgpt":
+            from kratos_agent.brain.chatgpt_transport import complete_chatgpt
+            return complete_chatgpt(self, request_payload, req_timeout, on_chunk)
+
         if should_stream:
-            result = self._stream_completion(request_payload, req_timeout, retries, on_chunk)
+            try:
+                result = self._stream_completion(request_payload, req_timeout, retries, on_chunk)
+            except KratosStreamError as exc:
+                # Recover an SSE-only failure on this exact model/endpoint. Once
+                # content was exposed, never replay it or an incomplete tool call.
+                if exc.partial_text or not exc.recoverable or exc.status == 429:
+                    raise
+                fallback_payload = dict(request_payload, stream=False)
+                result = self._json_completion(fallback_payload, req_timeout, 0)
+                if repetitive_output(result.text):
+                    raise RepetitiveOutputError('Repeated output detected; generation was stopped.')
+                if on_chunk and result.text:
+                    self._notify_chunk(on_chunk, result.text)
             if result.text or result.tool_calls:
                 return result
             # Some compatible gateways return an empty SSE stream. Retry once as
@@ -250,6 +327,7 @@ class KratosClient:
                                 "name": call.get("name", "tool"),
                                 "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False),
                             },
+                            **({"provider_items": call["provider_items"]} if call.get("provider_items") else {}),
                         })
                     item["tool_calls"] = calls
                 normalized.append(item)
@@ -262,7 +340,7 @@ class KratosClient:
                     "name": message.get("name") or metadata.get("name") or "tool",
                 })
             elif isinstance(content, list) and not any(
-                isinstance(part, dict) and part.get("type") in ("image_url", "image", "input_audio")
+                isinstance(part, dict) and part.get("type") in ("image_url", "image", "input_image", "input_file", "input_audio")
                 for part in content
             ):
                 normalized.append({
@@ -305,9 +383,28 @@ class KratosClient:
         timeout: float | None = None,
     ) -> Iterator[str]:
         """Yield text deltas from one Kratos response."""
+        self._check_active_connection()
         request_payload = dict(payload)
         self._require_configured_model(request_payload.get("model"))
         request_payload["stream"] = True
+        if self.provider in {"chatgpt-web", "browser-web"}:
+            result = self._complete(request_payload, stream=False, timeout=timeout)
+            if result.tool_calls:
+                raise BrainToolCallError("Use complete() for browser tool responses")
+            if result.text:
+                yield result.text
+            return
+        if self.provider == "chatgpt":
+            from kratos_agent.brain.chatgpt_transport import completion_events
+            emitted = False
+            for item in completion_events(self, request_payload, timeout or self.timeout):
+                if isinstance(item, KratosCompletion):
+                    if not emitted and item.text:
+                        yield item.text
+                elif item:
+                    emitted = True
+                    yield item
+            return
         retries = self.max_retries if max_retries is None else max(0, int(max_retries))
         req_timeout = self.timeout if timeout is None else timeout
         chunks: list[str] = []
@@ -318,7 +415,7 @@ class KratosClient:
         for attempt in range(retries + 1):
             _check_cancelled()
             try:
-                with self.session.post(
+                with self._post(
                     self.endpoint_url,
                     headers=headers,
                     json=request_payload,
@@ -328,7 +425,9 @@ class KratosClient:
                     if response.status_code != 200:
                         self._raise_response_error(response, str(request_payload.get("model", "unknown")))
                     with _close_stream_on_cancel(response):
-                        for raw_line in response.iter_lines(decode_unicode=False):
+                        # SSE frames must be exposed as soon as their newline
+                        # arrives, including short replies on a kept-open socket.
+                        for raw_line in response.iter_lines(chunk_size=1, decode_unicode=False):
                             _check_cancelled()
                             if not raw_line:
                                 continue
@@ -346,7 +445,7 @@ class KratosClient:
                             if not isinstance(event, dict):
                                 raise KratosStreamError("Kratos gateway returned an invalid stream event.", "".join(chunks))
                             if event.get("error"):
-                                raise KratosStreamError("Kratos gateway reported a stream error.", "".join(chunks))
+                                raise _gateway_stream_error(event, "".join(chunks))
                             choices = event.get("choices") or []
                             if not choices or not isinstance(choices[0], dict):
                                 continue
@@ -372,6 +471,10 @@ class KratosClient:
                     if result.text:
                         yield result.text
                 return
+            except KratosStreamError as exc:
+                if chunks or not exc.recoverable:
+                    raise
+                last_error = exc
             except (BrainRateLimitError, BrainServerError) as exc:
                 last_error = exc
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
@@ -409,7 +512,7 @@ class KratosClient:
 
         def consume(response: requests.Response) -> None:
             nonlocal finish_reason, usage, terminal
-            for raw_line in response.iter_lines(decode_unicode=False):
+            for raw_line in response.iter_lines(chunk_size=1, decode_unicode=False):
                 _check_cancelled()
                 if not raw_line:
                     continue
@@ -427,7 +530,7 @@ class KratosClient:
                 if not isinstance(event, dict):
                     raise KratosStreamError("Kratos gateway returned an invalid stream event.", "".join(chunks))
                 if event.get("error"):
-                    raise KratosStreamError("Kratos gateway reported a stream error.", "".join(chunks))
+                    raise _gateway_stream_error(event, "".join(chunks))
                 if isinstance(event.get("usage"), dict):
                     usage = _integer_usage(event["usage"])
                 choices = event.get("choices") or []
@@ -467,7 +570,7 @@ class KratosClient:
         for attempt in range(retries + 1):
             _check_cancelled()
             try:
-                with self.session.post(
+                with self._post(
                     self.endpoint_url,
                     headers=self._headers(),
                     json=payload,
@@ -485,6 +588,12 @@ class KratosClient:
                         raise BrainToolCallError("Kratos stream interrupted with an incomplete tool call; the response was discarded before execution.")
                     raise KratosStreamError("Kratos stream interrupted before completion.", "".join(chunks))
                 break
+            except KratosStreamError as exc:
+                if tool_deltas:
+                    raise BrainToolCallError('The provider interrupted a tool call; the incomplete response was discarded before execution.') from exc
+                if chunks or not exc.recoverable:
+                    raise
+                last_error = exc
             except (BrainRateLimitError, BrainServerError) as exc:
                 last_error = exc
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
@@ -519,36 +628,38 @@ class KratosClient:
         for attempt in range(retries + 1):
             _check_cancelled()
             try:
-                response = self.session.post(
+                with self._post(
                     self.endpoint_url,
                     headers=self._headers(),
                     json=payload,
                     timeout=timeout,
-                )
-                if response.status_code != 200:
-                    self._raise_response_error(response, str(payload.get("model", "unknown")))
-                body = response.json()
-                if not isinstance(body, dict):
-                    raise BrainError("Kratos gateway returned an invalid response object.")
-                choices = body.get("choices") or []
-                if not choices or not isinstance(choices[0], dict):
-                    return KratosCompletion(usage=_integer_usage(body.get("usage", {})))
-                choice = choices[0]
-                message = choice.get("message") or {}
-                if not isinstance(message, dict):
-                    raise BrainError("Kratos gateway returned an invalid message object.")
-                text = message.get("content")
-                if text is None:
-                    text = ""
-                if not isinstance(text, str):
-                    raise BrainError("Kratos gateway returned non-text message content.")
-                calls = _parse_tool_calls(message.get("tool_calls") or [])
-                return KratosCompletion(
-                    text=text.strip(),
-                    tool_calls=calls,
-                    finish_reason=str(choice.get("finish_reason") or "stop"),
-                    usage=_integer_usage(body.get("usage", {})),
-                )
+                    stream=True,
+                ) as response:
+                    if response.status_code != 200:
+                        self._raise_response_error(response, str(payload.get("model", "unknown")))
+                    body = response.json()
+                    _check_cancelled()
+                    if not isinstance(body, dict):
+                        raise BrainError("Kratos gateway returned an invalid response object.")
+                    choices = body.get("choices") or []
+                    if not choices or not isinstance(choices[0], dict):
+                        return KratosCompletion(usage=_integer_usage(body.get("usage", {})))
+                    choice = choices[0]
+                    message = choice.get("message") or {}
+                    if not isinstance(message, dict):
+                        raise BrainError("Kratos gateway returned an invalid message object.")
+                    text = message.get("content")
+                    if text is None:
+                        text = ""
+                    if not isinstance(text, str):
+                        raise BrainError("Kratos gateway returned non-text message content.")
+                    calls = _parse_tool_calls(message.get("tool_calls") or [])
+                    return KratosCompletion(
+                        text=text.strip(),
+                        tool_calls=calls,
+                        finish_reason=str(choice.get("finish_reason") or "stop"),
+                        usage=_integer_usage(body.get("usage", {})),
+                    )
             except (BrainRateLimitError, BrainServerError) as exc:
                 last_error = exc
             except (BrainBadRequestError, BrainNotFoundError, BrainError):
@@ -569,6 +680,12 @@ class KratosClient:
 
     def list_models(self, endpoint_url: str | None = None) -> list[str]:
         """Return model IDs exposed by the same local gateway."""
+        if self.provider in {"chatgpt-web", "browser-web"}:
+            from kratos_agent.brain.chatgpt_web import chatgpt_web_accounts
+            return [item["id"] for item in chatgpt_web_accounts.models(self.chatgpt_web_account_id)]
+        if self.provider == "chatgpt":
+            from kratos_agent.brain.chatgpt_auth import chatgpt_accounts
+            return [item["id"] for item in chatgpt_accounts.models(self.chatgpt_account_id)]
         url = endpoint_url or _models_endpoint(self.endpoint_url)
         try:
             response = self.session.get(url, headers=self._headers(), timeout=min(self.timeout, 10.0))
@@ -594,6 +711,23 @@ class KratosClient:
                 ids.append(model_id)
         return ids
 
+    def _check_active_connection(self) -> None:
+        from kratos_agent.brain.config import get_model_provider
+        from kratos_agent.brain.account_store import account_store
+        if self.configured_model is not None:
+            if self.provider in {"chatgpt-web", "browser-web"}:
+                record = account_store.read().get("web_accounts", {}).get(self.chatgpt_web_account_id, {})
+                if not record.get("storage_state"):
+                    raise BrainError("This browser account was disconnected; reconnect it in the extension")
+            return
+        if get_model_provider() != self.provider:
+            raise BrainError("The model connection changed; restart the runtime before continuing")
+        state = account_store.read()
+        if (self.provider == "chatgpt" and self.chatgpt_account_id != state.get("active_account")) or (
+            self.provider in {"chatgpt-web", "browser-web"} and self.chatgpt_web_account_id != state.get("active_web_account")
+        ):
+            raise BrainError("The ChatGPT account changed; restart the runtime before continuing")
+
     def _headers(self) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json", "Connection": "Keep-Alive",
@@ -605,12 +739,11 @@ class KratosClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    @staticmethod
-    def _require_configured_model(model: Any) -> str:
+    def _require_configured_model(self, model: Any) -> str:
         """Reject unconfigured IDs and attempts to route around the one Kratos model."""
         from kratos_agent.brain.config import get_default_model
 
-        configured = get_default_model()
+        configured = self.configured_model if self.configured_model is not None else get_default_model()
         if not configured:
             raise BrainError(
                 "No Kratos model is configured. Set KRATOS_MODEL to the exact model ID "

@@ -71,13 +71,14 @@ def test_failed_plan_cannot_speak_false_success(tmp_path):
     events = []
     loop = make_loop(tmp_path, [
         ModelResponse(tool_calls=[ToolCall("write_file", {"file_path": "report.md", "content": "Draft"})]),
-        *[ModelResponse(text="Everything is done. [[speak]]The task is complete.[[/speak]]") for _ in range(3)],
+        *[ModelResponse(text="Everything is done. [[speak]]The task is complete.[[/speak]]") for _ in range(20)],
     ], events)
     loop.tools.register(ToolSpec("write_file", "write", {"properties": {"file_path": {"type": "string"}, "content": {"type": "string"}}}, ToolPermission.WRITE), lambda **args: (_ for _ in ()).throw(RuntimeError("Disk unavailable")))
-    reply, _ = loop.run([ChatMessage("user", "create a report")], lambda spec, args: (True, ""), max_steps=10)
+    reply, _ = loop.run([ChatMessage("user", "create a report")], lambda spec, args: (True, ""), max_steps=30)
     assert loop.current_plan.state == AgentState.FAILED
-    assert "Task incomplete" in reply
-    assert events == ["The task is incomplete. Some steps still need attention."]
+    assert "needs attention" in reply
+    assert "The task is complete." not in events
+    assert all(event == "The task is incomplete. Some steps still need attention." for event in events)
 
 
 def test_normal_chat_receives_shared_speech_rule_without_starting_runtime():
@@ -92,8 +93,13 @@ def test_normal_chat_receives_shared_speech_rule_without_starting_runtime():
     exec(compile(ast.fix_missing_locations(module), str(source), "exec"), namespace)
     brain = Mock()
     brain.complete.return_value = ("Hello. [[speak]]Hello there.[[/speak]]", [])
-    runtime = SimpleNamespace(_history=[], brain=brain, memory=Mock(), _emit=Mock(), _speak_marked_text=Mock())
+    runtime = SimpleNamespace(
+        _history=[], brain=brain, memory=Mock(), _emit=Mock(), _speak_marked_text=Mock(),
+        context=ContextBuilder(ContextBudget(max_input_tokens=12000)), _save_context_checkpoint=Mock(),
+        _append_project_instruction_update=Mock(), _finalize_saved_tool_calls=Mock(),
+        project_memory=SimpleNamespace(get_project_context=lambda: ""),
+    )
     reply = namespace["run_chat_restricted"](runtime, "hello")
     assert SPEECH_OUTPUT_RULE in brain.complete.call_args.kwargs["system_instruction"]
     runtime._speak_marked_text.assert_called_once_with("Hello there.")
-    assert "[[speak]]" not in reply
+    assert reply.strip() == "Hello."

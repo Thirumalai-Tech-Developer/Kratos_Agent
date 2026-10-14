@@ -50,30 +50,48 @@ class VisionManager:
             fps=fps,
         )
         self._tasks: list[asyncio.Task[Any]] = []
+        self._screen_health: CaptureHealth | None = None
 
     def check_screen_health(self) -> CaptureHealth:
         """Performs a synchronous local screen capture health check."""
-        return self.screen.health_check()
+        self._screen_health = self.screen.health_check()
+        return self._screen_health
 
     def get_capture_status(self) -> dict[str, Any]:
-        """Returns structured capture status for CLI and UI (§13)."""
-        health = self.screen.health_check()
+        """Report already observed capture state without opening any device."""
+        camera_active = self.mode in ("camera", "both") and self.camera.is_running
+        screen_active = self.mode in ("screen", "both") and self.screen.is_running
+        health = self._screen_health if self.mode in ("screen", "both") else None
         gemini_connected = (
             self.status_hub.status.gemini_connected if self.status_hub else False
         )
+        errors = self.status_hub.status.errors if self.status_hub else {}
+        error = None
+        if self.mode in ("screen", "both"):
+            error = errors.get("screen") or (health.error if health else None)
+        if self.mode in ("camera", "both"):
+            error = error or errors.get("camera")
         return {
             "mode": self.mode.upper(),
-            "capture_online": health.available,
-            "backend": health.backend or "MSS",
-            "resolution": f"{health.width}x{health.height}" if health.available else "0x0",
+            "capture_online": bool(camera_active or screen_active),
+            "backend": (health.backend or "MSS") if health else ("OpenCV" if camera_active else None),
+            "resolution": f"{health.width}x{health.height}" if health and screen_active else "0x0",
             "gemini_stream": "SPEECH ONLY" if gemini_connected else "OFFLINE",
-            "error": health.error,
+            "error": error,
         }
 
     async def start(self) -> None:
         """Start vision capture tasks based on active mode."""
         await self.stop()
         self._tasks.clear()
+        self._screen_health = None
+        if self.status_hub:
+            self.status_hub.clear_error("camera")
+            self.status_hub.clear_error("screen")
+        if self.mode == "none":
+            if self.status_hub:
+                self.status_hub.update(video_mode="none", camera_health="offline", screen_health="offline")
+            return
 
         if self.mode in ("camera", "both"):
             async def _run_camera():
@@ -86,7 +104,7 @@ class VisionManager:
 
         if self.mode in ("screen", "both"):
             # Health check before marking online (§7, §8)
-            health = await asyncio.to_thread(self.screen.health_check)
+            health = await asyncio.to_thread(self.check_screen_health)
             if health.available:
                 async def _run_screen():
                     await self.screen.run()
@@ -107,7 +125,9 @@ class VisionManager:
                 camera_active=self.camera.is_running,
                 screen_active=self.screen.is_running,
                 camera_health="online" if self.camera.is_running else "offline",
-                screen_health="online" if self.screen.is_running else "offline",
+                screen_health="online" if self.screen.is_running else (
+                    "error" if self._screen_health and self._screen_health.error else "offline"
+                ),
                 video_mode=self.mode,
             )
 

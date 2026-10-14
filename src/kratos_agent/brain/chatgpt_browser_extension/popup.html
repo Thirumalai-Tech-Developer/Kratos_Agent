@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kratos connections</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <span class="logo">K</span>
+      <div><strong>Kratos</strong><small>Browser connections</small></div>
+      <button id="refresh" class="quiet" aria-label="Refresh connection status">
+        Refresh
+      </button>
+    </header>
+    <div class="layout">
+      <nav aria-label="Settings">
+        <span class="nav-active">Connections</span
+        ><small>Regular browser</small>
+      </nav>
+      <main>
+        <div class="heading">
+          <h1>Logins</h1>
+          <span class="provider">Web cookies</span>
+        </div>
+        <p class="intro">
+          Use your existing signed-in browser. Choose a website to connect its
+          session.
+        </p>
+        <label class="model-label" for="provider">Website</label>
+        <select id="provider">
+          <option value="chatgpt-web">ChatGPT</option>
+          <option value="qwen-browser">Qwen</option>
+          <option value="doubao-web">Dola</option>
+          <option value="gemini-web">Gemini</option>
+          <option value="deepseek-web">DeepSeek</option>
+          <option value="kimi-web">Kimi</option>
+          <option value="muse-spark-web">Meta AI</option>
+          <option value="groq-web">Groq Chat</option>
+          <option value="grok-web">Grok</option>
+          <option value="claude-web">Claude</option>
+          <option value="perplexity-web">Perplexity</option>
+          <option value="zai-web">Z.ai</option>
+        </select>
+        <div class="actions">
+          <button id="connect">Collect session cookies</button>
+        </div>
+        <p id="status" role="status" aria-live="polite">Checking connection…</p>
+        <p id="notice" role="alert" hidden></p>
+        <section id="accounts" aria-label="Saved logins"></section>
+        <p class="footnote">
+          Cookies refresh automatically after website sign-in. Model requests run
+          in the local OmniRoute executor. A saved login does not confirm a model reply.
+        </p>
+      </main>
+    </div>
+  </body>
+</html>

@@ -3,12 +3,13 @@ export function normalizeModelCatalog(entries) {
   if (!Array.isArray(entries)) throw new Error('The model catalog could not be read. Try refreshing it.');
   const seen = new Set();
   return entries.filter(entry => {
-    if (!entry || typeof entry.id !== 'string' || !entry.id.trim() || seen.has(entry.id)) return false;
-    seen.add(entry.id);
+    const key = entry?.selection_key || entry?.id;
+    if (!entry || typeof entry.id !== 'string' || !entry.id.trim() || seen.has(key)) return false;
+    seen.add(key);
     return true;
   }).map(entry => ({
     ...entry,
-    name: typeof entry.name === 'string' && entry.name.trim() ? entry.name : entry.id,
+    name: typeof entry.name === 'string' && entry.name.trim() ? entry.name : entry.display_name || entry.id,
     provider: typeof entry.provider_name === 'string' && entry.provider_name.trim()
       ? entry.provider_name
       : typeof entry.provider === 'string' && entry.provider.trim()
@@ -43,4 +44,12 @@ export function groupModelCatalog(models, query = '') {
   }
   return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))
     .map(([provider, entries]) => ({ provider, models: entries.sort((left, right) => left.name.localeCompare(right.name)) }));
+}
+
+/** Update the confirmed connection locally without fetching its catalog again. */
+export function withSelectedCatalogModel(models, modelId, connection) {
+  return models.map(model => ({
+    ...model,
+    is_configured: model.id === modelId && (typeof connection !== 'string' || model.selection_key === connection),
+  }));
 }

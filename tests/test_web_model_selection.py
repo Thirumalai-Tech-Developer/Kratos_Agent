@@ -12,6 +12,7 @@ import pytest
 import requests
 
 from kratos_agent.brain import config
+from kratos_agent.brain.account_store import AccountStore
 from kratos_agent.brain.client import BrainClient
 from kratos_agent.core.context_pipeline import ContextBuilder
 from kratos_agent.core.generation_settings import GenerationSettings
@@ -32,11 +33,20 @@ CATALOG = [
 
 
 @pytest.fixture(autouse=True)
-def isolate_catalog_cache(monkeypatch):
+def isolate_catalog_cache(monkeypatch, tmp_path):
+    from kratos_agent.brain import account_store as accounts_module
+    account_store = AccountStore(tmp_path / "auth")
+    account_store.write({"provider": "gateway", "accounts": {}, "web_accounts": {}})
+    monkeypatch.setattr(accounts_module, "account_store", account_store)
+    monkeypatch.setenv("KRATOS_CATALOG_CACHE_PATH", str(tmp_path / "catalog.json"))
+    monkeypatch.setenv("KRATOS_API_KEY", "isolated-model-selection-key")
+    monkeypatch.setenv("KRATOS_MODEL_PROVIDER", "gateway")
+    monkeypatch.setenv("KRATOS_RUNTIME_MODEL", "")
+    monkeypatch.setenv("KRATOS_RUNTIME_ACCOUNT_ID", "")
     for key, value in (("_cached_model_details", {}), ("_cached_models", []),
                        ("_cache_timestamp", 0.0), ("_catalog_last_attempt", 0.0),
-                       ("_catalog_endpoint", "")):
-        monkeypatch.setattr(config, key, value)
+                       ("_catalog_endpoint", ""), ("_catalog_cache_key", "")):
+        monkeypatch.setattr(config, key, value, raising=False)
 
 
 def real_metadata_method():
@@ -92,6 +102,17 @@ def test_explicit_choice_updates_request_runtime_session_capabilities_and_persis
     runtime.set_model(OLD)
     assert runtime.brain.build_envelope(OLD, [])["temperature"] == 0.8
     assert "reasoning_effort" not in runtime.brain.generation_options
+
+
+def test_normal_model_selection_validates_against_stored_runtime_catalog(runtime, monkeypatch):
+    catalog = Mock(return_value=CATALOG)
+    monkeypatch.setattr(model_selection, "get_model_catalog", catalog)
+    runtime.set_model(NEW)
+    catalog.assert_called_once_with(
+        timeout=15.0, refresh=False, strict=True,
+        cache_path=runtime.workspace / ".kratos" / "gateway-model-catalog.json",
+    )
+    assert runtime.model_name == NEW
 
 
 @pytest.mark.parametrize("model", [None, [], "", " model", "model\n", "x" * 513, "other/not-advertised"])
@@ -234,7 +255,11 @@ def test_model_listing_cache_tracks_explicit_selection(monkeypatch):
     monkeypatch.setattr(config, "_cached_models", [OLD])
     monkeypatch.setattr(config, "_cached_model_details", {OLD: {"id": OLD}, NEW: {"id": NEW}})
     monkeypatch.setattr(config, "_cache_timestamp", time.time())
+    monkeypatch.setattr(config, "_catalog_cache_key", config._gateway_catalog_cache_key(config.get_model_endpoint_url()))
+    fetch = Mock(side_effect=AssertionError("A scoped memory catalog must not refetch"))
+    monkeypatch.setattr(requests.Session, "get", fetch)
     assert config.get_available_models() == [NEW]
+    fetch.assert_not_called()
 
 
 def test_saved_selection_is_applied_to_studio_environment(tmp_path, monkeypatch):

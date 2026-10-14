@@ -10,6 +10,23 @@ from kratos_agent.brain.config import BrainError
 from kratos_agent.sdk import KratosAgent, KratosClient
 
 
+@pytest.fixture(autouse=True)
+def isolated_gateway_environment(tmp_path, monkeypatch):
+    """Gateway contract mocks must not inherit the user's selected browser account."""
+    from kratos_agent.brain import account_store as accounts_module
+
+    auth_dir = tmp_path / "auth"
+    monkeypatch.setenv("KRATOS_AUTH_DIR", str(auth_dir))
+    monkeypatch.setattr(accounts_module, "account_store", accounts_module.AccountStore(auth_dir))
+    monkeypatch.setenv("KRATOS_MODEL_PROVIDER", "gateway")
+    for name in ("KRATOS_MODEL", "KRATOS_RUNTIME_MODEL", "KRATOS_RUNTIME_ACCOUNT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KRATOS_BASE_URL", "http://127.0.0.1:20128/v1")
+    monkeypatch.setenv("KRATOS_CHAT_ENDPOINT", "http://127.0.0.1:20128/v1/chat/completions")
+    monkeypatch.setenv("KRATOS_API_KEY", "sdk-contract-test-key")
+    monkeypatch.setenv("KRATOS_CATALOG_CACHE_PATH", str(tmp_path / "catalog.json"))
+
+
 def _json_response(body: dict, status: int = 200) -> requests.Response:
     response = requests.Response()
     response.status_code = status
@@ -103,7 +120,7 @@ def test_malformed_tool_arguments_fail_closed(monkeypatch):
 
 def test_unconfigured_or_different_model_fails_without_network(monkeypatch):
     monkeypatch.delenv("KRATOS_MODEL", raising=False)
-    monkeypatch.delenv("KRATOS_MODEL", raising=False)
+    monkeypatch.delenv("KRATOS_RUNTIME_MODEL", raising=False)
     client = KratosClient(max_retries=0)
     client.session.post = Mock(side_effect=AssertionError("must not reach gateway"))
 

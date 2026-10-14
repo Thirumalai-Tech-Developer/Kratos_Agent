@@ -320,6 +320,22 @@ export function sanitizeProviderSpecificDataForResponse(value: unknown): JsonRec
   if (Object.keys(record).length === 0) return undefined;
 
   const sanitized: JsonRecord = { ...record };
+  // Provider reads hydrate browserSyncCredential for the executor. That
+  // private view must not leak its ciphertext or expanded cookie/storage
+  // payload into dashboard list/edit/import responses. Edits are partial;
+  // unsent credential fields remain in the stored connection.
+  for (const name of [
+    "browserSyncCredential", "storageState", "storage_state", "cookies", "origins",
+    "localStorage", "sessionStorage", "cookie", "token", "userToken", "access_token",
+    "refresh_token", "id_token", "authorization", "sessionKey", "sessionid", "session",
+    "sessionCookie", "userSession", "user_session", "user_session_token", "accessToken",
+    "session-token", "next-auth.session-token", "__Secure-next-auth.session-token",
+    "__Secure-authjs.session-token", "__Secure-1PSID", "__Secure-1PSIDTS", "__Secure-1PSIDCC",
+    "sso", "sso-rw", "kimi-auth", "ecto_1_sess", "abra_sess", "token_v2", "cf_clearance",
+  ]) delete sanitized[name];
+  for (const name of Object.keys(sanitized)) {
+    if (/^(?:__Secure-|__Host-)?(?:next-auth|authjs)\.session-token(?:\.\d+)?$/.test(name)) delete sanitized[name];
+  }
   delete sanitized.accessToken;
   delete sanitized.refreshToken;
   delete sanitized.idToken;

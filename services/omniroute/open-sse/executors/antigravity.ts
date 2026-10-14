@@ -1,4 +1,5 @@
 import crypto, { randomUUID } from "crypto";
+import { sleep } from "../utils/sleep.ts";
 import {
   BaseExecutor,
   mergeUpstreamExtraHeaders,
@@ -13,10 +14,7 @@ import {
   getAntigravityOAuthUserAgent,
 } from "../services/antigravityHeaders.ts";
 import { classify429, decide429, type Decision } from "../services/antigravity429Engine.ts";
-import {
-  parseRetryFromErrorText,
-  type RetryHintProvenance,
-} from "../services/accountFallback.ts";
+import { parseRetryFromErrorText, type RetryHintProvenance } from "../services/accountFallback.ts";
 import { parseDetailedRetryHintFromJsonBody } from "../services/retryAfterJson.ts";
 import {
   shouldRetryWithCredits,
@@ -27,10 +25,7 @@ import {
 import { persistCreditBalance, getAllPersistedCreditBalances } from "@/lib/db/creditBalance";
 import { setConnectionRateLimitUntil } from "@/lib/db/providers";
 import { getMitmAlias } from "@/lib/db/models";
-import {
-  MAX_ANTIGRAVITY_OUTPUT_TOKENS,
-  resolveAntigravityOutputCap,
-} from "./antigravityOutputCap.ts";
+import { resolveAntigravityOutputCap } from "./antigravityOutputCap.ts";
 export { MAX_ANTIGRAVITY_OUTPUT_TOKENS } from "./antigravityOutputCap.ts";
 import {
   ensureAntigravityProjectAssigned,
@@ -380,7 +375,9 @@ const COMPETITIVE_AGENT_PROMPT_PATTERNS: RegExp[] = [
  */
 export function stripCompetitiveAgentPrompts(systemInstruction: unknown): unknown {
   const record = asRecord(systemInstruction);
-  const parts = Array.isArray(record?.parts) ? (record.parts as Array<Record<string, unknown>>) : [];
+  const parts = Array.isArray(record?.parts)
+    ? (record.parts as Array<Record<string, unknown>>)
+    : [];
   if (parts.length === 0) return systemInstruction;
 
   let changed = false;
@@ -388,7 +385,10 @@ export function stripCompetitiveAgentPrompts(systemInstruction: unknown): unknow
     if (typeof part.text !== "string" || part.text.length === 0) return part;
     let text = part.text;
     for (const pattern of COMPETITIVE_AGENT_PROMPT_PATTERNS) {
-      const stripped = text.replace(pattern, "").replace(/\n{3,}/g, "\n\n").trimStart();
+      const stripped = text
+        .replace(pattern, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trimStart();
       if (stripped !== text) {
         changed = true;
         text = stripped;
@@ -1240,6 +1240,7 @@ export class AntigravityExecutor extends BaseExecutor {
     { model, body, stream, credentials, signal, log, upstreamExtraHeaders }: ExecuteInput,
     modelIdOverride?: string
   ) {
+    signal?.throwIfAborted();
     await resolveAntigravityClientVersion(getAntigravityClientProfile(credentials));
     const fallbackCount = this.getFallbackCount();
     const l = toSafeAntigravityLog(log);
@@ -1266,6 +1267,7 @@ export class AntigravityExecutor extends BaseExecutor {
     const creditsRetryState: AntigravityCreditsRetryState = { attempted: false };
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
+      signal?.throwIfAborted();
       const url = this.buildUrl(model, upstreamStream, urlIndex);
       const headers = this.buildHeaders(credentials, upstreamStream);
       mergeUpstreamExtraHeaders(headers, upstreamExtraHeaders);
@@ -1353,7 +1355,6 @@ export class AntigravityExecutor extends BaseExecutor {
       accountId,
       urlIndex,
       retryAttemptsByUrl,
-      fallbackCount,
     } = ctx;
 
     const { response, finalHeaders } = await sendAntigravityRequest(
@@ -1510,7 +1511,7 @@ export class AntigravityExecutor extends BaseExecutor {
         "RETRY",
         `${response.status} retry ${retryAttemptsByUrl[urlIndex]}/${MAX_AUTO_RETRIES} with Retry-After: ${Math.ceil(effectiveRetryMs / 1000)}s, waiting...`
       );
-      await new Promise((resolve) => setTimeout(resolve, effectiveRetryMs));
+      await sleep(effectiveRetryMs, ctx.signal);
       return { action: "retrySameUrl" };
     }
 
@@ -1531,7 +1532,7 @@ export class AntigravityExecutor extends BaseExecutor {
           "RETRY",
           `${response.status} transient auto retry ${retryAttemptsByUrl[urlIndex]}/${MAX_AUTO_RETRIES} after ${backoffMs / 1000}s`
         );
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        await sleep(backoffMs, ctx.signal);
         return { action: "retrySameUrl" };
       }
     }

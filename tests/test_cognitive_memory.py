@@ -19,7 +19,7 @@ class TestCognitiveMemory(unittest.TestCase):
         self.temp_dir = Path(tempfile.mkdtemp())
         self.db_path = self.temp_dir / "test_d1.db"
         self.storage_dir = self.temp_dir / "memory"
-        self.db = D1DatabaseClient(local_db_path=self.db_path)
+        self.db = D1DatabaseClient(account_id='', database_id='', api_token='', local_db_path=self.db_path)
         self.db.init_schema()
         self.store = CognitiveMemoryStore(db=self.db, storage_dir=self.storage_dir)
 

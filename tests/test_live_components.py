@@ -1,6 +1,5 @@
 """Unit and integration tests for Kratos Multimodal Live subsystem."""
 import asyncio
-import io
 import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,12 +8,16 @@ from kratos_agent.live.audio import AudioManager
 from kratos_agent.live.camera import CameraCapture
 from kratos_agent.live.config import LiveConfig
 from kratos_agent.live.events import LiveState, LiveStatus, LiveStatusHub
-from kratos_agent.live.microphone import MicrophoneListener, _calculate_rms, get_input_devices
-from kratos_agent.output.voice import sanitize_speech_text
+from kratos_agent.live.microphone import (
+    MicrophoneListener,
+    _calculate_rms,
+    get_input_devices,
+)
 from kratos_agent.live.runtime import LiveRuntime
-from kratos_agent.live.screen import ScreenCapture
+from kratos_agent.live.screen import CaptureHealth
 from kratos_agent.live.speaker import SpeakerPlayer
 from kratos_agent.live.vision import VisionManager
+from kratos_agent.output.voice import sanitize_speech_text
 
 
 class TestLiveConfig(unittest.TestCase):
@@ -140,7 +143,11 @@ class TestAudioVisionErrorIsolation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vm.mode, "none")
 
         with patch.object(vm.camera, "run", new_callable=AsyncMock), \
-             patch.object(vm.screen, "run", new_callable=AsyncMock):
+             patch.object(vm.screen, "run", new_callable=AsyncMock), \
+             patch.object(vm.screen, "health_check", return_value=CaptureHealth(
+                 available=True, backend="fake", width=640, height=480,
+                 frame_count=1, last_frame_time=0.0, error=None,
+             )):
             await vm.set_mode("screen")
             self.assertEqual(vm.mode, "screen")
 

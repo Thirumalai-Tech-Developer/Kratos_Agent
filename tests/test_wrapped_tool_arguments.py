@@ -2,6 +2,7 @@ from kratos_agent.core.runtime_contracts import ToolCall, ToolPermission, ToolSp
 from kratos_agent.core.tool_runtime import ToolRegistry
 from kratos_agent.core.agent_loop import AgentLoop
 from types import SimpleNamespace
+from threading import Event
 
 
 def test_wrapped_command_is_normalized_before_validation_and_approval():
@@ -31,6 +32,7 @@ def test_failure_guard_compares_actual_wrapped_commands_not_empty_envelopes():
     registry = ToolRegistry()
     registry.register(ToolSpec("run_terminal_command", "execute", {"properties": {"command": {"type": "string"}}, "required": ["command"]}, ToolPermission.EXECUTE), lambda command: command)
     loop = AgentLoop.__new__(AgentLoop)
+    loop.cancellation_flag = Event()
     loop.tools = registry
     loop.context = SimpleNamespace(prune_tool_result=lambda text: (text, False))
     loop.current_run = SimpleNamespace(completed_tools=[{"name": "run_terminal_command", "is_error": True, "args": {}}])

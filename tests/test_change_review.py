@@ -2,14 +2,18 @@
 import json
 import subprocess
 import threading
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
-from kratos_agent.core.change_review import ChangeReview, ReviewConflict, checkpoint_turn
+from kratos_agent.core.change_review import (
+    ChangeReview,
+    ReviewConflict,
+    capture_before_tool,
+    checkpoint_turn,
+)
 from kratos_agent.web.server import KratosServer, KratosWebHandler
 
 
@@ -43,6 +47,57 @@ def test_capture_failure_does_not_block_turn():
         return 'task ran'
 
     assert run(runtime, 'Run') == 'task ran'
+
+
+def test_deferred_checkpoint_does_not_scan_workspace_for_chat(tmp_path):
+    review = ChangeReview(tmp_path)
+    runtime = SimpleNamespace(change_review=review, memory=None)
+
+    @checkpoint_turn(defer=True)
+    def run(self, query):
+        return 'Hello!'
+
+    assert run(runtime, 'hii') == 'Hello!'
+    assert not review.store.exists()
+
+
+def test_deferred_checkpoint_preserves_edits_from_parallel_tools(tmp_path):
+    review = ChangeReview(tmp_path)
+    runtime = SimpleNamespace(change_review=review, memory=None)
+    (tmp_path / 'source.py').write_text('user edit')
+
+    @checkpoint_turn(defer=True)
+    def run(self, query):
+        workers = [threading.Thread(target=capture_before_tool, args=(self,)) for _ in range(3)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        (tmp_path / 'source.py').write_text('agent edit')
+        raise RuntimeError('failed after edit')
+
+    with pytest.raises(RuntimeError):
+        run(runtime, 'continue')
+    checkpoints = review.list()
+    assert len(checkpoints) == 1
+    review.restore(checkpoints[0]['id'], ['source.py'])
+    assert (tmp_path / 'source.py').read_text() == 'user edit'
+
+
+def test_cancelled_checkpoint_prevents_tool_execution(tmp_path):
+    from kratos_agent.core.execution_control import execution_scope
+
+    cancel = threading.Event()
+    cancel.set()
+    runtime = SimpleNamespace(change_review=ChangeReview(tmp_path), memory=None)
+
+    @checkpoint_turn(defer=True)
+    def run(self, query):
+        capture_before_tool(self)
+        pytest.fail('A cancelled tool must not run')
+
+    with execution_scope(cancel), pytest.raises(InterruptedError):
+        run(runtime, 'Fix source')
 
 
 def test_restore_preserves_preexisting_edits_and_git_index(tmp_path):

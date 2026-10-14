@@ -8,7 +8,9 @@ existing head/tail truncation logic applies unchanged.
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from .runtime_contracts import ChatMessage
@@ -72,7 +74,7 @@ CONTEXT_BUDGET: dict[str, int] = {
 
 @dataclass
 class ContextBudget:
-    max_input_tokens: int = 100_000
+    max_input_tokens: int = 256_000
     reserve_output_tokens: int = 8_000
     max_tool_result_chars: int = 12_000
     system_tokens: int = 2500
@@ -86,10 +88,51 @@ class ContextBuilder:
     def __init__(self, budget: ContextBudget | None = None) -> None:
         self.budget = budget or ContextBudget()
         self._headroom_stats: list[dict[str, Any]] = []
+        self.reset_tracking()
+
+    def reset_tracking(self) -> None:
+        self.overhead_tokens = 0
+        self.last_input_tokens: int | None = None
+        self.provider_input_tokens: int | None = None
+        self.compaction_count = 0
+        self.last_compaction: dict[str, Any] | None = None
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
         return max(1, len(text) // 4)
+
+    def history_tokens(self, messages: list[ChatMessage]) -> int:
+        # Include native tool arguments and message framing, not just visible text.
+        return sum(self.estimate_tokens(json.dumps({
+            "role": message.role, "content": message.content,
+            "tool_calls": message.metadata.get("tool_calls"),
+            "tool_call_id": message.tool_call_id, "name": message.name,
+        }, ensure_ascii=False, default=str)) for message in messages)
+
+    def snapshot(self, history: list[ChatMessage] | None = None) -> dict[str, Any]:
+        capacity = max(1, self.budget.max_input_tokens - self.budget.reserve_output_tokens)
+        estimated = self.overhead_tokens + self.history_tokens(history) if history is not None else (self.last_input_tokens or 0)
+        measured = history is None and self.provider_input_tokens is not None
+        used = self.provider_input_tokens if measured else estimated
+        return {
+            "used_tokens": used, "estimated_tokens": estimated,
+            "measurement": "provider" if measured else "estimated",
+            "provider_input_tokens": self.provider_input_tokens,
+            "overhead_known": self.last_input_tokens is not None,
+            "scope": "working_context" if history is not None else "last_request",
+            "context_limit": self.budget.max_input_tokens,
+            "input_limit": capacity, "reserved_output_tokens": self.budget.reserve_output_tokens,
+            "percent_used": round(100 * used / capacity, 1),
+            "auto_compact_at_tokens": int(capacity * 0.9),
+            "over_limit": used > capacity,
+            "compaction_count": self.compaction_count, "last_compaction": self.last_compaction,
+        }
+
+    def record_usage(self, usage: dict[str, Any] | None) -> None:
+        if isinstance(usage, dict):
+            value = usage.get("prompt_tokens", usage.get("input_tokens"))
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                self.provider_input_tokens = value
 
     def prune_tool_result(self, text: str) -> tuple[str, bool]:
         # Step 1: Try Headroom compression first (if available)
@@ -125,59 +168,63 @@ class ContextBuilder:
             
         return truncated_text, True
 
-    def compact_history(self, messages: list[ChatMessage]) -> tuple[list[ChatMessage], dict[str, Any] | None]:
-        limit = self.budget.max_input_tokens - self.budget.reserve_output_tokens
-        total = sum(self.estimate_tokens(message.content) for message in messages)
-        if total <= limit or len(messages) <= 1:
+    def compact_history(self, messages: list[ChatMessage], *, force: bool = False,
+                        overhead_tokens: int = 0) -> tuple[list[ChatMessage], dict[str, Any] | None]:
+        capacity = max(1, self.budget.max_input_tokens - self.budget.reserve_output_tokens)
+        limit = max(1, capacity - overhead_tokens)
+        total = self.history_tokens(messages)
+        if (not force and total + overhead_tokens < int(capacity * 0.9)) or len(messages) <= 1:
             return messages, None
 
-        # Preserve the newest explicit user request. Keeping messages[0] here
-        # retained stale goals from earlier turns and could drop the request
-        # currently being executed when an old assistant reply was large.
-        root_user: ChatMessage | None = None
-        remaining_messages = list(messages)
+        # Assistant tool calls and their results form one indivisible group.
+        # Never leave an orphan tool result in a provider request.
+        groups: list[list[ChatMessage]] = []
+        for message in messages:
+            if message.role == "tool" and groups:
+                groups[-1].append(message)
+            else:
+                groups.append([message])
         internal_user_prefixes = (
             "[System Directive",
             "[RUNTIME VERIFICATION FAILED",
             "[COMPACTION CHECKPOINT]",
         )
-        for index in range(len(messages) - 1, -1, -1):
-            message = messages[index]
-            if message.role == "user" and not message.content.startswith(internal_user_prefixes):
-                root_user = message
-                remaining_messages = messages[:index] + messages[index + 1:]
+        root = next((i for i in range(len(groups) - 1, -1, -1)
+                     if groups[i][0].role == "user" and not groups[i][0].content.startswith(internal_user_prefixes)), None)
+        keep = {len(groups) - 1}
+        if root is not None:
+            keep.add(root)
+        used = sum(self.history_tokens(groups[i]) for i in keep)
+        target = min(total // 2, int(limit * 0.6))
+        for i in range(len(groups) - 1, -1, -1):
+            if i in keep:
+                continue
+            cost = self.history_tokens(groups[i])
+            if used + cost > target:
                 break
-
-        # Preserve the newest turns from remaining_messages up to budget
-        kept: list[ChatMessage] = []
-        used = self.estimate_tokens(root_user.content) if root_user else 0
-        target_limit = limit // 2
-
-        for message in reversed(remaining_messages):
-            cost = self.estimate_tokens(message.content)
-            if kept and used + cost > target_limit:
-                break
-            kept.append(message)
+            keep.add(i)
             used += cost
-
-        omitted = list(reversed(remaining_messages[: len(remaining_messages) - len(kept)]))
-        facts = []
-        for message in omitted:
-            prefix = message.content.replace("\n", " ").strip()[:500]
-            if prefix:
-                facts.append(f"- {message.role}: {prefix}")
-
-        checkpoint_messages: list[ChatMessage] = []
-        if facts:
-            # Keep gateway compatibility by avoiding system roles inside the message array.
-            checkpoint_messages.append(ChatMessage(
-                role="user",
-                content="[COMPACTION CHECKPOINT]\nOlder execution steps were compacted. Retain these findings and constraints:\n" + "\n".join(facts),
-                metadata={"compacted": True},
-            ))
-
-        result = ([root_user] if root_user else []) + checkpoint_messages + list(reversed(kept))
-        return result, {"before_tokens": total, "after_tokens": sum(self.estimate_tokens(m.content) for m in result), "omitted_messages": len(omitted)}
+        omitted = [message for i, group in enumerate(groups) if i not in keep for message in group]
+        if not omitted:
+            return messages, None
+        # Bound the checkpoint itself; older large transcripts must actually shrink.
+        facts = [f"- {m.role}: {m.content[:220].replace(chr(10), ' ')}" for m in omitted if m.content.strip()]
+        summary_limit = min(2400, max(0, (total - used - 50) * 2))
+        if summary_limit < 80:
+            return messages, None
+        checkpoint = ChatMessage("user", "[COMPACTION CHECKPOINT]\nOlder steps summarized; full history remains in session records.\n"
+                                 + "\n".join(facts)[-summary_limit:], metadata={"compacted": True})
+        result = [checkpoint] + [m for i, group in enumerate(groups) if i in keep for m in group]
+        after = self.history_tokens(result)
+        if after >= total:
+            return messages, None
+        detail = {"before_tokens": total + overhead_tokens, "after_tokens": after + overhead_tokens,
+                  "saved_tokens": total - after, "omitted_messages": len(omitted),
+                  "reason": "manual" if force else "automatic", "at": datetime.now(timezone.utc).isoformat()}
+        self.compaction_count += 1
+        self.last_compaction = detail
+        self.provider_input_tokens = None
+        return result, detail
 
     def assemble(
         self,
@@ -188,7 +235,6 @@ class ContextBuilder:
         run_state: Any | None = None,
     ) -> dict[str, Any]:
         self._headroom_stats.clear()
-        history, compaction = self.compact_history(history)
         if isinstance(instruction_sections, str):
             system = instruction_sections
         elif isinstance(instruction_sections, (list, tuple)):
@@ -226,7 +272,14 @@ class ContextBuilder:
             ])
             system += "\n".join(banner_lines)
 
-        token_estimate = self.estimate_tokens(system + "\n".join(m.content for m in history))
+        # Native schemas consume input tokens too. Workspace metadata is local
+        # adapter state and is not sent as a separate model message.
+        self.overhead_tokens = self.estimate_tokens(system) + (
+            self.estimate_tokens(json.dumps(tools, ensure_ascii=False, default=str)) + 128 if tools else 0)
+        history, compaction = self.compact_history(history, overhead_tokens=self.overhead_tokens)
+        token_estimate = self.overhead_tokens + self.history_tokens(history)
+        self.last_input_tokens = token_estimate
+        self.provider_input_tokens = None
         request = {
             "instructions": instruction_sections,
             "system": system,
@@ -234,6 +287,7 @@ class ContextBuilder:
             "tools": tools,
             "workspace": workspace,
             "token_estimate": token_estimate,
+            "context_usage": self.snapshot(),
         }
         # Include Headroom stats if any compressions occurred
         if self._headroom_stats:
@@ -244,4 +298,3 @@ class ContextBuilder:
                 "details": self._headroom_stats,
             }
         return {"request": request, "compaction": compaction, "history": history}
-

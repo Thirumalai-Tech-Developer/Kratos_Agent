@@ -201,3 +201,24 @@ test("#8926: partial passthrough discovery remains non-authoritative", async () 
     ["gpt-5.6-luna"]
   );
 });
+
+for (const providerId of ["agy", "antigravity"]) {
+  test(`${providerId}: retired Flash route is rejected before dispatch and current identity is kept`, async () => {
+    await seedProviderCatalog(providerId, `${providerId}-current-flash`, [
+      "gemini-3.8-flash-tiered",
+    ]);
+    // agy is the public alias for the shared Antigravity routing pool.
+    await seedProviderCatalog("antigravity", "antigravity-current-flash", [
+      "gemini-3.8-flash-tiered",
+    ]);
+
+    const retired = await getModelInfo(`${providerId}/gemini-3.7-flash-high`);
+    assert.equal(retired.provider, null);
+    assert.equal(retired.errorType, "model_not_found");
+    assert.match(retired.errorMessage, /active live catalog/i);
+
+    const current = await getModelInfo(`${providerId}/gemini-3.8-flash-tiered`);
+    assert.equal(current.provider, "antigravity");
+    assert.equal(current.model, "gemini-3.8-flash-tiered");
+  });
+}

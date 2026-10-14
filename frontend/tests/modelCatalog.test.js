@@ -13,6 +13,17 @@ test('Provider identifiers stay intact across duplicates, friendly names, and in
   assert.equal(catalog[1].name, 'dola-web/dola');
 });
 
+test('Gateway and extension entries with the same ID remain separate choices', () => {
+  const id = 'chatgpt-web/thinking';
+  const catalog = normalizeModelCatalog([
+    { id, selection_key: 'gateway:' + id, connection_provider: 'gateway' },
+    { id, selection_key: 'chatgpt-web:one:' + id, display_name: 'GPT thinking', provider_name: 'ChatGPT browser' },
+  ]);
+  assert.equal(catalog.length, 2);
+  assert.equal(catalog[1].name, 'GPT thinking');
+  assert.equal(catalog[1].selection_key, 'chatgpt-web:one:' + id);
+});
+
 test('A multi-word search finds a model using both its provider and version without changing IDs', () => {
   const catalog = normalizeModelCatalog([{ id: 'qwen/omni-flash', name: 'Qwen 2.8 OmniFlash', provider: 'Qwen' },
     { id: 'qwen/max', name: 'Qwen 2.8 Max', provider: 'Qwen' }, { id: 'dola/dola', name: 'Dola', provider: 'Dola' }]);

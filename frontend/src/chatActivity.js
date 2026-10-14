@@ -31,11 +31,27 @@ export function finishToolActivity(previous = [], status) {
 }
 
 export function restoredToolActivity(calls = []) {
-  return calls.map((call, index) => ({
-    id: call.call_id || `saved-tool-${index}`, name: call.name || 'tool', label: call.action_label || call.name || 'tool',
-    arguments: call.arguments || call.args,
-    // Older sessions saved invocations without their result. Do not invent success.
-    status: call.is_error ? 'failed' : (call.result !== undefined || call.content !== undefined ? 'completed' : 'unknown'),
-    output: call.result ?? call.content,
-  }));
+  return (Array.isArray(calls) ? calls : []).filter(call => call && typeof call === 'object').map((call, index) => {
+    const source = call.source_agent ?? call.source_actor;
+    const sourceAgent = typeof source === 'string' ? { agent_id: source, role: call.agent_role }
+      : source && typeof source === 'object' ? { ...source, agent_id: source.agent_id || source.id, role: source.role || call.agent_role } : undefined;
+    let id = call.call_id ? String(call.call_id) : `saved-tool-${index}`;
+    const savedPrefix = sourceAgent?.agent_id ? `subagent:${sourceAgent.agent_id}:` : '';
+    if (savedPrefix && id.startsWith(savedPrefix)) id = `${sourceAgent.agent_id}:${id.slice(savedPrefix.length)}`;
+    const output = call.output !== undefined ? call.output : call.result !== undefined ? call.result : call.content;
+    // A saved pending/running invocation has no live execution to wait on. Keep
+    // terminal evidence, and never infer success from the turn's final answer.
+    const status = call.status === 'cancelled' ? 'cancelled' : call.is_error ? 'failed'
+      : ['completed', 'failed', 'unknown'].includes(call.status) ? call.status
+      : ['pending', 'running'].includes(call.status) ? 'unknown' : output !== undefined ? 'completed' : 'unknown';
+    return {
+      id, name: call.name || 'tool', label: call.action_label || call.name || 'tool',
+      arguments: call.arguments ?? call.args, status, output,
+      truncated: Boolean(call.truncated),
+      ...(Number.isFinite(call.duration_ms) ? { duration_ms: call.duration_ms } : {}),
+      ...(call.status_detail ? { status_detail: call.status_detail } : {}),
+      ...(sourceAgent ? { source_agent: sourceAgent } : {}),
+      ...(call.agent_role ? { agent_role: call.agent_role } : {}),
+    };
+  });
 }

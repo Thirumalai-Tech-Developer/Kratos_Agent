@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Search, Database, MessageSquare, Trash2, CornerUpRight, User } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
+import KratosMark from './KratosMark';
+import { visibleMessageText } from '../speechDirectives';
 
 export default function SessionsExplorer({
   sessions,
@@ -26,7 +28,7 @@ export default function SessionsExplorer({
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
           <div className="flex items-center gap-2 text-xs font-rajdhani font-bold text-slate-300">
             <Database className="w-4 h-4 text-pink-400" />
-            <span>CLOUDFLARE D1 SESSIONS ({sessions?.length || 0})</span>
+            <span>Saved chats ({sessions?.length || 0})</span>
           </div>
         </div>
 
@@ -45,9 +47,9 @@ export default function SessionsExplorer({
         {/* Sessions List */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
           {isLoading ? (
-            <div className="p-6 text-center text-xs text-slate-500">Loading sessions from D1...</div>
+            <div className="p-6 text-center text-xs text-slate-500">Loading chats…</div>
           ) : filteredSessions.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500">No sessions found in D1</div>
+            <div className="p-6 text-center text-xs text-slate-500">No saved chats found</div>
           ) : (
             filteredSessions.map((s) => {
               const isSelected = s.session_id === activeSessionId;
@@ -119,7 +121,7 @@ export default function SessionsExplorer({
                 className="px-3 py-1.5 rounded-lg font-rajdhani font-bold text-xs flex items-center gap-1.5 bg-cyan-500/20 border border-cyan-400 text-cyan-300 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(0,243,255,0.4)] transition"
               >
                 <CornerUpRight className="w-3.5 h-3.5" />
-                <span>CONTINUE IN ARENA</span>
+                <span>Continue chat</span>
               </button>
 
               <button
@@ -174,18 +176,13 @@ export default function SessionsExplorer({
                   {agentText && (
                     <div className="flex justify-start gap-3">
                       <div className="flex-shrink-0 mt-1">
-                        <img
-                          src="./kratos_badge.png"
-                          alt="Kratos"
-                          className="w-8 h-8 rounded-xl object-cover border border-pink-500/40 shadow-sm"
-                        />
+                        <KratosMark size={30} />
                       </div>
                       <div className="max-w-[85%] rounded-2xl p-4 glass-card border border-slate-700/60 rounded-tl-sm text-sm text-slate-100">
                         <div className="flex items-center gap-1.5 text-[11px] font-rajdhani font-bold text-cyan-400 mb-2">
-                          <span>⚔️</span>
-                          <span>KRATOS AGENT // STORED REPLY</span>
+                          <span>Kratos · saved reply</span>
                         </div>
-                        <MarkdownRenderer content={agentText} />
+                        <MarkdownRenderer content={visibleMessageText({ role: 'agent', content: agentText })} />
                       </div>
                     </div>
                   )}

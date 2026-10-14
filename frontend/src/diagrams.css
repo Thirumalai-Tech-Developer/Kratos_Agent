@@ -1,0 +1,37 @@
+.diagram-panel {
+  margin: 14px 0;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 12px;
+  background: #111827;
+  overflow: hidden;
+}
+.diagram-svg {
+  padding: 18px;
+  overflow-x: auto;
+}
+.diagram-svg svg {
+  display: block;
+  width: 100%;
+  min-width: 320px;
+  height: auto;
+  margin: auto;
+}
+.diagram-status {
+  margin: 12px 16px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.diagram-source {
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+.diagram-source > summary {
+  padding: 10px 16px;
+  color: #7dd3fc;
+  font-size: 12px;
+  cursor: pointer;
+}
+.diagram-source .code-dialog-box {
+  margin: 0;
+  border-width: 1px 0 0;
+  border-radius: 0;
+}

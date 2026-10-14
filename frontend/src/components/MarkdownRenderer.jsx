@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
+import { markdownSegments } from '../markdownSegments';
+import { renderDiagram } from '../diagramRenderer';
+import '../diagrams.css';
 
 // Common language alias mapping from src/kratos_agent/web
 const ALIAS_MAP = {
@@ -58,7 +61,7 @@ function highlightCode(codeText, lang) {
   return { highlighted, displayLang, langClass };
 }
 
-function CodeDialogBox({ code, language }) {
+export function CodeDialogBox({ code, language }) {
   const [copied, setCopied] = useState(false);
 
   const { highlighted, displayLang, langClass } = highlightCode(code, language);
@@ -69,8 +72,7 @@ function CodeDialogBox({ code, language }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }).catch(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setCopied(false);
       });
     }
   };
@@ -98,6 +100,38 @@ function CodeDialogBox({ code, language }) {
         />
       </pre>
     </div>
+  );
+}
+
+function MermaidDiagram({ code, complete }) {
+  const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const [result, setResult] = useState({ svg: '', status: 'waiting', code: '' });
+  useEffect(() => {
+    if (!complete) return;
+    let active = true;
+    renderDiagram(code, `kratos-diagram-${instanceId}`)
+      .then(svg => { if (active) setResult({ svg, status: 'ready', code }); })
+      .catch(() => { if (active) setResult({ svg: '', status: 'fallback', code }); });
+    return () => { active = false; };
+  }, [code, complete, instanceId]);
+
+  const current = result.code === code ? result : { svg: '', status: 'waiting' };
+  return (
+    <section className="diagram-panel" aria-label="Architecture diagram">
+      {current.svg ? (
+        <div className="diagram-svg" role="img" aria-label="Generated diagram"
+          dangerouslySetInnerHTML={{ __html: current.svg }} />
+      ) : (
+        <p className="diagram-status" role="status">
+          {!complete ? 'Diagram is being written…' : current.status === 'fallback'
+            ? 'Diagram preview is unavailable. The source is shown below.' : 'Rendering diagram…'}
+        </p>
+      )}
+      <details className="diagram-source" open={!current.svg || undefined}>
+        <summary>Diagram source</summary>
+        <CodeDialogBox code={code} language="mermaid" />
+      </details>
+    </section>
   );
 }
 
@@ -278,38 +312,15 @@ function renderTextMarkdown(text, keyPrefix) {
 export default function MarkdownRenderer({ content, isStreaming }) {
   if (!content && !isStreaming) return null;
 
-  // Match complete or in-progress code blocks
-  const codeBlockRegex = /```([a-zA-Z0-9_\-+]*)\r?\n([\s\S]*?)(?:```|$)/g;
-  const segments = [];
-  let lastIndex = 0;
-  let match;
-
-  const textToParse = content || '';
-
-  while ((match = codeBlockRegex.exec(textToParse)) !== null) {
-    const beforeCode = textToParse.substring(lastIndex, match.index);
-    if (beforeCode) {
-      segments.push({ type: 'text', content: beforeCode });
-    }
-    segments.push({
-      type: 'code',
-      lang: match[1],
-      code: match[2]
-    });
-    lastIndex = match.index + match[0].length;
-    if (!match[0].endsWith('```') && lastIndex === textToParse.length) {
-      break;
-    }
-  }
-
-  if (lastIndex < textToParse.length) {
-    segments.push({ type: 'text', content: textToParse.substring(lastIndex) });
-  }
+  const segments = markdownSegments(content);
 
   return (
     <div className="text-sm">
       {segments.map((seg, idx) => {
         if (seg.type === 'code') {
+          if (seg.lang === 'mermaid') {
+            return <MermaidDiagram key={idx} code={seg.code} complete={seg.complete} />;
+          }
           return (
             <CodeDialogBox
               key={idx}

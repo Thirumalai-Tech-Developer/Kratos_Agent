@@ -227,6 +227,10 @@ class AgenticMemory:
 
     def load_session(self, session_id: str) -> bool:
         """Loads a session from Cloudflare D1 database, falling back to disk backup."""
+        # A newly populated SQLite mirror can contain only the latest turns.
+        # The complete session backup preserves history while cloud sync waits.
+        if getattr(self.db, 'has_pending_writes', False) and self._load_file_backup(session_id):
+            return True
         # 1. Try loading from D1 DB
         try:
             rows = self.db.execute("SELECT * FROM sessions WHERE id = ?", [session_id])
@@ -299,7 +303,9 @@ class AgenticMemory:
         except Exception as exc:
             logger.debug("Operation error suppressed: %s", exc)
 
-        # 2. Fallback to local JSON file
+        return self._load_file_backup(session_id)
+
+    def _load_file_backup(self, session_id: str) -> bool:
         session_path = self.sessions_dir / f"{session_id}.json"
         if not session_path.exists():
             return False
@@ -482,6 +488,9 @@ class AgenticMemory:
             "agent": effective_reply,
             "tools_used": tool_calls or [],
             "status": status,
+            "plan": plan.to_dict() if hasattr(plan, 'to_dict') else plan,
+            "files_changed": files_changed,
+            "verification_status": verification_status,
         }
         self.active_session.turns.append(turn)
 

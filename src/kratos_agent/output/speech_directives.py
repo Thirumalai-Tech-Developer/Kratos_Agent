@@ -17,13 +17,13 @@ class SpeechDirective:
 
 
 def extract_speech_directives(text: str) -> SpeechDirective:
-    """Remove directive tags and collect only correctly paired speak segments.
+    """Keep the visible answer separate from correctly paired speech segments.
 
-    Malformed, nested, or unmatched directives fail closed: their text remains
-    visible, but none of it is sent to a speech backend.
+    A speech summary is audio metadata, so neither its markers nor its body
+    belong in the visible answer. Malformed, nested, or unmatched directives
+    fail closed: their marked body stays hidden and none is spoken aloud.
     """
     source = str(text or "")
-    display: list[str] = []
     speech: list[str] = []
     cursor = 0
     segment_start: int | None = None
@@ -34,13 +34,11 @@ def extract_speech_directives(text: str) -> SpeechDirective:
         next_close = source.find(CLOSE, cursor)
         positions = [(pos, marker) for pos, marker in ((next_open, OPEN), (next_close, CLOSE)) if pos >= 0]
         if not positions:
-            display.append(source[cursor:])
             if segment_start is not None:
                 valid = False
             break
 
         pos, marker = min(positions, key=lambda pair: pair[0])
-        display.append(source[cursor:pos])
         if marker == OPEN:
             if segment_start is not None:
                 valid = False
@@ -54,7 +52,10 @@ def extract_speech_directives(text: str) -> SpeechDirective:
                 segment_start = None
         cursor = pos + len(marker)
 
-    visible = "".join(display)
+    if segment_start is not None:
+        valid = False
+    display_filter = DirectiveStreamFilter()
+    visible = display_filter.push(source) + display_filter.flush()
     # If parsing failed, suppress all speech in the response rather than trying
     # to guess which fragment the model intended to mark.
     if not valid:
@@ -67,29 +68,38 @@ def extract_speech_directives(text: str) -> SpeechDirective:
 
 
 class DirectiveStreamFilter:
-    """Strip directive markers from streamed display text across chunk edges."""
+    """Hide speech directives and their bodies across streamed chunk edges."""
 
     def __init__(self) -> None:
         self._pending = ""
+        self._speech_depth = 0
 
     def push(self, chunk: str) -> str:
         self._pending += str(chunk or "")
         output: list[str] = []
-        while self._pending:
-            if self._pending.startswith(OPEN):
-                self._pending = self._pending[len(OPEN):]
+        cursor = 0
+        while cursor < len(self._pending):
+            if self._pending.startswith(OPEN, cursor):
+                cursor += len(OPEN)
+                self._speech_depth += 1
                 continue
-            if self._pending.startswith(CLOSE):
-                self._pending = self._pending[len(CLOSE):]
+            if self._pending.startswith(CLOSE, cursor):
+                cursor += len(CLOSE)
+                self._speech_depth = max(0, self._speech_depth - 1)
                 continue
-            if any(marker.startswith(self._pending) for marker in (OPEN, CLOSE)):
+            if len(self._pending) - cursor < len(CLOSE) and any(
+                marker.startswith(self._pending[cursor:]) for marker in (OPEN, CLOSE)
+            ):
                 break
-            output.append(self._pending[0])
-            self._pending = self._pending[1:]
+            if not self._speech_depth:
+                output.append(self._pending[cursor])
+            cursor += 1
+        self._pending = self._pending[cursor:]
         return "".join(output)
 
     def flush(self) -> str:
         # Discard a possible partial control token at end-of-stream so it can
         # never leak into the UI as an implementation detail.
         self._pending = ""
+        self._speech_depth = 0
         return ""

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import threading
@@ -19,7 +20,7 @@ from kratos_agent.ccs import get_capability_map
 from kratos_agent.core.agent_loop import AgentLoop
 from kratos_agent.core.approval_mode import ApprovalMode, approval_gate
 from kratos_agent.core.context_pipeline import ContextBudget, ContextBuilder
-from kratos_agent.core.change_review import ChangeReview, checkpoint_turn
+from kratos_agent.core.change_review import ChangeReview, checkpoint_turn, capture_before_tool
 from kratos_agent.core.generation_settings import GenerationSettings
 from kratos_agent.core.event_bus import event_bus
 from kratos_agent.core.event_store import EventStore
@@ -36,8 +37,10 @@ from kratos_agent.core.mcp_runtime import McpManager
 from kratos_agent.core.memory import memory
 from kratos_agent.core.prompt_builder import CORE_PROMPT_V2, SPEECH_OUTPUT_RULE
 from kratos_agent.core.prompt_library import prompt_library
+from kratos_agent.core.project_memory import ProjectMemory
 from kratos_agent.core.model_adapter import KratosModelAdapter
 from kratos_agent.core.risk_policy import assess_tool_risk
+from kratos_agent.core.resume_artifacts import resume_artifacts
 from kratos_agent.core.runtime_contracts import (
     ChatMessage,
     EventKind,
@@ -66,12 +69,13 @@ _ACTIONABLE_REQUEST_PATTERN = re.compile(
 
 def _recent_conversation(history: list[ChatMessage], exchanges: int = 2) -> list[ChatMessage]:
     """Keep a small conversational window and drop old execution transcripts."""
-    user_positions = [i for i, message in enumerate(history) if message.role == "user"]
+    checkpoints = [message for message in history if message.metadata.get("compacted")]
+    user_positions = [i for i, message in enumerate(history) if message.role == "user" and not message.metadata.get("compacted")]
     if not user_positions:
         return []
 
     selected = user_positions[-max(1, exchanges):]
-    recent: list[ChatMessage] = []
+    recent: list[ChatMessage] = checkpoints[-1:]
     for offset, start in enumerate(selected):
         end = selected[offset + 1] if offset + 1 < len(selected) else len(history)
         recent.append(history[start])
@@ -91,12 +95,27 @@ def _serialize_turn(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
         with self._turn_lock:
-            from kratos_agent.sdk.client import gateway_scope
-            session = getattr(self.memory, "active_session", None)
-            with gateway_scope(session_id=session.session_id if session else "",
-                               cancel=self._cancellation_flag):
-                return method(self, *args, **kwargs)
+            depth = getattr(self, "_project_instruction_turn_depth", 0)
+            self._project_instruction_turn_depth = depth + 1
+            try:
+                refresh = getattr(self, "_refresh_project_instructions", None)
+                if depth == 0 and callable(refresh):
+                    refresh()
+                from kratos_agent.sdk.client import gateway_scope
+                from kratos_agent.core.execution_control import execution_scope
+                session = getattr(self.memory, "active_session", None)
+                with execution_scope(self._cancellation_flag), gateway_scope(session_id=session.session_id if session else "",
+                                   cancel=self._cancellation_flag):
+                    return method(self, *args, **kwargs)
+            finally:
+                self._project_instruction_turn_depth = depth
     return wrapped
+
+
+def _resumable_plan(session: Any) -> Any:
+    """Resume unfinished work without reviving a completed historical plan."""
+    plan = session.get_plan() if session is not None else None
+    return plan if plan is not None and plan.get_unfinished_tasks() else None
 
 
 def _derive_turn_status(
@@ -195,8 +214,14 @@ class KratosRuntime:
     """Composes replaceable instructions, context, tools, provider, loop and session trace."""
     def __init__(self, model_name: str | None = None, workspace: Path | None = None) -> None:
         self.workspace = (workspace or Path.cwd()).resolve()
-        from kratos_agent.core.model_selection import read_selected_model
-        self.model_name = model_name or read_selected_model(self.workspace) or get_default_model()
+        from kratos_agent.core.model_selection import read_selected_connection
+        selection = read_selected_connection(self.workspace)
+        workspace_model = selection["model"] if selection else None
+        if selection:
+            os.environ["KRATOS_MODEL_PROVIDER"] = selection["provider"]
+            os.environ["KRATOS_RUNTIME_MODEL"] = model_name or workspace_model
+            os.environ["KRATOS_RUNTIME_ACCOUNT_ID"] = selection["account_id"]
+        self.model_name = model_name or workspace_model or get_default_model()
         if self.model_name:
             os.environ["KRATOS_MODEL"] = self.model_name
         self._turn_lock = threading.RLock()
@@ -206,15 +231,20 @@ class KratosRuntime:
         self.skill_manager.set_workspace(self.workspace)
         self.memory = memory
         self.d1_db = getattr(self.memory, "d1_db", None) or getattr(self.memory, "db", None)
+        self.project_memory = ProjectMemory(self.workspace)
+        self.project_memory.reload()
+        self._project_instruction_digest = self.project_memory.snapshot_digest
+        self._pending_project_instruction_update = None
+        self._project_instruction_session = self.memory.active_session.session_id if self.memory.active_session else "default"
         self.instructions = InstructionEngine()
         self._register_instruction_modules()
         self.context = ContextBuilder(ContextBudget())
         self.model_metadata: dict[str, Any] | None = None
         try:
-            from kratos_agent.brain.config import get_model_catalog
+            from kratos_agent.brain.config import get_runtime_model_catalog as get_model_catalog
 
             model_metadata = next(
-                (item for item in get_model_catalog(timeout=0.75) if item["id"] == self.model_name),
+                (item for item in get_model_catalog(timeout=0.75, cache_path=self.workspace / ".kratos" / "gateway-model-catalog.json") if item["id"] == self.model_name),
                 None,
             )
             self.apply_model_metadata(model_metadata)
@@ -226,15 +256,19 @@ class KratosRuntime:
             if status.get("state") == "error":
                 logger.warning("MCP server %s unavailable (%s); Kratos will continue startup.", server_name, status.get("error"))
         self.tools = self.tools_registry.specs()  # Existing CLI compatibility.
-        self.brain = BrainClient()
+        self.brain = BrainClient(configured_model=self.model_name if selection else None)
         self.brain.generation_model = self.model_name
         self.brain.generation_options = self.generation_settings.status(self.model_name, self.model_metadata)['options']
         self.model = KratosModelAdapter(self.model_name, self.brain)
         self.agent = None  # The explicit AgentLoop replaces the opaque LangChain graph.
         self._history = self._restore_history()
+        if self._history:
+            self._pending_project_instruction_update = self._project_instruction_message()
         self._event_store = self._open_event_store()
         self.last_request: dict[str, Any] | None = None
         self._current_tool_calls: list[dict[str, Any]] = []
+        self._pending_display_prose: str | None = None
+        self._tool_activity_lock = threading.RLock()
         self._cancellation_flag = threading.Event()
         self.loop = AgentLoop(self.context, self.instructions, self.tools_registry, self.model, lambda event: self._emit(event), self.workspace, self._cancellation_flag)
         self.loop.on_speech = self._speak_marked_text
@@ -355,6 +389,7 @@ class KratosRuntime:
             "for lengthy work. It must not replace execution. Follow the shared speech rule for the final answer."
         ), 20))
         self.instructions.register(InstructionModule("workspace", "project", lambda: f"Workspace: {self.workspace}", 30))
+        self.instructions.register(InstructionModule("project-instructions", "project", self.project_memory.get_project_context, 32))
         def _get_skill_instructions() -> str:
             request = str(getattr(self, "_active_user_request", "") or "")
             catalog = self.skill_manager.get_all_skills_prompt(request)
@@ -369,10 +404,54 @@ class KratosRuntime:
         self.instructions.register(InstructionModule("skills", "persona", _get_skill_instructions, 40))
         self.instructions.register(InstructionModule("engineering-guidelines", "developer", lambda: "GUIDELINES: Follow project conventions, make minimal targeted changes, and verify results before declaring completion.", 50))
 
+    def project_instruction_status(self) -> dict[str, Any]:
+        """Current editor status; inspecting it never changes an active prompt."""
+        return self.project_memory.status()
+
+    def _project_instruction_message(self) -> str:
+        context = self.project_memory.get_project_context()
+        if context:
+            return "[PROJECT INSTRUCTIONS UPDATED]\nApply this current project guidance to the following user request.\n\n" + context
+        return (
+            "[PROJECT INSTRUCTIONS UPDATED]\nNo project instructions are currently loaded. "
+            "Earlier guidance from kratos.md/KRATOS.md no longer applies. Continue following "
+            "the current user's request and the normal permission and verification rules."
+        )
+
+    def _refresh_project_instructions(self, *, force_notice: bool = False) -> None:
+        """Reload at a turn boundary and queue only the changed project guidance."""
+        previous = getattr(self, "_project_instruction_digest", None)
+        snapshot = self.project_memory.reload()
+        self._project_instruction_digest = snapshot["digest"]
+        if force_notice or snapshot["digest"] != previous:
+            self._pending_project_instruction_update = self._project_instruction_message()
+
+    def _append_project_instruction_update(self, history: list[ChatMessage], *, before_latest_user: bool = False) -> None:
+        update = getattr(self, "_pending_project_instruction_update", None)
+        if not update:
+            return
+        message = ChatMessage("user", update, metadata={"project_instruction_update": True})
+        position = len(history)
+        if before_latest_user:
+            position = next((index for index in range(len(history) - 1, -1, -1) if history[index].role == "user"), position)
+        history.insert(position, message)
+        self._pending_project_instruction_update = None
+
     def _restore_history(self) -> list[ChatMessage]:
         active = self.memory.active_session
         if not active:
             return []
+        checkpoint = self.workspace / ".kratos" / "sessions" / active.session_id / "context-checkpoint.json"
+        try:
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if saved.get("session_updated_at") == active.updated_at and isinstance(saved.get("history"), list):
+                restored = [ChatMessage(**item) for item in saved["history"]]
+                if any(message.metadata.get("compacted") for message in restored):
+                    self.context.compaction_count = saved.get("compaction_count", 0)
+                    self.context.last_compaction = saved.get("last_compaction")
+                    return restored
+        except (OSError, ValueError, TypeError):
+            pass
         history: list[ChatMessage] = []
         # Keep durable session history on disk, but restore only the latest two
         # successful exchanges into the model context for a fresh process.
@@ -398,9 +477,16 @@ class KratosRuntime:
     def reset(self) -> None:
         """Reset conversation history, active session turns, and rebind event store."""
         self._history = []
+        self._current_tool_calls = []
+        self._pending_display_prose = None
+        self.context.reset_tracking()
+        self.last_request = None
         if self.memory and hasattr(self.memory, "clear"):
             self.memory.clear()
         self._event_store = self._open_event_store()
+        self._refresh_project_instructions()
+        self._pending_project_instruction_update = None
+        self._project_instruction_session = getattr(self._event_store, "session_id", "default")
 
     def _open_event_store(self) -> EventStore:
         session_id = self.memory.active_session.session_id if self.memory.active_session else "default"
@@ -408,52 +494,317 @@ class KratosRuntime:
 
     def activate_session(self) -> None:
         """Rebind runtime history and trace after the session manager switches sessions."""
+        session = self.memory.active_session
+        session_id = session.session_id if session else "default"
+        if session_id != getattr(self._event_store, "session_id", None):
+            self.context.reset_tracking()
+            self.last_request = None
         self._history = self._restore_history()
+        changed_session = session_id != getattr(self, "_project_instruction_session", None)
+        if changed_session and hasattr(self, "loop"):
+            # Keep saved sessions intact, but do not carry a different chat's
+            # in-memory plan/evidence into a fresh or restored conversation.
+            self.loop.current_plan = None
+            self.loop.current_run = None
+            self.loop.last_verification = None
+            self.loop.resume_files = []
+            self.loop.workspace_tracker.reset()
+            self.loop.terminal_latch.reset()
+            self._current_tool_calls = []
+            self._pending_display_prose = None
+            self._active_user_request = ""
+        self._refresh_project_instructions(force_notice=changed_session and bool(self._history))
+        if changed_session and not self._history:
+            self._pending_project_instruction_update = None
+        self._project_instruction_session = session_id
         self._event_store = self._open_event_store()
 
+    def _save_context_checkpoint(self) -> None:
+        if not any(message.metadata.get("compacted") for message in self._history):
+            return
+        session = self.memory.active_session
+        if not session:
+            return
+        path = self.workspace / ".kratos" / "sessions" / session.session_id / "context-checkpoint.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({
+            "session_updated_at": session.updated_at,
+            "history": [message.to_dict() for message in self._history],
+            "compaction_count": self.context.compaction_count,
+            "last_compaction": self.context.last_compaction,
+        }, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+
+    def context_status(self, *, busy: bool = False) -> dict[str, Any]:
+        status = self.context.snapshot(None if busy else self._history)
+        session = self.memory.active_session
+        status.update({"session_id": session.session_id if session else None, "model": self.model_name,
+                       "limit_source": "model" if self.model_metadata and self.model_metadata.get("metadata_available") and any(
+                           self.model_metadata.get(key) for key in ("context_length", "max_input_tokens")) else "configured",
+                       "busy": busy, "can_compact": not busy and len(self._history) > 2})
+        return status
+
+    def compact_context(self) -> dict[str, Any]:
+        """Compact only the working prompt; durable conversation records stay intact."""
+        previous = (self._history, self.context.compaction_count, self.context.last_compaction,
+                    self.context.provider_input_tokens)
+        history, detail = self.context.compact_history(self._history, force=True,
+                                                      overhead_tokens=self.context.overhead_tokens)
+        if detail:
+            self._history = history
+            try:
+                self._save_context_checkpoint()
+            except OSError:
+                self._history, self.context.compaction_count, self.context.last_compaction, self.context.provider_input_tokens = previous
+                raise
+            event = RuntimeEvent(EventKind.COMPACTED, detail)
+            self._emit(event)
+            event_bus.publish(event)
+        return {"compacted": detail is not None, "context": self.context_status(),
+                "message": "Context compacted. Full conversation retained." if detail else "Context is already compact; no useful reduction is available."}
+
     def _emit(self, event: RuntimeEvent) -> None:
-        self._event_store.append(event)
-        if event.kind.value == "model.request_assembled":
-            self.last_request = event.payload
-        elif event.kind.value in {"tool.requested", "tool.started"}:
-            payload = dict(event.payload or {})
-            call_id = payload.get("call_id")
-            if call_id and not any(item.get("call_id") == call_id for item in self._current_tool_calls) or not call_id and payload not in self._current_tool_calls:
-                self._current_tool_calls.append(payload)
+        lock = self.__dict__.setdefault("_tool_activity_lock", threading.RLock())
+        with lock:
+            self._event_store.append(event)
+            kind = event.kind.value
+            payload = event.payload or {}
+            if kind == "model.request_assembled":
+                self.last_request = payload
+            elif kind == "model.response":
+                self.context.record_usage(payload.get("usage"))
+                self._pending_display_prose = str(payload.get("display_text") or "")
+            elif kind in {"tool.requested", "tool.started", "tool.completed", "tool.failed"}:
+                self._record_saved_tool_event(kind, payload, event.timestamp)
+            elif kind == "subagent.updated":
+                activity = payload.get("activity") or {}
+                identity = payload.get("subagent") or {}
+                if activity.get("kind") in {"tool.requested", "tool.started", "tool.completed", "tool.failed"}:
+                    self._record_saved_tool_event(
+                        activity["kind"], activity.get("payload") or {}, event.timestamp,
+                        source_agent=str(identity.get("agent_id") or ""),
+                        agent_role=str(identity.get("role") or ""),
+                    )
+
+    def _record_saved_tool_event(
+        self, kind: str, payload: dict[str, Any], timestamp: float,
+        *, source_agent: str | None = None, agent_role: str | None = None,
+    ) -> None:
+        """Save observed tool activity in order, keeping actor identities distinct."""
+        call_id = str(payload.get("call_id") or "")
+        if source_agent is not None:
+            if not source_agent or not call_id:
+                return
+            call_id = f"subagent:{source_agent}:{call_id}"
+        calls = self._current_tool_calls
+        call = next((item for item in calls if call_id and item.get("call_id") == call_id), None)
+        if call is None and not call_id:
+            call = next((item for item in reversed(calls)
+                         if not item.get("call_id") and item.get("name") == payload.get("name")
+                         and item.get("status") in {"pending", "running"}), None)
+        if call is None:
+            call = {"call_id": call_id, "name": payload.get("name"),
+                    "arguments": dict(payload.get("arguments") or {}), "timestamp": timestamp}
+            if source_agent is not None:
+                call.update(source_agent=source_agent, agent_role=agent_role)
+            calls.append(call)
+        for key in ("name", "arguments", "action_label", "display", "duration_ms", "truncated"):
+            if key in payload:
+                call[key] = payload[key]
+        if kind in {"tool.completed", "tool.failed"}:
+            call["output"] = payload.get("content", payload.get("output", ""))
+            call["is_error"] = kind == "tool.failed" or bool(payload.get("is_error"))
+            cancelled = call["is_error"] and re.match(
+                r"^(?:CancelledByUser\b|Cancelled by user\b|Error:\s*(?:CommandCancelled(?:Error)?\b|"
+                r"Command cancelled by user\b|CancelledByUser\b)|Error during parallel tool execution:\s*"
+                r"InterruptedError:\s*Command cancelled by user\b)",
+                str(call["output"]).strip(), re.IGNORECASE,
+            )
+            call["status"] = "cancelled" if cancelled else ("failed" if call["is_error"] else "completed")
+            call["completed_at"] = timestamp
+        else:
+            call["status"] = "running" if kind == "tool.started" else "pending"
+            if kind == "tool.started" and source_agent is None:
+                prose = getattr(self, "_pending_display_prose", None)
+                if prose:
+                    call["display_prose_before"] = prose
+                self._pending_display_prose = None
+
+    def _finalize_saved_tool_calls(self, status: str) -> None:
+        """Do not leave interrupted or missing tool results running on reload."""
+        lock = self.__dict__.setdefault("_tool_activity_lock", threading.RLock())
+        with lock:
+            for call in self._current_tool_calls:
+                if call.get("status") not in {"pending", "running"}:
+                    continue
+                call["status"] = "cancelled" if status in {"paused", "cancelled"} else (
+                    "failed" if status == "failed" else "unknown"
+                )
+                call["status_detail"] = "The turn ended before a tool result was recorded."
+                if call["status"] in {"cancelled", "failed"}:
+                    call["is_error"] = True
 
     def _run_isolated(self, role: str, history: list[ChatMessage]) -> str:
         """Run a child task with a fresh history and role-scoped instructions."""
-        self._is_subagent_running = True
-        try:
-            child_instructions = InstructionEngine()
-            for section in self.instructions.build():
-                child_instructions.register(InstructionModule(section["name"], section["layer"], lambda content=section["content"]: content))
+        from copy import copy
+        from dataclasses import replace
+        import time
+        import uuid
 
-            subagent_prompt = None
+        from kratos_agent.core.subagents import scoped_subagent_event
+        from kratos_agent.core.execution_control import execution_scope
+        from kratos_agent.sdk.client import gateway_scope
+
+        identity = dict(history[0].metadata.get("subagent", {})) if history else {}
+        identity.setdefault("agent_id", uuid.uuid4().hex)
+        identity.setdefault("role", role)
+        identity.setdefault("task", history[0].content if history else "")
+        parent_turn_id = getattr(self.loop, "_current_turn_id", "") or identity["agent_id"]
+        started = time.monotonic()
+        terminal = {"status": None, "error": None}
+        parent_tracker = getattr(self.loop, "workspace_tracker", None)
+        parent_run = getattr(self.loop, "current_run", None)
+        side_effect_lock = self.__dict__.setdefault("_subagent_side_effect_lock", threading.RLock())
+        child_calls = {}
+
+        def _merge_side_effect(event: RuntimeEvent) -> None:
+            """Merge observed execution, never the child's completion claims."""
+            payload = event.payload or {}
+            with side_effect_lock:
+                if event.kind == EventKind.TOOL_CALL_STARTED:
+                    call_id = payload.get("call_id")
+                    if call_id:
+                        child_calls[call_id] = {
+                            "name": payload.get("name"),
+                            "arguments": dict(payload.get("arguments") or {}),
+                        }
+                elif event.kind in {EventKind.TOOL_COMPLETED, EventKind.TOOL_FAILED}:
+                    call = child_calls.pop(payload.get("call_id"), None)
+                    if parent_run and call and isinstance(call["name"], str):
+                        parent_run.record_tool_call(call["name"], call["arguments"],
+                                                    event.kind == EventKind.TOOL_FAILED or bool(payload.get("is_error")))
+                        parent_run.completed_tools[-1]["subagent_id"] = identity["agent_id"]
+                        parent_run.completed_tools[-1]["call_id"] = payload.get("call_id")
+                elif event.kind in {EventKind.FILE_CREATED, EventKind.FILE_MODIFIED,
+                                    EventKind.FILE_DELETED, EventKind.FILE_INSPECTED}:
+                    file_path = payload.get("file_path")
+                    if not isinstance(file_path, str) or not file_path.strip() or payload.get("is_error"):
+                        return
+                    if parent_tracker:
+                        record = {
+                            EventKind.FILE_CREATED: parent_tracker.record_file_created,
+                            EventKind.FILE_MODIFIED: parent_tracker.record_file_modified,
+                            EventKind.FILE_DELETED: parent_tracker.record_file_deleted,
+                            EventKind.FILE_INSPECTED: parent_tracker.record_file_inspected,
+                        }[event.kind]
+                        record(file_path)
+                    if parent_run:
+                        if event.kind == EventKind.FILE_INSPECTED:
+                            parent_run.record_inspected_file(file_path)
+                        elif event.kind == EventKind.FILE_DELETED:
+                            parent_run.written_files[:] = [path for path in parent_run.written_files if path != file_path]
+                        else:
+                            parent_run.record_written_file(file_path)
+                elif event.kind == EventKind.COMMAND_COMPLETED:
+                    command = payload.get("command")
+                    if not isinstance(command, str) or not command.strip():
+                        return
+                    if parent_tracker:
+                        parent_tracker.record_command(command, 1 if payload.get("is_error") else 0)
+                    if parent_run:
+                        parent_run.record_command(command)
+
+        def _publish(event: RuntimeEvent) -> None:
             try:
-                p_text = prompt_library.get_subagent_prompt(role)
-                if p_text:
-                    subagent_prompt = p_text
-            except Exception as e:
-                logger.warning("Failed to fetch subagent prompt for %s: %s", role, e)
-            if not subagent_prompt:
-                subagent_prompt = f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context."
+                self._emit(event)
+            except Exception as exc:
+                logger.error("Failed to persist subagent event: %s", exc)
+            event_bus.publish(event)
 
-            def _subagent_emit(ev: RuntimeEvent) -> None:
+        def _lifecycle(kind: EventKind, status: str, **detail: Any) -> None:
+            _publish(RuntimeEvent(kind, {"subagent": {**identity, "status": status}, **detail}, parent_turn_id))
+
+        def _subagent_emit(event: RuntimeEvent) -> None:
+            if event.kind == EventKind.MODEL_CHUNK:
+                return
+            _merge_side_effect(event)
+            if event.kind in {EventKind.TURN_FAILED, EventKind.AGENT_FAILED}:
+                error = (event.payload or {}).get("error")
+                terminal.update(status="cancelled" if error == "cancelled" else "failed", error=error)
+            elif event.kind == EventKind.AGENT_PAUSED:
+                terminal["status"] = "paused"
+            _publish(scoped_subagent_event(event, identity, parent_turn_id))
+
+        class IsolatedAgentLoop(AgentLoop):
+            def emit(child, event: RuntimeEvent) -> None:
+                # Base emit publishes globally; route only the scoped wrapper.
+                _subagent_emit(event)
+
+        with self.subagents.isolated_execution():
+            _lifecycle(EventKind.SUBAGENT_STARTED, "running")
+            try:
+                child_instructions = InstructionEngine()
+                for section in self.instructions.build():
+                    child_instructions.register(InstructionModule(section["name"], section["layer"], lambda content=section["content"]: content))
+
+                subagent_prompt = None
                 try:
-                    self._event_store.append(ev)
-                except Exception as e:
-                    logger.error("Failed to append subagent event: %s", e)
+                    subagent_prompt = prompt_library.get_subagent_prompt(role)
+                except Exception as exc:
+                    logger.warning("Failed to fetch subagent prompt for %s: %s", role, exc)
+                if not subagent_prompt:
+                    subagent_prompt = f"You are a specialized {role} subagent. Return findings and evidence to your parent; do not assume the parent has your context."
+                child_instructions.register(InstructionModule("subagent_role", "runtime", lambda: subagent_prompt))
 
-            child_loop = AgentLoop(self.context, child_instructions, self.tools_registry, self.model, _subagent_emit, self.workspace, self._cancellation_flag)
-            result, _ = child_loop.run(history, self._allow_tool)
-            return result
-        finally:
-            self._is_subagent_running = False
-        self._active_user_request = ""
+                # Keep usage, tools and dynamic plans local to this child. MCP
+                # handlers stay shared, while plan handlers bind to its loop.
+                child_context = ContextBuilder(replace(self.context.budget))
+                child_tools = copy(self.tools_registry)
+                child_tools._tools = dict(self.tools_registry._tools)
+                child_loop = IsolatedAgentLoop(child_context, child_instructions, child_tools, self.model,
+                                               _subagent_emit, self.workspace, self._cancellation_flag,
+                                               bind_plan_handlers=False)
+
+                def _child_todos(todos: list[dict[str, str]]) -> str:
+                    child_loop._on_todo_update(todos)
+                    return f"Todo list updated: {len(todos)} item(s)."
+
+                def _child_plan(plan: str) -> str:
+                    if not str(plan or "").strip():
+                        raise ValueError("Plan content cannot be empty.")
+                    child_loop._on_plan_mode_exit(str(plan))
+                    return "Plan submitted to the parent for review."
+
+                for name, handler in (("todo_write", _child_todos), ("exit_plan_mode", _child_plan)):
+                    registered = child_tools.get(name)
+                    if registered:
+                        child_tools.register(registered.spec, handler)
+
+                def _child_allow_tool(spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
+                    # The child's parallel tool workers use new threads. Bind
+                    # the nesting rule here as well as the runtime thread guard.
+                    if spec.name in {"spawn_subagent", "spawn_parallel_subagents"}:
+                        return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
+                    return self._allow_tool(spec, arguments)
+
+                with execution_scope(self._cancellation_flag), gateway_scope(
+                    session_id=f"subagent:{identity['agent_id']}", task_id=identity["agent_id"],
+                    cancel=self._cancellation_flag,
+                ):
+                    result, _ = child_loop.run(history, _child_allow_tool)
+                status = "cancelled" if self._cancellation_flag.is_set() else terminal["status"] or "completed"
+                kind = EventKind.SUBAGENT_COMPLETED if status == "completed" else EventKind.SUBAGENT_FAILED
+                _lifecycle(kind, status, result=result, error=terminal["error"],
+                           duration_ms=int((time.monotonic() - started) * 1000))
+                return result
+            except Exception as exc:
+                _lifecycle(EventKind.SUBAGENT_FAILED, "cancelled" if self._cancellation_flag.is_set() else "failed",
+                           error=str(exc), duration_ms=int((time.monotonic() - started) * 1000))
+                raise
 
     def cancel(self) -> None:
-        """Signal the active agent turn to stop at the next tool boundary."""
+        """Interrupt the active turn's model requests, async tools and child commands."""
         self._cancellation_flag.set()
 
     def clear_cancel(self) -> None:
@@ -467,9 +818,9 @@ class KratosRuntime:
         self.tools = self.tools_registry.specs()
         self.loop.tools = self.tools_registry
 
-    def set_model(self, model_name: str) -> None:
+    def set_model(self, model_name: str, connection: str | None = None) -> None:
         from kratos_agent.core.model_selection import select_runtime_model
-        select_runtime_model(self, model_name)
+        select_runtime_model(self, model_name, connection=connection)
 
     def apply_model_metadata(self, metadata: dict[str, Any] | None) -> None:
         """Apply advertised gateway context and output limits to the runtime."""
@@ -479,6 +830,13 @@ class KratosRuntime:
             self.brain.generation_options = self.generation_settings.status(self.model_name, metadata)['options']
             if hasattr(self, 'loop'):
                 self.loop.inspection_limit = self.generation_settings.status(self.model_name, metadata)['inspection_limit']
+        budget = self.context.budget
+        defaults = type(budget)()
+        budget.max_input_tokens = defaults.max_input_tokens
+        budget.reserve_output_tokens = defaults.reserve_output_tokens
+        self.context.last_input_tokens = None
+        self.context.provider_input_tokens = None
+        self.context.overhead_tokens = 0
         if not metadata or not metadata.get("metadata_available"):
             return
 
@@ -504,7 +862,13 @@ class KratosRuntime:
         budget.max_input_tokens = input_limit + reserve_output
 
     def _allow_tool(self, spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
-        if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and getattr(self, "_is_subagent_running", False):
+        allowed, reason = self._check_tool_permission(spec, arguments)
+        if allowed and spec.permission != ToolPermission.READ and spec.name not in ('todo_write', 'exit_plan_mode'):
+            capture_before_tool(self)
+        return allowed, reason
+
+    def _check_tool_permission(self, spec: Any, arguments: dict[str, Any]) -> tuple[bool, str]:
+        if spec.name in ("spawn_subagent", "spawn_parallel_subagents") and self.subagents.is_child_thread:
             return False, "Nested subagent spawning is prohibited to avoid infinite recursion."
         if hasattr(self, "harness") and self.harness:
             tools_plugin = self.harness.get_plugin("tools")
@@ -552,16 +916,19 @@ class KratosRuntime:
     @_serialize_turn
     def invoke(self, messages: list[dict[str, str]]) -> str:
         self._current_tool_calls = []
+        self._pending_display_prose = None
         self._cancellation_flag.clear()  # Always start fresh for a new turn
         history = _recent_conversation([
             ChatMessage(role=item.get("role", "user"), content=str(item.get("content", "")))
             for item in messages
         ])
+        self._append_project_instruction_update(history, before_latest_user=True)
         resume_plan = None
         user = next((item.content for item in reversed(history) if item.role == "user"), "")
         self._active_user_request = user
         if user.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:
-            resume_plan = self.memory.active_session.get_plan()
+            resume_plan = _resumable_plan(self.memory.active_session)
+        self.loop.resume_files = resume_artifacts(self.memory.active_session, self.workspace, resume_plan.goal) if resume_plan else []
         result, final_history = self.loop.run(history, self._allow_tool, resume_plan=resume_plan)
         if result.startswith("Model request failed:") or result.startswith("Execution error:"):
             status = "failed"
@@ -590,15 +957,17 @@ class KratosRuntime:
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
         verif_dict = self.loop.last_verification.__dict__ if getattr(self.loop, "last_verification", None) else None
 
+        self._finalize_saved_tool_calls(status)
         self.memory.record_turn(
             user,
             result,
-            self._current_tool_calls,
+            tool_calls=self._current_tool_calls,
             plan=plan_dict,
             files_changed=files_dict,
             verification_status=verif_dict,
             status=status
         )
+        self._save_context_checkpoint()
         return result
 
     @_serialize_turn
@@ -610,20 +979,30 @@ class KratosRuntime:
 
         normal_model = get_normal_mode_model()
         self._current_tool_calls = []
+        self._pending_display_prose = None
         self._active_user_request = query
         self._history = _recent_conversation(self._history)
+        self._append_project_instruction_update(self._history)
         self._history.append(ChatMessage("user", query))
 
         system_instruction = (
             "You are Kratos, an elite autonomous AI assistant operating with full capabilities.\n"
             "You answer questions directly, discuss architecture, analyze code, write snippets, and assist the user in Kratos's signature sharp persona.\n"
             + SPEECH_OUTPUT_RULE
+            + "\n\n" + self.project_memory.get_project_context()
         )
 
         start_evt = RuntimeEvent(kind=EventKind.UNDERSTANDING_STARTED, payload={"restricted": False, "model": normal_model})
         event_bus.publish(start_evt)
         self._emit(start_evt)
 
+        built = self.context.assemble(system_instruction, self._history, [], {})
+        self._history = built["history"]
+        if built["compaction"]:
+            self._emit(RuntimeEvent(EventKind.COMPACTED, built["compaction"]))
+        request_event = RuntimeEvent(EventKind.REQUEST_ASSEMBLED, {"context_usage": built["request"]["context_usage"]})
+        self._emit(request_event)
+        event_bus.publish(request_event)
         messages = [{"role": msg.role, "content": msg.content} for msg in self._history]
         response_chunks: list[str] = []
         stream_filter = DirectiveStreamFilter()
@@ -659,19 +1038,21 @@ class KratosRuntime:
             if self._history and self._history[-1].role == "user" and self._history[-1].content == query:
                 self._history.pop()
 
+        self._finalize_saved_tool_calls(status)
         self.memory.record_turn(
             query,
             result,
-            [],
+            tool_calls=[],
             status=status
         )
+        self._save_context_checkpoint()
         done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": status, "preview": result[:150]})
         event_bus.publish(done_evt)
         self._emit(done_evt)
         return result
 
     @_serialize_turn
-    @checkpoint_turn
+    @checkpoint_turn(defer=True)
     def run_agent(
         self,
         query: str,
@@ -683,12 +1064,15 @@ class KratosRuntime:
             return self.run_chat_restricted(query)
 
         self._current_tool_calls = []
+        self._pending_display_prose = None
         self._active_user_request = query
         self._history = _recent_conversation(self._history)
+        self._append_project_instruction_update(self._history)
         self._history.append(ChatMessage("user", query))
         resume_plan = None
         if query.strip().lower() in ("continue", "resume", "/continue") and self.memory.active_session:
-            resume_plan = self.memory.active_session.get_plan()
+            resume_plan = _resumable_plan(self.memory.active_session)
+        self.loop.resume_files = resume_artifacts(self.memory.active_session, self.workspace, resume_plan.goal) if resume_plan else []
         result, self._history = self.loop.run(
             self._history,
             self._allow_tool,
@@ -718,15 +1102,17 @@ class KratosRuntime:
         files_dict = self.loop.workspace_tracker.summary() if hasattr(self.loop, "workspace_tracker") else None
         verif_dict = self.loop.last_verification.__dict__ if getattr(self.loop, "last_verification", None) else None
 
+        self._finalize_saved_tool_calls(status)
         self.memory.record_turn(
             query,
             result,
-            self._current_tool_calls,
+            tool_calls=self._current_tool_calls,
             plan=plan_dict,
             files_changed=files_dict,
             verification_status=verif_dict,
             status=status
         )
+        self._save_context_checkpoint()
         done_evt = RuntimeEvent(kind=EventKind.TURN_COMPLETED, payload={"response_length": len(result), "status": status, "preview": result[:150]})
         event_bus.publish(done_evt)
         self._emit(done_evt)

@@ -1,0 +1,203 @@
+:root {
+  color-scheme: dark;
+  font:
+    13px/1.5 system-ui,
+    sans-serif;
+  color: #e7eaf2;
+  background: #11141c;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  width: 460px;
+  min-height: 390px;
+  max-height: 600px;
+  margin: 0;
+  overflow-y: auto;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px;
+  border-bottom: 1px solid #2c3242;
+}
+.logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #8b5cf6;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 800;
+}
+header strong {
+  font-size: 16px;
+}
+header small {
+  display: block;
+  color: #a8afbf;
+}
+header button {
+  margin-left: auto;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 106px 1fr;
+}
+nav {
+  padding: 22px 10px;
+  border-right: 1px solid #2c3242;
+}
+nav small {
+  display: block;
+  margin-top: 12px;
+  color: #a8afbf;
+  font-size: 10px;
+}
+.nav-active {
+  display: block;
+  padding: 8px;
+  border-radius: 7px;
+  background: #28213e;
+  color: #ceb7ff;
+  font-size: 11px;
+}
+main {
+  padding: 18px;
+  min-width: 0;
+}
+h1 {
+  font-size: 21px;
+  margin: 0;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.provider {
+  font-size: 11px;
+  color: #c3c9d7;
+}
+.intro,
+.footnote {
+  color: #a8afbf;
+}
+.footnote {
+  font-size: 11px;
+  margin-top: 20px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+button,
+select {
+  font: inherit;
+  border: 1px solid #55507b;
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+button {
+  background: #794bdd;
+  color: white;
+  cursor: pointer;
+}
+button:hover {
+  filter: brightness(1.15);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+button.quiet {
+  background: #202634;
+  border-color: #394255;
+}
+button.danger {
+  color: #fecaca;
+  background: #36212a;
+  border-color: #733847;
+}
+:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+.account {
+  border: 1px solid #323a4d;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 12px;
+}
+.account-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  margin: 0 0 7px;
+}
+.tag {
+  display: inline-block;
+  border-radius: 99px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.tag.connected {
+  color: #86efac;
+  background: #17382a;
+}
+.tag.disconnected {
+  color: #b7becc;
+  background: #2a2f3a;
+}
+.tag.error {
+  color: #fca5a5;
+  background: #422029;
+}
+.active-label {
+  color: #c4b5fd;
+  margin-left: 8px;
+  font-size: 11px;
+}
+.model-label {
+  display: block;
+  color: #a8afbf;
+  margin: 12px 0 4px;
+  font-size: 11px;
+}
+select {
+  width: 100%;
+  background: #161c28;
+  color: #e7eaf2;
+  margin-bottom: 10px;
+}
+.account .actions {
+  gap: 6px;
+}
+.account button {
+  font-size: 11px;
+  padding: 6px 8px;
+}
+#status {
+  color: #a8afbf;
+}
+#status.connected {
+  color: #86efac;
+}
+#notice {
+  border-radius: 7px;
+  padding: 9px;
+  background: #20342b;
+  color: #bbf7d0;
+  overflow-wrap: anywhere;
+}
+#notice.error {
+  background: #422029;
+  color: #fca5a5;
+}
+.empty {
+  color: #a8afbf;
+  padding: 15px 0;
+}

@@ -6,8 +6,8 @@ into Kratos' ModelResponse contract without hiding real failures.
 """
 from __future__ import annotations
 
-import json
 import inspect
+import json
 import re
 import uuid
 from collections.abc import Callable
@@ -16,6 +16,14 @@ from typing import Any
 from kratos_agent.brain.config import BrainToolCallError
 
 from .runtime_contracts import ModelCapabilities, ModelResponse, ToolCall
+from .tool_protocol_recovery import (
+    RECOVERY_PROTOCOLS,
+    parse_recovery_completion,
+    plain_tool_transcript,
+    tool_recovery_instruction,
+)
+
+__all__ = ["KratosModelAdapter", "tool_recovery_instruction"]
 
 
 class KratosModelAdapter:
@@ -65,8 +73,15 @@ class KratosModelAdapter:
         return system_content, messages
 
     @staticmethod
-    def _tool_protocol_hint() -> str:
+    def _tool_protocol_hint(browser: bool = False) -> str:
         """Keep the behavioral tool-call rules compact; schemas are already sent natively."""
+        if browser:
+            return ('\n\nTOOL EXECUTION RULES:\n'
+                    '- Kratos runs local tools. Return one JSON object with text and tool_calls.\n'
+                    '- tool_calls is an array of {"name":"registered tool","arguments":{schema-valid arguments}}.\n'
+                    '- A final answer uses an empty tool_calls array or ordinary text.\n'
+                    '- Never claim a tool ran before its result arrives.\n'
+                    '- Use forward slashes for Windows paths; do not output native, XML, DSML or call: markup.\n')
         return (
             "\n\nTOOL EXECUTION RULES:\n"
             "- When an action is required, emit a structured tool call immediately; do not narrate first.\n"
@@ -97,6 +112,7 @@ class KratosModelAdapter:
                 name=name,
                 arguments=args,
                 call_id=str(call.get("id") or call.get("call_id") or f"call_{uuid.uuid4().hex[:8]}"),
+                provider_items=call.get("provider_items", []),
             ))
         return result
 
@@ -109,17 +125,37 @@ class KratosModelAdapter:
 
         system_content, messages = self._messages(request)
         tools = request.get("tools") or []
+        recovery_protocol = request.get("tool_recovery_protocol")
+        if recovery_protocol and recovery_protocol not in RECOVERY_PROTOCOLS:
+            raise ValueError("Unknown tool recovery protocol")
+        from kratos_agent.brain.web_providers import WEB_PROVIDERS
+        browser = self.model.partition("/")[0] in WEB_PROVIDERS
         if tools:
             # Do not serialize the full tool schemas into the system prompt again.
             # BrainClient already sends them through the native `tools` field.
-            system_content = system_content + self._tool_protocol_hint()
+            system_content = system_content + self._tool_protocol_hint(browser)
+
+        wire_tools = tools
+        if recovery_protocol and not browser:
+            # Drop the native API framing when it repeatedly fails. The actual
+            # registered schemas live in the persisted correction message, and
+            # the returned JSON is checked against these original tools below.
+            wire_tools = []
+            messages = plain_tool_transcript(messages)
+            # Compaction may summarize the earlier correction. API calls are
+            # stateless: keep the active contract and current schemas available.
+            # Browser calls retain their original history/cursor instead.
+            system_content += "\n\n" + tool_recovery_instruction(recovery_protocol, tools)
+        # Browser model requests retain their original schemas and messages.
+        # An ephemeral protocol message here would break conversation cursors.
+        chunk_handler = stream_filter_enabled = bool(on_chunk and not recovery_protocol)
 
         pending_text = ""
         suppress_text = False
 
         def stream_filter(chunk: str) -> None:
             nonlocal pending_text, suppress_text
-            if not on_chunk or suppress_text:
+            if not stream_filter_enabled or suppress_text:
                 return
             pending_text += chunk
             prefixes = ('call:', '<tool', '<||DSML||', '<|DSML|', '<|toolcallbegin|>', '{"name"')
@@ -161,9 +197,9 @@ class KratosModelAdapter:
                     model=self.model,
                     messages=messages,
                     system_instruction=system_content,
-                    tools=tools,
+                    tools=wire_tools,
                     stream=True,
-                    on_chunk=stream_filter if on_chunk else None,
+                    on_chunk=stream_filter if chunk_handler else None,
                 )
             except TypeError as exc:
                 # Only retry for clients that genuinely do not accept on_chunk.
@@ -173,7 +209,7 @@ class KratosModelAdapter:
                     model=self.model,
                     messages=messages,
                     system_instruction=system_content,
-                    tools=tools,
+                    tools=wire_tools,
                     stream=True,
                 )
             if isinstance(raw_result, tuple) and len(raw_result) == 2:
@@ -194,16 +230,39 @@ class KratosModelAdapter:
                 model=self.model,
                 messages=messages,
                 system_instruction=system_content,
-                tools=tools,
-                on_chunk=stream_filter if on_chunk else None,
+                tools=wire_tools,
+                on_chunk=stream_filter if chunk_handler else None,
             )
 
-        if on_chunk and not suppress_text and pending_text:
+        if stream_filter_enabled and not suppress_text and pending_text:
             on_chunk(pending_text)
 
-        text, text_calls = extract_tool_calls_from_text(str(raw_text or ""), strict=True)
         if not isinstance(native_calls, list):
             raise BrainToolCallError("The provider returned an invalid tool-call collection.")
+        if recovery_protocol:
+            if native_calls:
+                normalized_calls = self._dedupe_calls(native_calls)
+                try:
+                    recovery_text = json.dumps({"text": str(raw_text or ""), "tool_calls": [
+                        {"name": call.name, "arguments": call.arguments} for call in normalized_calls
+                    ]}, ensure_ascii=False, allow_nan=False)
+                except (TypeError, ValueError) as exc:
+                    raise BrainToolCallError("The provider returned arguments that are not valid JSON.") from exc
+            else:
+                recovery_text = str(raw_text or "")
+            completion = parse_recovery_completion(recovery_text, tools, recovery_protocol)
+            calls = [ToolCall(name=call.name, arguments=call.arguments, call_id=call.id)
+                     for call in completion.tool_calls]
+            if on_chunk and completion.text:
+                on_chunk(completion.text)
+            return ModelResponse(
+                text=completion.text,
+                tool_calls=calls,
+                finish_reason="tool_calls" if calls else "stop",
+                raw=str(raw_text or ""),
+            )
+
+        text, text_calls = extract_tool_calls_from_text(str(raw_text or ""), strict=True)
         all_calls = self._dedupe_calls([*native_calls, *text_calls])
         advertised = {str((tool.get("function") or tool).get("name", "")) for tool in tools if isinstance(tool, dict)}
         if any(call.name not in advertised for call in all_calls):

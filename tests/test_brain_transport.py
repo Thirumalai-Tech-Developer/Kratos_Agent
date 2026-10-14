@@ -20,8 +20,11 @@ from kratos_agent.brain.config import (
 
 
 @pytest.fixture(autouse=True)
-def kratos_model_env(monkeypatch):
+def kratos_model_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("KRATOS_CATALOG_CACHE_PATH", str(tmp_path / "catalog.json"))
     monkeypatch.setenv("KRATOS_MODEL", "kratos-reasoning-v1")
+    monkeypatch.setenv("KRATOS_RUNTIME_MODEL", "kratos-reasoning-v1")
+    monkeypatch.setenv("KRATOS_MODEL_PROVIDER", "gateway")
 
 
 def _response(body: dict, status: int = 200) -> MagicMock:
@@ -97,8 +100,7 @@ def test_repetitive_response_stops_before_callback_and_does_not_retry(mock_post,
         BrainClient().complete('kratos-reasoning-v1', [{'role': 'user', 'content': 'check'}], stream=stream, on_chunk=chunks.append)
     assert not chunks
     assert mock_post.call_count == 1
-    if stream:
-        response.__exit__.assert_called_once()
+    response.close.assert_called_once()
 
 
 @patch("requests.Session.post")
@@ -164,3 +166,72 @@ def test_tool_calling_extraction_from_coding_output():
     assert tool_calls[0]["name"] == "write_file"
     assert tool_calls[0]["args"]["file_path"] == "index.html"
     assert "Kratos" in tool_calls[0]["args"]["content"]
+
+
+def _sse_events(*events):
+    response = _response({})
+    response.iter_lines.return_value = ['data: ' + json.dumps(event) for event in events]
+    return response
+
+
+@patch('kratos_agent.sdk.client._retry_wait')
+@patch('requests.Session.post')
+def test_transient_gateway_sse_error_retries_the_same_model(mock_post, _wait):
+    from kratos_agent.sdk.client import KratosClient
+    failed = _sse_events({'error': {'status': 503, 'message': 'private upstream error'}})
+    recovered = _sse_events({'choices': [{'delta': {'content': 'Recovered'}, 'finish_reason': 'stop'}]})
+    mock_post.side_effect = [failed, recovered]
+    client = KratosClient(provider='gateway', configured_model='kratos-reasoning-v1', max_retries=1)
+    result = client.complete({'model': 'kratos-reasoning-v1', 'messages': [{'role': 'user', 'content': 'hello'}]})
+    assert result.text == 'Recovered'
+    assert mock_post.call_count == 2
+    assert {call.kwargs['json']['model'] for call in mock_post.call_args_list} == {'kratos-reasoning-v1'}
+    failed.close.assert_called_once()
+
+
+@patch('requests.Session.post')
+def test_gateway_sse_only_failure_recovers_as_json_without_changing_model(mock_post):
+    from kratos_agent.sdk.client import KratosClient
+    mock_post.side_effect = [_sse_events({'error': {'message': 'stream-only transport failure'}}),
+                             _response({'choices': [{'message': {'content': 'Recovered as JSON'}}]})]
+    chunks = []
+    client = KratosClient(provider='gateway', configured_model='kratos-reasoning-v1', max_retries=0)
+    result = client.complete({'model': 'kratos-reasoning-v1', 'messages': []}, on_chunk=chunks.append)
+    assert result.text == 'Recovered as JSON'
+    assert chunks == ['Recovered as JSON']
+    assert [call.kwargs['json']['stream'] for call in mock_post.call_args_list] == [True, False]
+
+
+@patch('requests.Session.post')
+def test_gateway_sse_login_failure_does_not_retry_or_expose_upstream_details(mock_post):
+    from kratos_agent.sdk.client import KratosClient, KratosStreamError
+    mock_post.return_value = _sse_events({'error': {'code': 401, 'message': 'private-token-value'}})
+    client = KratosClient(provider='gateway', configured_model='kratos-reasoning-v1', max_retries=2)
+    with pytest.raises(KratosStreamError, match='valid login') as error:
+        client.complete({'model': 'kratos-reasoning-v1', 'messages': []})
+    assert 'private-token-value' not in str(error.value)
+    assert mock_post.call_count == 1
+
+
+@pytest.mark.parametrize('native_tool', [False, True])
+@patch('requests.Session.post')
+def test_gateway_partial_sse_failure_is_never_replayed(mock_post, native_tool):
+    from kratos_agent.sdk.client import KratosClient, KratosStreamError
+    from kratos_agent.brain.config import BrainToolCallError
+    delta = {'tool_calls': [{'index': 0, 'id': 'one', 'function': {'name': 'write_file', 'arguments': '{'}}]} if native_tool else {'content': 'partial answer'}
+    mock_post.return_value = _sse_events({'choices': [{'delta': delta}]}, {'error': {'status': 502}})
+    client = KratosClient(provider='gateway', configured_model='kratos-reasoning-v1', max_retries=2)
+    with pytest.raises(BrainToolCallError if native_tool else KratosStreamError):
+        client.complete({'model': 'kratos-reasoning-v1', 'messages': []})
+    assert mock_post.call_count == 1
+
+
+@patch('kratos_agent.sdk.client._retry_wait')
+@patch('requests.Session.post')
+def test_gateway_rate_limited_sse_has_bounded_retries_and_clear_status(mock_post, _wait):
+    from kratos_agent.sdk.client import KratosClient, KratosStreamError
+    mock_post.return_value = _sse_events({'error': {'code': 'rate_limit_exceeded'}})
+    client = KratosClient(provider='gateway', configured_model='kratos-reasoning-v1', max_retries=2)
+    with pytest.raises(KratosStreamError, match='HTTP 429'):
+        client.complete({'model': 'kratos-reasoning-v1', 'messages': []})
+    assert mock_post.call_count == 3

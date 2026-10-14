@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import urllib.request
 import urllib.parse
+from types import SimpleNamespace
 from pathlib import Path
 
 from kratos_agent.core.d1_client import D1DatabaseClient
@@ -20,7 +21,7 @@ class TestD1StorageAndWeb(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
         self.db_path = self.base_path / "test_d1.db"
-        self.d1_db = D1DatabaseClient(local_db_path=self.db_path)
+        self.d1_db = D1DatabaseClient(account_id='', database_id='', api_token='', local_db_path=self.db_path)
         self.d1_db.init_schema()
 
         self.memory = AgenticMemory(
@@ -35,6 +36,7 @@ class TestD1StorageAndWeb(unittest.TestCase):
         )
 
     def tearDown(self):
+        self.d1_db.close()
         gc.collect()
         try:
             self.temp_dir.cleanup()
@@ -96,7 +98,8 @@ class TestD1StorageAndWeb(unittest.TestCase):
 
     def test_web_server_endpoints(self):
         # Start server on ephemeral port in background
-        server = start_server(port=7890, open_browser=False, d1_db=self.d1_db, memory=self.memory, daemon=True)
+        runtime = SimpleNamespace(memory=self.memory, workspace=self.base_path)
+        server = start_server(port=0, open_browser=False, d1_db=self.d1_db, memory=self.memory, runtime=runtime, daemon=True)
         port = server.server_address[1]
         base_url = f"http://127.0.0.1:{port}"
 
@@ -120,6 +123,7 @@ class TestD1StorageAndWeb(unittest.TestCase):
                 self.assertEqual(data["rows"][0]["answer"], 42)
         finally:
             server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

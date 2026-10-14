@@ -7,6 +7,36 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { mergeProviderModelListing } from "@/lib/providers/mergeProviderModelListing";
 
+for (const providerId of ["agy", "antigravity"]) {
+  it(`${providerId}: current discovered models replace retired static routes`, () => {
+    const models = mergeProviderModelListing({
+      providerId,
+      registryModels: [{ id: "gemini-3.7-flash-high", name: "Old Flash" }],
+      syncedModels: [{ id: "gemini-3.8-flash-tiered", name: "Current Flash" }],
+      customModels: [],
+      usesCuratedModelsOnly: false,
+    });
+    assert.deepEqual(
+      models.map((model) => model.id),
+      ["gemini-3.8-flash-tiered"]
+    );
+  });
+
+  it(`${providerId}: empty discovery preserves the offline fallback`, () => {
+    const models = mergeProviderModelListing({
+      providerId,
+      registryModels: [{ id: "gemini-3.7-flash-high", name: "Known Flash" }],
+      syncedModels: [],
+      customModels: [],
+      usesCuratedModelsOnly: false,
+    });
+    assert.deepEqual(
+      models.map((model) => model.id),
+      ["gemini-3.7-flash-high"]
+    );
+  });
+}
+
 describe("mergeProviderModelListing (cursor exclusive)", () => {
   const registry = [
     { id: "auto", name: "Auto (Server Picks)" },

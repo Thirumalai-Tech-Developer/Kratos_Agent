@@ -161,7 +161,7 @@ def test_unrelated_report_write_cannot_save_an_unrecovered_failure(tmp_path):
     assert (tmp_path / "report.md").is_file()
     assert loop.current_plan.state == AgentState.FAILED
     assert any(task.state == TaskState.FAILED for task in loop.current_plan.tasks)
-    assert "Task incomplete" in reply
+    assert "needs attention" in reply
     assert EventKind.AGENT_COMPLETED not in [event.kind for event in events]
     assert loop.recovery_memory.entries() == []
 
@@ -226,7 +226,7 @@ def test_successful_read_in_same_wave_cannot_recover_an_earlier_failed_read(tmp_
     assert loop.current_plan.state == AgentState.FAILED
     assert loop.current_plan.tasks[0].state == TaskState.FAILED
     assert loop.current_plan.tasks[0].retry_required_tool == "read_file"
-    assert "Task incomplete" in reply
+    assert "needs attention" in reply
     assert loop.recovery_memory.entries() == []
 
 

@@ -19,6 +19,10 @@ class EventKind(str, Enum):
     AGENT_STARTED = "agent.started"
     UNDERSTANDING_STARTED = "understanding.started"
     PLANNING_STARTED = "planning.started"
+    SUBAGENT_STARTED = "subagent.started"
+    SUBAGENT_UPDATED = "subagent.updated"
+    SUBAGENT_COMPLETED = "subagent.completed"
+    SUBAGENT_FAILED = "subagent.failed"
 
     # Planning & Tasks
     PLAN_CREATED = "plan.created"
@@ -136,6 +140,7 @@ class ToolCall:
     name: str
     arguments: dict[str, Any]
     call_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    provider_items: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
 
 @dataclass

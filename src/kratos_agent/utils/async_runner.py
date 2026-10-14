@@ -1,6 +1,7 @@
 import asyncio
 import threading
-from typing import Any, Coroutine
+from collections.abc import Coroutine
+from typing import Any
 
 _SHARED_LOOP: asyncio.AbstractEventLoop | None = None
 _SHARED_THREAD: threading.Thread | None = None
@@ -32,6 +33,34 @@ def get_shared_event_loop() -> asyncio.AbstractEventLoop:
 
 def run_coroutine(coro: Coroutine[Any, Any, Any], timeout: float | None = None) -> Any:
     """Safely executes an async coroutine from synchronous threads via the shared background loop."""
+    from kratos_agent.core.execution_control import current_cancel_event
+
+    cancellation = current_cancel_event()
+
+    async def scoped():
+        task = asyncio.create_task(coro)
+
+        async def watch():
+            while not cancellation.is_set():
+                await asyncio.sleep(0.05)
+            task.cancel()
+
+        watcher = asyncio.create_task(watch()) if cancellation is not None else None
+        try:
+            if cancellation is not None and cancellation.is_set():
+                task.cancel()
+            return await task
+        except asyncio.CancelledError:
+            raise InterruptedError("Operation cancelled by user") from None
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
+            # Await the task's finally blocks before releasing the runtime turn.
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     loop = get_shared_event_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future = asyncio.run_coroutine_threadsafe(scoped(), loop)
     return future.result(timeout=timeout)

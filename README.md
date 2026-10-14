@@ -16,6 +16,16 @@ Kratos Studio combines the Kratos desktop and coding agent with the current Omni
 
 If the gateway is unavailable, the task reports a visible model error. Kratos retries its configured endpoint and model ID; any provider fallback inside a configured OmniRoute combo remains OmniRoute's responsibility.
 
+Chat starts with **Preparing request** and shows **Waiting for the selected model** only after Kratos assembles the model request. Workspace checkpoints start before the first approved tool that can change files; ordinary conversation skips the scan. Events and completed turns save to local JSONL/SQLite immediately. Cloudflare D1 sync runs in the background with a durable retry queue, so an unavailable cloud database does not delay the reply or Stop, and pending training records survive a restart.
+
+The model catalog is fetched once and saved to `.kratos/gateway-model-catalog.json`. Opening the picker, switching models, normal requests, and restarts reuse this saved catalog. Click **Refetch** in **Choose a model** to fetch it again. The snapshot has no automatic expiry and is bound to the gateway endpoint and API key fingerprint; changing either requires its own catalog. Failed Refetch keeps the last successful list and displays a notice. Browser connection models use the metadata saved with their login.
+
+The conversation header shows context tokens used, remaining input capacity, the output reserve, and compaction savings. Expand **Context** for details or use **Compact context** while idle. Counts are marked as estimates unless the provider reports them. The configured context window defaults to 256k; advertised model limits take precedence. Automatic compaction starts at 90% of the available input budget, preserves recent tool-call/result pairs, and saves a checkpoint without deleting the full session records.
+
+Kratos automatically recovers from malformed tool responses and failed verification while the task remains active. Recovery changes method from schema correction to explicit JSON, one action at a time, and a revised approach. Rejected calls never execute; completed work and verification requirements remain saved. A small recovery notice disappears after five seconds, and **Stop** interrupts recovery. Set `KRATOS_AUTONOMOUS_RECOVERY=0` to opt into bounded recovery; only that mode uses `KRATOS_VERIFICATION_RETRIES` (1–10, default 3) and the legacy two-correction tool limit. Network retries still use `KRATOS_MAX_RETRIES`; sign-in, permission, and other terminal blockers stay visible.
+
+Each browser receives a persistent workspace profile. The first profile keeps the original project and history; additional profiles run independent Python workers in `.kratos/users/<profile>/workspace`, with separate sessions, model settings, context, and Stop controls. Four profiles can run concurrently by default (`KRATOS_MAX_USERS`, 2–32). Profiles share the configured model gateway and its provider quotas. Additional profiles save their training/session data in their own local databases; shared Cloudflare D1 and desktop, mail, microphone, and MCP connections are not inherited automatically. Browser profiles are workspace separation for users of this trusted local installation, not a replacement for authenticated accounts.
+
 ## Setup
 
 Requirements: Python 3.12 or 3.13, Node.js 20+ for OmniRoute and the built-in MCP servers, and the OpenPets desktop app if you use the animated companion.
@@ -38,6 +48,17 @@ The launcher supplies `KRATOS_BASE_URL` and starts both local services. For the 
 Optional speech output uses `GEMINI_API_KEY` or `GOOGLE_API_KEY` and `KRATOS_LIVE_ENABLED=true`. Without Gemini credentials, only marked phrases use local Windows SAPI output. Speech recognition remains local. Set `KRATOS_COMPUTER_USE_MCP=false` or `KRATOS_OPENPETS_MCP=false` to disable those built-in MCP servers.
 
 ## First-party Python SDK
+
+For ChatGPT account access, run `uv run kratos-connect browser-setup`, load the
+generated Kratos extension in your regular Chrome or Edge, and manage logins
+and models from its **Connections** panel. Connected logins appear in green and
+errors appear in red. This path uses the bundled `chatgpt-web.ts` executor in
+your normal signed-in tab. Terminal login is also available with
+`uv run kratos-connect login`. Official authorization is available explicitly
+with `uv run kratos-connect login --provider chatgpt`. Credentials are protected
+outside the workspace. Select a returned
+account/model ID and restart Studio; see the [ChatGPT connection](docs/chatgpt-connection.md)
+and [browser connection](docs/chatgpt-browser-connection.md) guides.
 
 ```python
 from kratos_agent.sdk import KratosAgent, KratosClient

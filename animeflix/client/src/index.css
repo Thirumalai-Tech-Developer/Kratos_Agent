@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --netflix-red: #E50914;
+    --netflix-black: #141414;
+    --netflix-dark: #181818;
+    --netflix-card: #202020;
+    --netflix-gray: #808080;
+    --netflix-light-gray: #e5e5e5;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #141414;
+    color: #ffffff;
+    font-family: 'Netflix Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #141414;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #E50914;
+}
+
+/* Hide scrollbar for carousel but allow horizontal scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Netflix style glow and shadows */
+.netflix-shadow {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+}
+
+.card-hover-shadow {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.9), 0 8px 10px -6px rgba(0, 0, 0, 0.9);
+}
+
+.text-stroke-red {
+  -webkit-text-stroke: 2px #E50914;
+  color: #141414;
+}
+
+.text-stroke-white {
+  -webkit-text-stroke: 4px #595959;
+  color: #141414;
+}
+
+/* Top 10 Number styling */
+.top10-number {
+  font-size: 8rem;
+  font-weight: 900;
+  line-height: 0.8;
+  letter-spacing: -6px;
+  color: #000000;
+  -webkit-text-stroke: 4px #595959;
+  user-select: none;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}

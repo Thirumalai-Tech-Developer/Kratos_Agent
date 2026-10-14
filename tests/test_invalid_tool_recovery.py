@@ -18,6 +18,13 @@ BROKEN = '<|DSML|calls><|DSML|invoke name="read_file"><|DSML|parameter name="fil
 VALID = 'call:read_file{"file_path":"README.md"}'
 
 
+@pytest.fixture(autouse=True)
+def isolated_model_configuration(monkeypatch):
+    # SDK fixtures must not inherit the developer's saved browser selection.
+    monkeypatch.setenv("KRATOS_RUNTIME_MODEL", "configured")
+    monkeypatch.setenv("KRATOS_MODEL_PROVIDER", "gateway")
+
+
 class SequenceClient:
     def __init__(self, responses, calls):
         self.responses = iter(responses)
@@ -74,7 +81,8 @@ def test_malformed_response_gets_corrected_before_any_tool_executes(setup):
     assert sum(message.role == "tool" for message in history) == 1
 
 
-def test_tool_format_recovery_stops_after_two_corrections(setup):
+def test_explicit_bounded_recovery_can_still_stop_after_two_corrections(setup, monkeypatch):
+    monkeypatch.setenv("KRATOS_AUTONOMOUS_RECOVERY", "0")
     create, calls, events = setup
     loop, client = create([(BROKEN, [])] * 4)
     answer, history = run(loop)
@@ -155,6 +163,7 @@ def test_incomplete_or_guessed_text_calls_are_rejected_before_execution(setup, t
 
 
 def test_tool_format_recovery_can_be_disabled(setup, monkeypatch):
+    monkeypatch.setenv("KRATOS_AUTONOMOUS_RECOVERY", "0")
     monkeypatch.setenv("KRATOS_MAX_RETRIES", "0")
     create, calls, events = setup
     loop, client = create([(BROKEN, []), (VALID, [])])
@@ -232,3 +241,64 @@ def test_malformed_native_stream_delta_is_a_recoverable_error(monkeypatch, delta
         assert brain.session.post.call_count == 1
     finally:
         brain.session.close()
+
+
+def test_format_recovery_continues_after_two_corrections_and_changes_method(setup):
+    create, calls, events = setup
+    loop, client = create([(BROKEN, [])] * 4 + [(VALID, []), ("Verified file content.", [])])
+    loop.cancellation_flag.wait = Mock(return_value=False)
+    answer, history = run(loop)
+    assert answer == "Verified file content."
+    assert calls == ["README.md"] and len(client.requests) == 6
+    retries = [event for event in events if event.kind == EventKind.RETRY]
+    assert [event.payload["strategy"] for event in retries] == ["schema_correction", "schema_correction", "json", "json"]
+    assert all(event.payload["recoverable"] for event in retries)
+    assert client.requests[3]["tools"] == []  # Alternate API protocol omits native tools.
+    assert not any(event.kind == EventKind.TURN_FAILED for event in events)
+    assert not any("Invalid tool response rejected" in event.payload.get("chunk", "") for event in events)
+    assert any("alternate local JSON response protocol" in message.content for message in history)
+
+
+def test_all_recovery_methods_can_be_tried_before_a_valid_response(setup):
+    create, calls, events = setup
+    loop, client = create([(BROKEN, [])] * 8 + [(VALID, []), ("Verified file content.", [])])
+    loop.cancellation_flag.wait = Mock(return_value=False)
+    answer, _ = loop.run([ChatMessage(role="user", content="Please read README.md")], allow_tool=lambda *args: (True, "allowed"), max_steps=12)
+    assert answer == "Verified file content." and calls == ["README.md"]
+    assert len(client.requests) == 10
+    strategies = [event.payload["strategy"] for event in events if event.kind == EventKind.RETRY]
+    assert strategies == ["schema_correction"] * 2 + ["json"] * 2 + ["single_json"] * 2 + ["fresh_plan"] * 2
+    assert not any(event.kind == EventKind.TURN_FAILED for event in events)
+
+
+def test_stop_during_extended_recovery_prevents_another_model_request(setup):
+    create, calls, events = setup
+    cancellation = threading.Event()
+    loop, client = create([(BROKEN, [])] * 8, cancellation)
+    original = loop.emit_fn
+    def emit(event):
+        original(event)
+        if event.kind == EventKind.RETRY and event.payload["attempt"] == 4:
+            cancellation.set()
+    loop.emit_fn = emit
+    answer, _ = run(loop)
+    assert "interrupted" in answer.lower()
+    assert len(client.requests) == 4 and calls == []
+    assert any(event.kind == EventKind.TURN_FAILED and event.payload.get("error") == "cancelled" for event in events)
+
+
+def test_json_protocol_remains_active_after_valid_tool_and_final_answer(setup):
+    create, calls, events = setup
+    valid_call = json.dumps({"text": "", "tool_calls": [
+        {"name": "read_file", "arguments": {"file_path": "README.md"}}]})
+    final = json.dumps({"text": "Verified file content.", "tool_calls": []})
+    loop, client = create([(BROKEN, [])] * 3 + [(valid_call, []), (final, [])])
+    loop.cancellation_flag.wait = Mock(return_value=False)
+    answer, _ = run(loop)
+    assert answer == "Verified file content."
+    assert calls == ["README.md"] and len(client.requests) == 5
+    assert client.requests[-1]["tools"] == []
+    displayed = "".join(event.payload.get("chunk", "") for event in events
+                        if event.kind == EventKind.MODEL_CHUNK)
+    assert "tool_calls" not in displayed and "file_path" not in displayed
+    assert not any(event.kind == EventKind.TURN_FAILED for event in events)

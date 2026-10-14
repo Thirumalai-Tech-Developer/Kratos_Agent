@@ -1,0 +1,19 @@
+{
+  "name": "animeflix",
+  "version": "1.0.0",
+  "description": "Animeflix - Premium Netflix-style Anime Streaming and Management Platform",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "server": "node server/server.js",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "dev": "node server/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

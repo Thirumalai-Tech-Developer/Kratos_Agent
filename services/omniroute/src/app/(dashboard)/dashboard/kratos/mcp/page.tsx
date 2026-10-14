@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getUserProfile, profileRequestPath } from "@/lib/kratos/browserWorkspaceProfile.js";
 
 type Server = { name: string; enabled: boolean; transport: string; status: { state: string; tools?: number; error?: string } };
 
@@ -15,22 +16,25 @@ export default function KratosMcpPage() {
   const [urlName, setUrlName] = useState("");
   const [url, setUrl] = useState("");
   const [transport, setTransport] = useState("streamable-http");
-  const load = async () => {
+  const [profile, setProfile] = useState("");
+  const load = async (selectedProfile: string) => {
     try {
-      const response = await fetch("/api/kratos/mcp", { cache: "no-store" });
+      const response = await fetch(profileRequestPath("/api/mcp", selectedProfile, true), { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not load MCP connections");
       setServers(body.servers);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not load connections"); }
   };
   useEffect(() => {
+    const selectedProfile = getUserProfile();
+    setProfile(selectedProfile);
     setConfig(JSON.stringify({ url: `${window.location.origin}/api/mcp/stream`, type: "streamable-http", enabled: true }, null, 2));
-    void load();
+    void load(selectedProfile);
   }, []);
   const change = async (payload: Record<string, unknown>) => {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/kratos/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await fetch(profileRequestPath("/api/mcp", profile || getUserProfile(), true), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Configuration failed");
       setServers(body.servers);
@@ -38,9 +42,10 @@ export default function KratosMcpPage() {
     finally { setBusy(false); }
   };
   return <main className="space-y-6 p-6">
-    <div><Link href="/dashboard/kratos" className="text-primary">Back to workspace</Link>
+    <div><Link href={profile ? `/dashboard/kratos?profile=${profile}` : "/dashboard/kratos"} className="text-primary">Back to workspace</Link>
       <h1 className="mt-3 text-2xl font-semibold">Kratos MCP connections</h1>
       <p className="text-text-muted">Connected tools, resources and prompts run through Kratos permissions. Configuration changes reconnect enabled servers.</p></div>
+    {profile && <p className="text-sm text-text-muted">Connections for User {profile.slice(0, 6)} · the same workspace as this browser&apos;s chat.</p>}
     {error && <p role="alert" className="rounded-lg border border-red-500 p-3">{error}</p>}
     <section className="space-y-3">
       {servers.map((server) => <div key={server.name} className="flex flex-wrap items-center gap-4 rounded-lg border border-border p-4">

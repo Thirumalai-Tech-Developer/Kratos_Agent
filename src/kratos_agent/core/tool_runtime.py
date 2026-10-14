@@ -168,6 +168,16 @@ class ToolRegistry:
     def __contains__(self, name: str) -> bool:
         return self.get(name) is not None
 
+    def _named_sources(self, query: str) -> set[str]:
+        """Recognize an explicitly named connector without consulting its config."""
+        normalized = re.sub(r"[^a-z0-9]+", " ", query.casefold()).strip()
+        sources = {item.spec.source for item in self._tools.values() if item.spec.source.startswith("mcp:")}
+        return {
+            source for source in sources
+            if (name := re.sub(r"[^a-z0-9]+", " ", source.partition(":")[2].casefold()).strip())
+            and re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", normalized)
+        }
+
     def search(self, query: str, context: Any | None = None, max_results: int = 15) -> list[dict[str, Any]]:
         """Performs semantic search across the tool catalog and returns top 5-15 candidate tool schemas."""
         from kratos_agent.tools.discovery import get_tool_search
@@ -177,12 +187,15 @@ class ToolRegistry:
         matched_names = {m.name for m in matched}
 
         query_tokens = set(re.findall(r"\w+", query.lower()))
+        named_sources = self._named_sources(query)
         dynamic_matches = []
         for name, item in self._tools.items():
             if item.spec.source == "builtin":
                 continue
             searchable = f"{name} {item.spec.description} {item.spec.source}".lower()
             overlap = sum(token in searchable for token in query_tokens if len(token) > 2)
+            if item.spec.source in named_sources:
+                overlap += 100
             if overlap:
                 dynamic_matches.append((overlap, name, item))
         dynamic_matches.sort(key=lambda entry: (-entry[0], entry[1]))
@@ -207,6 +220,38 @@ class ToolRegistry:
                     "source": item.spec.source,
                 })
         return results[:max_results]
+
+    def discovery_result(self, query: str, max_results: int = 15) -> str:
+        """Return matching live schemas, without the task selector's baseline tools."""
+        named_sources = self._named_sources(query)
+        tokens = {token for token in re.findall(r"\w+", query.casefold()) if len(token) > 2}
+        matches = []
+        sources: dict[str, int] = {}
+        for name, item in self._tools.items():
+            if item.spec.source.startswith("mcp:"):
+                sources[item.spec.source] = sources.get(item.spec.source, 0) + 1
+            searchable = f"{name} {item.spec.description} {item.spec.source}".casefold()
+            score = sum(token in searchable for token in tokens)
+            if named_sources:
+                if item.spec.source not in named_sources:
+                    continue
+                score += 100
+            if score:
+                matches.append((score, name, item))
+        matches.sort(key=lambda entry: (-entry[0], entry[1]))
+        limit = max(1, min(15, max_results))
+        return json.dumps({
+            "tools": [{
+                "type": "function",
+                "function": {"name": item.spec.name, "description": item.spec.description,
+                             "parameters": item.spec.parameters},
+                "source": item.spec.source,
+            } for _, _, item in matches[:limit]],
+            "match_count": len(matches),
+            "registered_tool_count": len(self._tools),
+            "registered_mcp_sources": [{"source": source, "tools": count}
+                                       for source, count in sorted(sources.items())[:30]],
+        }, ensure_ascii=False)
 
     def get_tools(self, context: Any | None = None, categories: list[str] | None = None, max_tools: int = 35) -> list[dict[str, Any]]:
         """Dynamically loads and returns only relevant tool schemas for the given context."""
@@ -265,6 +310,18 @@ class ToolRegistry:
 
         results: list[dict[str, Any]] = []
         seen: set[str] = set()
+
+        # A filtered catalog must remain discoverable from the model itself.
+        discovery = self._tools.get("search_tools")
+        if discovery:
+            results.append(schema(discovery))
+            seen.add(discovery.spec.name)
+
+        named_sources = self._named_sources(str(context or ""))
+        for item in self._tools.values():
+            if item.spec.source in named_sources and item.spec.name not in seen:
+                results.append(schema(item))
+                seen.add(item.spec.name)
 
         # Core developer tools are available for coding, file, and system tasks.
         # General tools (such as todo_write) must not pull file and shell tools
@@ -554,6 +611,26 @@ def legacy_tool_registry(workspace: Path) -> ToolRegistry:
         )
     from kratos_agent.jobs.tools import register_job_tools
     register_job_tools(registry, workspace)
+    registry.register(
+        ToolSpec(
+            name="search_tools",
+            description=("Search this workspace's currently registered tools, including connected MCP tools, "
+                         "by connector name or task. Returns actual names and argument schemas without "
+                         "executing them. Use before claiming a capability is unavailable; request schemas "
+                         "are filtered, so an omitted tool may still be registered."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 15, "default": 15},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            permission=ToolPermission.READ,
+        ),
+        registry.discovery_result,
+    )
     return registry
 
 

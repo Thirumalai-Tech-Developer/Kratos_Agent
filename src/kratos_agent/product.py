@@ -109,12 +109,16 @@ def prepare_environment(args: argparse.Namespace) -> dict[str, str]:
     load_dotenv(ROOT / ".env", override=False)
     load_dotenv(GATEWAY / ".env", override=False)
     env = dict(os.environ)
-    from kratos_agent.core.model_selection import read_selected_model
-    selected_model = read_selected_model(workspace)
-    if selected_model:
-        env["KRATOS_MODEL"] = selected_model
+    from kratos_agent.core.model_selection import read_selected_connection
+    selection = read_selected_connection(workspace)
+    if selection:
+        env["KRATOS_MODEL"] = selection["model"]
+        env["KRATOS_RUNTIME_MODEL"] = selection["model"]
+        env["KRATOS_MODEL_PROVIDER"] = selection["provider"]
+        env["KRATOS_RUNTIME_ACCOUNT_ID"] = selection["account_id"]
     env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
     env["KRATOS_INTERNAL_TOKEN"] = secrets.token_urlsafe(32)
+    env["OMNIROUTE_INTERNAL_SERVICE_TOKEN"] = env["KRATOS_INTERNAL_TOKEN"]
     env["KRATOS_AGENT_PORT"] = str(args.agent_port)
     env["KRATOS_BASE_URL"] = f"http://127.0.0.1:{args.port}/v1"
     env["KRATOS_CHAT_ENDPOINT"] = env["KRATOS_BASE_URL"] + "/chat/completions"
@@ -328,6 +332,15 @@ def wait_gateway_models(env: dict[str, str], timeout: float) -> list[str]:
 
 def run_cli(args: argparse.Namespace) -> None:
     env = prepare_environment(args)
+    from kratos_agent.brain.config import get_default_model, get_model_provider
+    if get_model_provider() != "gateway":
+        model = get_default_model()
+        if not model:
+            raise RuntimeError("Select a connected ChatGPT model with kratos-connect before starting Kratos.")
+        env["KRATOS_MODEL"] = model
+        print(f"Workspace: {args.workspace.resolve()} | Model: {model}", flush=True)
+        launch_terminal(args.workspace.resolve(), env)
+        return
     url = env["KRATOS_GATEWAY_URL"]
     gateway = None
     watcher = None

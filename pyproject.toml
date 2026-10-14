@@ -8,6 +8,8 @@ authors = [
 ]
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "PyJWT[crypto]>=2.10,<3",
+    "portalocker>=3.2,<4",
     "ddgs>=9.15.0",
     "fastapi>=0.141.1",
     "requests>=2.31.0",
@@ -39,6 +41,7 @@ dependencies = [
 ]
 
 [project.scripts]
+kratos-connect = "kratos_agent.brain.chatgpt_auth:connection_main"
 kratos = "kratos_agent:main"
 kratos-agent = "kratos_agent:main"
 kratos-studio = "kratos_agent.product:main"

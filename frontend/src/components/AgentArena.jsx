@@ -1,7 +1,17 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Send, Trash2, Zap, Sparkles, Terminal, User, ChevronDown, Eye, Wrench, Square, LoaderCircle } from 'lucide-react';
+import { Send, Trash2, Zap, Terminal, User, ChevronDown, Eye, Wrench, Square, LoaderCircle } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
 import ToolActivity from './ToolActivity';
+import ContextMeter from './ContextMeter';
+import { visibleMessageText } from '../speechDirectives';
+import { isSavedToolFormatFailure, isToolFormatFailure } from '../chatRecovery';
+import RecoveryNotice from './RecoveryNotice';
+import KratosMark from './KratosMark';
+import LiveControls from './LiveControls';
+import LiveToolStatus from './LiveToolStatus';
+import { liveStatusView } from '../liveStatusView';
+import { groupedMessageTimeline, messageTimeline } from '../messageTimeline';
+import { toolCardAnchor } from '../toolAnchors';
 
 function ReasoningAccordion({ reasoning, isThinking, duration }) {
   const [manuallyOpen, setManuallyOpen] = useState(false);
@@ -57,12 +67,18 @@ function ReasoningAccordion({ reasoning, isThinking, duration }) {
 
 export default function AgentArena({
   messages,
+  runningTools = [],
   inputPrompt,
   setInputPrompt,
   onSend,
   onStop,
+  onRetry,
   isStopping,
+  isWorkspaceStarting,
   executionError,
+  recoveryNotice,
+  onDismissRecoveryNotice,
+  onOpenActivity,
   onClear,
   isExecuting,
   currentStep,
@@ -70,15 +86,27 @@ export default function AgentArena({
   isAgentMode,
   modelName,
   modelModality,
+  contextUsage,
+  onCompactContext,
+  isCompacting,
+  contextNotice,
+  contextError,
   onOpenModelPicker,
   sessionId,
   onVisionMode,
-  visionMode = 'none'
+  liveStatus,
+  liveControlError,
+  liveControlPending,
+  onLiveControl,
+  taskDetails
 }) {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const textareaRef = useRef(null);
+  const followStreamRef = useRef(true);
   const [visionError, setVisionError] = useState('');
+  const activeVisionMode = liveStatusView(liveStatus).visionMode;
+  const captureError = visionError || liveStatus?.errors?.camera || liveStatus?.errors?.screen || '';
 
   const changeVisionMode = async (mode) => {
     setVisionError('');
@@ -89,11 +117,13 @@ export default function AgentArena({
     }
   };
 
+  useEffect(() => { followStreamRef.current = true; }, [sessionId]);
+
   useEffect(() => {
-    if (messages.length > 0 && messagesContainerRef.current) {
+    if (messages.length > 0 && messagesContainerRef.current && followStreamRef.current) {
       messagesContainerRef.current.scrollTo({
         top: messagesContainerRef.current.scrollHeight,
-        behavior: 'smooth'
+        behavior: 'auto'
       });
     }
   }, [messages, currentStep]);
@@ -108,7 +138,7 @@ export default function AgentArena({
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (inputPrompt.trim() && !isExecuting) {
+      if (inputPrompt.trim() && !isExecuting && !isWorkspaceStarting && !isCompacting) {
         onSend();
       }
     }
@@ -127,7 +157,7 @@ export default function AgentArena({
           </div>
           <div className="h-3 w-px bg-white/10 mx-1"></div>
           <span className="font-code text-xs font-semibold tracking-wider text-slate-300 truncate">
-            Conversation · <span className="text-pink-400 font-bold">{sessionId ? `Session ${sessionId.slice(-8)}` : 'READY'}</span>
+            Conversation <span className="conversation-session">{sessionId ? `· ${sessionId.slice(-8)}` : ''}</span>
           </span>
         </div>
 
@@ -148,22 +178,28 @@ export default function AgentArena({
               ? 'bg-pink-500/20 border border-pink-500/50 text-pink-300 animate-pulse'
               : 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
           }`}>
-            {isStopping ? 'STOPPING' : (isExecuting ? 'PROCESSING' : 'READY')}
+            {isWorkspaceStarting ? 'STARTING' : (isStopping ? 'STOPPING' : (isExecuting ? 'PROCESSING' : 'READY'))}
           </span>
         </div>
       </div>
 
+      <ContextMeter context={contextUsage} isExecuting={isExecuting} isCompacting={isCompacting}
+        onCompact={onCompactContext} notice={contextNotice} error={contextError} />
+
+      {taskDetails}
+
       {/* Messages Stream */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0"
+        onScroll={event => { const element = event.currentTarget; followStreamRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}
+        className="conversation-stream flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 scrollbar-thin w-full min-w-0"
       >
         {messages.length === 0 ? (
           <div className="workspace-welcome">
-            <div className="welcome-symbol"><Sparkles size={26} /></div>
-            <span className="welcome-eyebrow">YOUR WORK, WITH AN AGENT</span>
-            <h1>What would you like to build?</h1>
-            <p>Turn an idea into a plan, work through a project, or get a clear answer. Kratos keeps the conversation and tools in one place.</p>
+            <div className="welcome-symbol"><KratosMark size={54} title="" /></div>
+            <span className="welcome-eyebrow">CREATE · EXPLORE · GET THINGS DONE</span>
+            <h1>What are we working on?</h1>
+            <p>A place to think, build, and move your work forward.</p>
             <div className="welcome-suggestions">
               {[
                 [Terminal, 'Explore a project', 'Review the workspace and explain its architecture.'],
@@ -180,26 +216,18 @@ export default function AgentArena({
           messages.map((msg, index) => (
             <div
               key={index}
-              className={`flex gap-2.5 sm:gap-3.5 w-full min-w-0 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
+              className={`chat-turn flex gap-2.5 sm:gap-3.5 w-full min-w-0 ${msg.role === 'user' ? 'user-turn justify-end' : 'assistant-turn justify-start'} animate-fadeIn`}
             >
               {/* Agent Avatar */}
               {msg.role !== 'user' && (
-                <div className="flex-shrink-0 mt-1">
-                  <div className="relative">
-                    <img
-                      src="./kratos_badge.png"
-                      alt="Kratos"
-                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-pink-500/40 shadow-[0_0_12px_rgba(255,0,127,0.3)]"
-                    />
-                  </div>
-                </div>
+                <div className="assistant-avatar flex-shrink-0 mt-1"><KratosMark size={30} /></div>
               )}
 
               {/* Message Bubble */}
-              <div className={`max-w-[92%] sm:max-w-[85%] min-w-0 overflow-hidden rounded-2xl p-3.5 sm:p-5 shadow-xl ${
+              <div className={`chat-message max-w-[92%] sm:max-w-[85%] min-w-0 overflow-hidden rounded-2xl p-3.5 sm:p-5 shadow-xl ${
                 msg.role === 'user'
-                  ? 'bg-gradient-to-br from-[#1d0d33] to-[#120822] border border-pink-500/30 text-slate-100 rounded-tr-sm'
-                  : 'glass-card border-slate-700/60 text-slate-100 rounded-tl-sm'
+                  ? 'user-message text-slate-100'
+                  : 'assistant-message text-slate-100'
               }`}>
                 {/* Role Header */}
                 <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-white/5 text-[11px] font-rajdhani font-bold tracking-wider">
@@ -207,12 +235,11 @@ export default function AgentArena({
                     {msg.role === 'user' ? (
                       <>
                         <User className="w-3.5 h-3.5 text-pink-400" />
-                        <span className="text-pink-300 font-pixl">COMMANDER // USER</span>
+                        <span className="text-pink-300 font-pixl">You</span>
                       </>
                     ) : (
                       <>
-                        <span className="text-cyan-400">⚔️</span>
-                        <span className="text-cyan-300 font-pixl">KRATOS AGENT // AUTONOMOUS</span>
+                        <span className="text-cyan-300 font-pixl">Kratos</span>
                       </>
                     )}
                   </div>
@@ -231,36 +258,34 @@ export default function AgentArena({
                 )}
 
                 {/* Content */}
-                {msg.role !== 'user' && <ToolActivity activities={msg.tools} />}
-                <div className="prose prose-invert max-w-none text-sm leading-relaxed min-w-0 w-full overflow-x-auto break-words">
-                  <MarkdownRenderer
-                    content={msg.content}
-                    isStreaming={isExecuting && index === messages.length - 1 && msg.role !== 'user' && !msg.isThinking}
-                  />
+                <div className="message-timeline">
+                  {(msg.role === 'user' ? [{ id: 'user-text', type: 'text', content: visibleMessageText(msg) }] : groupedMessageTimeline(messageTimeline(msg))).map((block, blockIndex, blocks) => block.type === 'tool-group'
+                    ? <ToolActivity key={block.id} activities={block.blocks.map(call => call.activity)} anchors={Object.fromEntries(block.blocks.map(call => [call.activity.id, toolCardAnchor(index, call.activity.id)]))} />
+                    : !isSavedToolFormatFailure(msg) && <div className="prose prose-invert max-w-none text-sm leading-relaxed min-w-0 w-full overflow-x-auto break-words" key={block.id}>
+                      <MarkdownRenderer content={block.content}
+                        isStreaming={isExecuting && index === messages.length - 1 && blockIndex === blocks.length - 1 && msg.role !== 'user' && !msg.isThinking} />
+                    </div>)}
                 </div>
-                {['cancelled', 'failed', 'paused', 'interrupted'].includes(msg.status) && (
+                {isSavedToolFormatFailure(msg) && <p className="recovery-history">
+                  Earlier attempt ended before completion. <button type="button" onClick={onOpenActivity}>View Activity</button>
+                </p>}
+                {!isSavedToolFormatFailure(msg) && ['cancelled', 'failed', 'paused', 'interrupted'].includes(msg.status) && (
                   <p className={`turn-status turn-${msg.status}`} role="status">
-                    {msg.status === 'cancelled' ? 'Stopped by you. Existing changes were kept.' : msg.status === 'failed' ? 'This task failed.' : msg.status === 'paused' ? 'This task is paused.' : 'Response interrupted; completion could not be confirmed.'}
+                    {msg.status === 'cancelled' ? 'Stopped by you. Existing changes were kept.' : msg.status === 'failed' ? 'Needs attention. Completed work is saved.' : msg.status === 'paused' ? 'This task is paused.' : 'Response interrupted; completion could not be confirmed.'}
+                    {msg.status === 'failed' && index === messages.length - 1 && <button type="button" className="context-compact-button ml-2" disabled={isExecuting} onClick={onRetry}>Retry task</button>}
                   </p>
                 )}
               </div>
 
               {/* User Avatar */}
-              {msg.role === 'user' && (
-                <div className="flex-shrink-0 mt-1">
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-[#ff007f] to-[#ff8c00] flex items-center justify-center text-white font-bold text-xs shadow-[0_0_12px_rgba(255,0,127,0.4)]">
-                    CMD
-                  </div>
-                </div>
-              )}
             </div>
           ))
         )}
 
         {/* Live Step Progression Feedback */}
         {isExecuting && currentStep && (
-          <div className="flex items-start gap-3 p-3.5 rounded-xl bg-pink-950/25 border border-pink-500/40 text-xs font-code animate-pulse">
-            <span className="text-pink-400 mt-0.5">⚡</span>
+          <div className="chat-progress flex items-start gap-3 text-xs font-code" role="status">
+            <LoaderCircle className="animate-spin" size={14} />
             <div>
               <div className="font-bold text-pink-300 tracking-wider font-pixl uppercase">
                 {currentStep.tag || 'AGENT EXECUTION IN PROGRESS'}
@@ -277,7 +302,8 @@ export default function AgentArena({
 
       {/* Input Dock */}
       <div className="composer-dock flex-shrink-0 p-3 sm:p-4 bg-[#0a0515] border-t border-pink-500/20">
-        <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1" aria-label="Vision controls">
+        <div className="composer-toolbar">
+        <div className="vision-controls flex flex-wrap items-center gap-1.5 mb-2 px-1" aria-label="Vision controls">
           <span className="inline-flex items-center gap-1.5 mr-1 text-[11px] font-code text-cyan-300">
             <Eye className="w-3.5 h-3.5" />
             <code>/vision</code>
@@ -292,22 +318,26 @@ export default function AgentArena({
               key={mode}
               type="button"
               onClick={() => changeVisionMode(mode)}
-              disabled={isExecuting}
-              aria-pressed={visionMode === mode || (mode === 'none' && visionMode === 'off')}
+              disabled={isExecuting || Boolean(liveControlPending)}
+              aria-pressed={activeVisionMode === mode}
               title={`/vision ${mode === 'none' ? 'off' : mode}`}
               className={`rounded-md border px-2 py-1 text-[9px] font-code tracking-wider transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:opacity-50 ${
-                visionMode === mode || (mode === 'none' && visionMode === 'off')
+                activeVisionMode === mode
                   ? 'border-cyan-400/60 bg-cyan-400/15 text-cyan-200 shadow-[0_0_10px_rgba(0,243,255,0.12)]'
                   : 'border-white/10 bg-black/20 text-slate-400 hover:border-cyan-400/40 hover:text-cyan-200'
               }`}
             >
-              {label}
+              {liveControlPending?.action === 'set_vision_mode' && liveControlPending.value === mode ? <LoaderCircle size={12} className="animate-spin" /> : label}
             </button>
           ))}
-          <span className="ml-auto text-[10px] font-code text-slate-500">type /vision [mode]</span>
+          <small className="vision-capture-status" role="status">{liveControlPending?.action === 'set_vision_mode' ? 'Updating capture…' : activeVisionMode === 'none' ? 'Capture off' : `${activeVisionMode === 'both' ? 'Camera + screen' : activeVisionMode === 'camera' ? 'Camera' : 'Screen'} capture active`}</small>
         </div>
-        {visionError && <p role="status" className="mb-2 px-1 text-xs text-rose-300">{visionError}</p>}
-        {executionError && <p role="status" className="execution-error">{executionError}</p>}
+        <LiveControls status={liveStatus} error={liveControlError} pending={liveControlPending} onControl={onLiveControl} />
+        </div>
+        <LiveToolStatus tools={runningTools} />
+        {captureError && captureError !== liveControlError && <p role="status" className="mb-2 px-1 text-xs text-rose-300">{captureError}</p>}
+        {executionError && !isToolFormatFailure(executionError) && <p role="status" className="execution-error">{executionError}</p>}
+        <RecoveryNotice notice={recoveryNotice} onDismiss={onDismissRecoveryNotice} />
         {isStopping && <p role="status" className="execution-notice">Stopping… waiting for the running operation to exit.</p>}
         <div className="relative flex items-end gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-700/80 focus-within:border-pink-500/60 focus-within:shadow-[0_0_20px_rgba(255,0,127,0.25)] transition duration-200">
 
@@ -352,9 +382,9 @@ export default function AgentArena({
               <span>{isStopping ? 'Stopping…' : 'Stop'}</span>
             </button> : <button
               onClick={onSend}
-              disabled={!inputPrompt.trim() || isExecuting}
+              disabled={!inputPrompt.trim() || isExecuting || isWorkspaceStarting || isCompacting}
               className={`px-4 py-2 rounded-lg font-rajdhani font-bold text-xs tracking-wider flex items-center gap-1.5 transition duration-200 ${
-                inputPrompt.trim() && !isExecuting
+                inputPrompt.trim() && !isExecuting && !isWorkspaceStarting && !isCompacting
                   ? 'bg-gradient-to-r from-[#ff007f] to-[#ff8c00] text-white shadow-[0_0_15px_rgba(255,0,127,0.4)] hover:shadow-[0_0_20px_rgba(255,0,127,0.6)]'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
